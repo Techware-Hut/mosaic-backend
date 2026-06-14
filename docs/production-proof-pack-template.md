@@ -1,6 +1,8 @@
 # Production Soft-Launch Proof Pack
 
 > Template: copy this file per release, fill in fields, attach redacted screenshots. Do not commit secrets.
+>
+> **Workflow:** [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md)
 
 ---
 
@@ -131,9 +133,11 @@ Status:
 
 ---
 
-## Release — 2026-06-07 (historical template)
+## Blank release template (copy per release)
 
-## Release metadata
+Example historical fill: 2026-06-07 probe data below. Replace metadata for each new release.
+
+### Release metadata
 
 - Deployed commit (`main`):
 - Previous known-good commit:
@@ -142,13 +146,13 @@ Status:
 - Approvers:
 - Executor:
 
-## Pre-deploy rollback confirmation
+### Pre-deploy rollback confirmation
 
 - [ ] Last good SHA recorded on EB
 - [ ] EB rollback path confirmed with infra owner
 - [ ] Production env vars documented ([production-env-checklist.md](production-env-checklist.md))
 
-## Branch / deploy model (MVP)
+### Branch / deploy model (MVP)
 
 - Integration: PR → `staging` (no hosted staging backend)
 - Production: PR → `main` → AWS EB
@@ -156,7 +160,7 @@ Status:
 
 ---
 
-## Smoke results
+### Smoke results
 
 Reference: [production-smoke-checklist.md](production-smoke-checklist.md)
 
@@ -181,7 +185,7 @@ Reference: [production-smoke-checklist.md](production-smoke-checklist.md)
 
 ---
 
-## Webhook delivery (Stripe Dashboard — redact secrets)
+### Webhook delivery (Stripe Dashboard — redact secrets)
 
 | Route | Last success timestamp | HTTP status |
 |-------|------------------------|-------------|
@@ -195,7 +199,7 @@ Registration guide: [stripe-webhook-registration.md](stripe-webhook-registration
 
 ---
 
-## Environment verification
+### Environment verification
 
 - [ ] All vars in [production-env-checklist.md](production-env-checklist.md) set on EB
 - [ ] Stripe webhook secrets match Dashboard signing secrets (5 endpoints)
@@ -203,28 +207,31 @@ Registration guide: [stripe-webhook-registration.md](stripe-webhook-registration
 
 ---
 
-## Launch readiness sign-off
+### Launch readiness sign-off
 
 | Gate | Status |
 |------|--------|
-| Deploy healthy (P0.1–P0.2) | Partial — P0.1 only |
+| EB deployed commit confirmed | _required_ |
+| Rollback SHA recorded | _required_ |
+| Deploy healthy (P0.1–P0.2) | Partial — P0.1 only (historical example) |
 | Auth smoke (P1) | Not run |
 | Vendor journey (P2–P3) | Not run |
 | Payments / webhooks (P4–P5) | Not run |
 | P0 code blockers closed | **No** — see [launch-readiness-report.md](launch-readiness-report.md) |
+| Product owner written approval (Bryan) | _required for launch-ready_ |
 
-**Recommendation:** Do not sign off unrestricted public launch until P1–P6 smoke complete and P0 blockers tracked or explicitly deferred with business approval.
+**Recommendation:** Do not sign off unrestricted public launch until EB commit is confirmed, rollback is recorded, P1–P6 smoke complete (post-deploy), P0 blockers tracked or explicitly deferred with business approval, and Bryan provides written approval.
 
 ---
 
-## Redactions applied
+### Redactions applied
 
 - [ ] No OTP, JWT, cookie values, `whsec_`, `sk_live_`, passwords in attachments
 - [ ] Screenshots cropped to exclude env var panels
 
 ---
 
-## Attachments (optional)
+### Attachments (optional)
 
 - Stripe webhook delivery screenshots (5 endpoints)
 - EB health screenshot

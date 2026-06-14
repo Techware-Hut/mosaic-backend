@@ -1,6 +1,6 @@
 # Deploy Verification Log
 
-Records post-deploy verification for Mosaic Biz Hub backend. For full smoke tiers see [production-smoke-checklist.md](production-smoke-checklist.md).
+Records post-deploy verification for Mosaic Biz Hub backend. For the full release workflow see [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md). For smoke tiers see [production-smoke-checklist.md](production-smoke-checklist.md).
 
 ---
 

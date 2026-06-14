@@ -27,12 +27,12 @@ Secret rotation verification and AWS-side deployment hygiene are intentionally e
 
 ## Current code and documentation evidence
 
-- [controllers/userController.js](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/controllers/userController.js:1)
-- [controllers/authController.js](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/controllers/authController.js:1)
-- [README.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/README.md:1)
-- [SETUP.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/SETUP.md:1)
-- [STAGING.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/STAGING.md:1)
-- [DEPLOYMENT.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/DEPLOYMENT.md:1)
+- [controllers/userController.js](../controllers/userController.js)
+- [controllers/authController.js](../controllers/authController.js)
+- [README.md](../README.md)
+- [SETUP.md](../SETUP.md)
+- [STAGING.md](../STAGING.md)
+- [DEPLOYMENT.md](../DEPLOYMENT.md)
 
 ## Remaining external follow-up
 
