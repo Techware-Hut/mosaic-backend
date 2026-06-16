@@ -108,6 +108,31 @@ Current release path: validate on `staging` branch → merge to `main` → deplo
 
 ---
 
+## Post-merge gate — 2026-06-16 (GitHub Actions EB deploy)
+
+GitHub Actions CI/CD added on branch `chore/github-actions-eb-deploy`:
+
+| Item | Value |
+|------|-------|
+| CI workflow | `.github/workflows/ci.yml` — `npm ci` + `npm test` on PR/push to `staging`/`main` |
+| Deploy workflow | `.github/workflows/deploy-eb-production.yml` — test gate + source ZIP + EB deploy + health probes |
+| GitHub variables | `AWS_REGION=us-east-1`, `EB_APPLICATION_NAME=mosaic-backend`, `EB_ENVIRONMENT_NAME=Mosaic-backend` |
+| Setup doc | [github-actions-eb-setup.md](github-actions-eb-setup.md) |
+| Local `npm test` | **57/57 pass** (2026-06-16) |
+
+### Production baseline probes (pre-automated-deploy)
+
+Probed before first GitHub Actions deploy:
+
+| Check | Result |
+|-------|--------|
+| `GET https://api.mosaicbizhub.com/` | **200** — `{"message":"Mosaic Biz Hub API is working 9 feb "}` |
+| `GET https://api.mosaicbizhub.com/api/users/auth/check` (unauth) | **401** |
+
+**Pending (infra owner):** Add `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets; create `production` GitHub environment with reviewers; run **Deploy to Elastic Beanstalk** via `workflow_dispatch` on `main`. CORS fix (`mosaic-biz-frontend-launch.vercel.app`) is in git @ `5db1a78` but not confirmed live until EB deploy completes.
+
+---
+
 ## Post-merge gate — 2026-06-14 (PR #9 merged)
 
 PR [#9](https://github.com/DeveloperTWH/backend/pull/9) merged to `main` at `2026-06-14T21:38:12Z`.

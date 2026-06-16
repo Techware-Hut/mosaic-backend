@@ -1,0 +1,121 @@
+name: Deploy to Elastic Beanstalk
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  EB_APPLICATION_NAME: ${{ vars.EB_APPLICATION_NAME || 'mosaic-backend' }}
+  EB_ENVIRONMENT_NAME: ${{ vars.EB_ENVIRONMENT_NAME || 'Mosaic-backend' }}
+  PRODUCTION_API_URL: https://api.mosaicbizhub.com
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  deploy:
+    name: Deploy
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create deployment package
+        run: |
+          shopt -s dotglob
+          zip -r deploy.zip . \
+            -x "*.git*" \
+            -x "*node_modules/*" \
+            -x "*.env*" \
+            -x "*tests/*" \
+            -x "*docs/*" \
+            -x "*.github/*" \
+            -x "*.zip" \
+            -x "*logs/*" \
+            -x "*.log" \
+            -x "debug-data.js" \
+            -x "fix-product-data.js" \
+            -x "fix-variants.js" \
+            -x "test-products.js" \
+            -x "*.txt"
+
+      - name: Deploy to Elastic Beanstalk
+        uses: einaregilsson/beanstalk-deploy@v22
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          application_name: ${{ env.EB_APPLICATION_NAME }}
+          environment_name: ${{ env.EB_ENVIRONMENT_NAME }}
+          region: ${{ env.AWS_REGION }}
+          version_label: mosaic-${{ github.sha }}
+          deployment_package: deploy.zip
+          use_existing_version_if_available: false
+          wait_for_deployment: true
+          wait_for_environment_recovery: true
+
+      - name: Post-deploy health probe
+        run: |
+          echo "Deployed commit: ${{ github.sha }}"
+          echo "Version label: mosaic-${{ github.sha }}"
+          for i in 1 2 3 4 5; do
+            status=$(curl -s -o /tmp/health.json -w "%{http_code}" "${PRODUCTION_API_URL}/")
+            echo "Attempt $i: HTTP $status"
+            if [ "$status" = "200" ]; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Health probe failed after 5 attempts"
+          exit 1
+
+      - name: Post-deploy auth probe
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" "${PRODUCTION_API_URL}/api/users/auth/check")
+          echo "Auth check (unauthenticated): HTTP $status"
+          if [ "$status" != "401" ]; then
+            echo "Expected 401 for unauthenticated auth/check"
+            exit 1
+          fi
+
+      - name: Deployment summary
+        run: |
+          {
+            echo "## Production deploy"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Version label | \`mosaic-${{ github.sha }}\` |"
+            echo "| EB application | \`${{ env.EB_APPLICATION_NAME }}\` |"
+            echo "| EB environment | \`${{ env.EB_ENVIRONMENT_NAME }}\` |"
+            echo "| Region | \`${{ env.AWS_REGION }}\` |"
+            echo "| API URL | \`${{ env.PRODUCTION_API_URL }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
