@@ -1,0 +1,17 @@
+# Excluded from Elastic Beanstalk deployment bundles (eb CLI / zip workflows)
+.git/
+.github/
+node_modules/
+.env
+.env.*
+tests/
+docs/
+*.zip
+*.log
+logs/
+debug-data.js
+fix-product-data.js
+fix-variants.js
+test-products.js
+*.txt
+!package.json

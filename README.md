@@ -84,6 +84,7 @@ npm run dev
 | `npm run dev` | Start the API with `nodemon` |
 | `npm start` | Start the API with `node index.js` |
 | `npm test` | Run automated tests (`node --test tests/**/*.test.js`, 57 cases) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) |
+| CI | GitHub Actions [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs tests on PR/push to `staging`/`main` |
 
 ## Operational docs
 
@@ -103,7 +104,7 @@ Key entry points:
 1. Work on a feature branch; open PR to `staging`.
 2. Complete integration checklist in [STAGING.md](STAGING.md) (code review, local boot — no hosted staging).
 3. Open PR `staging` → `main`; required reviewers approve.
-4. Deploy `main` to AWS Elastic Beanstalk; follow [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) for smoke and sign-off.
+4. Deploy `main` to AWS Elastic Beanstalk via GitHub Actions ([`.github/workflows/deploy-eb-production.yml`](.github/workflows/deploy-eb-production.yml)); follow [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) for smoke and sign-off. One-time setup: [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md).
 5. Record proof in [docs/production-proof-pack-template.md](docs/production-proof-pack-template.md).
 
 Hosted staging is deferred — see [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md).
