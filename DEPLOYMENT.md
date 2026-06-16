@@ -61,18 +61,42 @@ Use **`https://api.mosaicbizhub.com`** for smoke tests and Stripe webhook URLs. 
 
 ## Deployment steps
 
+### Automated (GitHub Actions — preferred)
+
+Workflow: [`.github/workflows/deploy-eb-production.yml`](.github/workflows/deploy-eb-production.yml)
+
+**Triggers:**
+
+- Push to `main` (after merge from `staging`)
+- Manual **Run workflow** (`workflow_dispatch`) on `main` — use for first deploy and rollbacks
+
+**Flow:** `npm ci` → `npm test` → source-only ZIP → Elastic Beanstalk → health probe on `https://api.mosaicbizhub.com/`
+
+**One-time setup:** [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md) — AWS IAM OIDC role, GitHub variables (`AWS_REGION`, `EB_APPLICATION_NAME`, `EB_ENVIRONMENT_NAME`, `AWS_ROLE_TO_ASSUME`), and `production` environment reviewers. No long-lived AWS access keys in GitHub.
+
+**Per release:**
+
+1. Merge approved PR `staging` → `main`; note commit SHA.
+2. CI runs on push; deploy workflow runs tests then deploys to EB environment **`mosaic-backend-env`** (application **`mosaic-biz-hub-backend`**, region **`us-east-1`**).
+3. Confirm workflow summary shows deployed SHA and health probe PASS.
+4. Verify EB boot logs (Mongo connected, no missing-env crash).
+5. Run [production-smoke-checklist.md](docs/production-smoke-checklist.md) with **test accounts only**.
+6. Fill [production-proof-pack-template.md](docs/production-proof-pack-template.md); retain for release record.
+
+**Rollback via GitHub Actions:** Run **Deploy to Elastic Beanstalk** workflow manually and select a previous known-good commit on `main`.
+
+### Manual ZIP (legacy fallback)
+
+If GitHub Actions is unavailable:
+
 1. Identify exact commit on `main` to release (post-merge SHA).
-2. Infrastructure owner deploys `main` to AWS Elastic Beanstalk.
-3. Verify boot logs:
-   - MongoDB connected
-   - Server listening on expected port
-   - No missing-env or Stripe init crashes
-4. Run [production-smoke-checklist.md](docs/production-smoke-checklist.md) with **test accounts only**.
-5. Fill [production-proof-pack-template.md](docs/production-proof-pack-template.md); retain for release record.
+2. Infrastructure owner uploads ZIP to AWS Elastic Beanstalk (exclude `node_modules`, `.env`, `.git` — see [`.ebignore`](.ebignore)).
+3. Follow verification steps below.
 
 **Minimum post-deploy smoke:**
 
 - `GET https://api.mosaicbizhub.com/` → 200
+- `GET https://api.mosaicbizhub.com/api/users/auth/check` (unauthenticated) → 401
 - Auth login/logout with test user
 - One Stripe webhook delivery check in Dashboard
 - One non-destructive protected route
@@ -118,6 +142,7 @@ Deployment and smoke tests **do not fix** open P0 code issues. See [launch-readi
 
 ## Related docs
 
+- [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md) — GitHub Actions + AWS one-time setup
 - [docs/DECISION_REGISTER.md](docs/DECISION_REGISTER.md) — MVP decisions and deferrals
 - [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) — **release owner runbook** (smoke, rollback, Go/No-Go)
 - [STAGING.md](STAGING.md)
