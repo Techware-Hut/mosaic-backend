@@ -72,12 +72,12 @@ Workflow: [`.github/workflows/deploy-eb-production.yml`](.github/workflows/deplo
 
 **Flow:** `npm ci` → `npm test` → source-only ZIP → Elastic Beanstalk → health probe on `https://api.mosaicbizhub.com/`
 
-**One-time setup:** [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md) — AWS IAM, GitHub secrets (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`), variables (`AWS_REGION`, `EB_APPLICATION_NAME`, `EB_ENVIRONMENT_NAME`), and optional `production` environment reviewers.
+**One-time setup:** [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md) — AWS IAM OIDC role, GitHub variables (`AWS_REGION`, `EB_APPLICATION_NAME`, `EB_ENVIRONMENT_NAME`, `AWS_ROLE_TO_ASSUME`), and `production` environment reviewers. No long-lived AWS access keys in GitHub.
 
 **Per release:**
 
 1. Merge approved PR `staging` → `main`; note commit SHA.
-2. CI runs on push; deploy workflow runs tests then deploys to EB environment **`Mosaic-backend`** (application **`mosaic-backend`**, region **`us-east-1`**).
+2. CI runs on push; deploy workflow runs tests then deploys to EB environment **`mosaic-backend-env`** (application **`mosaic-biz-hub-backend`**, region **`us-east-1`**).
 3. Confirm workflow summary shows deployed SHA and health probe PASS.
 4. Verify EB boot logs (Mongo connected, no missing-env crash).
 5. Run [production-smoke-checklist.md](docs/production-smoke-checklist.md) with **test accounts only**.
