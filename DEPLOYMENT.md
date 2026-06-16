@@ -118,6 +118,8 @@ Deployment and smoke tests **do not fix** open P0 code issues. See [launch-readi
 
 ## Related docs
 
+- [docs/DECISION_REGISTER.md](docs/DECISION_REGISTER.md) — MVP decisions and deferrals
+- [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) — **release owner runbook** (smoke, rollback, Go/No-Go)
 - [STAGING.md](STAGING.md)
 - [SETUP.md](SETUP.md)
 - [README.md](README.md)

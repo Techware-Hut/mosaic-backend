@@ -10,7 +10,7 @@
 | `staging` | Integration branch (PR review, local boot) | **None** |
 | `main` | Production release | AWS Elastic Beanstalk |
 
-Runtime validation for MVP happens **after** `main` deploy to production using **dedicated test accounts** and the [production-smoke-checklist.md](production-smoke-checklist.md). See [STAGING.md](../STAGING.md) and [DEPLOYMENT.md](../DEPLOYMENT.md).
+Runtime validation for MVP happens **after** `main` deploy to production using **dedicated test accounts** and the [production-smoke-checklist.md](production-smoke-checklist.md). See [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md), [STAGING.md](../STAGING.md), and [DEPLOYMENT.md](../DEPLOYMENT.md).
 
 This supersedes any prior plan to provision a separate staging EB environment before first production soft-launch.
 

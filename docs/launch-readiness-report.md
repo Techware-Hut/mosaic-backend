@@ -131,10 +131,10 @@ See [production-env-checklist.md](production-env-checklist.md) for production EB
 
 | Repo | `npm test` | `npm run build` | `npm run lint` | CI |
 |------|------------|-----------------|----------------|-----|
-| **Backend** | Fails by design (placeholder) | N/A | Not defined | None |
+| **Backend** | **57 tests** via Node built-in runner (`node --test tests/**/*.test.js`); mock-based | N/A | Not defined | None |
 | **Frontend** | Not defined | Defined | Defined | None |
 
-**Verdict:** No automated test coverage; no lint gate on backend; no CI pipeline in either repo.
+**Verdict:** Backend has local automated tests (see [TEST_MATRIX.md](TEST_MATRIX.md)) but **no CI pipeline** and no lint gate; tests do not exercise live MongoDB, Stripe, or AWS.
 
 ---
 
@@ -142,7 +142,7 @@ See [production-env-checklist.md](production-env-checklist.md) for production EB
 
 | Source | Says | Reality |
 |--------|------|---------|
-| Backend README architecture | Mongo sanitization + XSS configured | Imported in `app.js`, **never applied** |
+| Backend README architecture | Mongo sanitization + XSS configured | Imports only in `app.js`, **not mounted** — README corrected in doc pass |
 | Backend README / SETUP | Google integrations optional | **Server crashes** if Google env missing |
 | Backend `.env.example` | Legacy Stripe secret names | Code uses `STRIPE_*_WEBHOOK_SECRET` names from README |
 | Backend doc links | Absolute paths to `C:/Users/Asus/OneDrive/...` | Broken on other machines — **fixed in this doc pass** |
@@ -155,7 +155,7 @@ See [production-env-checklist.md](production-env-checklist.md) for production EB
 
 ### P0 launch blockers
 
-1. No automated tests or CI
+1. No CI pipeline (local `npm test` exists — 57 mocked tests — but not gated in GitHub Actions)
 2. Security middleware not wired (`mongoSanitize` / `xss-clean`)
 3. Unauthenticated payment/order attack surface
 4. Order emails before payment
@@ -181,4 +181,4 @@ Jest/Vitest + CI, hosted staging, security hardening, admin Blog/FAQ UI, fronten
 
 ## Bottom line
 
-Both repos implement a **broad MVP surface**, but **launch readiness is blocked** by missing test/CI infrastructure, open security findings, email/payment ordering bugs, weak onboarding validation, env/doc drift, and absence of a staging environment for integrated verification.
+Both repos implement a **broad MVP surface**, but **launch readiness is blocked** by missing CI regression gates, open security findings, email/payment ordering bugs, weak onboarding validation, env/doc drift, and absence of a staging environment for integrated verification.

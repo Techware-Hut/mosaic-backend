@@ -2,6 +2,10 @@
 
 Run **after** each `main` deploy to AWS Elastic Beanstalk. Use **dedicated test accounts** only. Document proof in [production-proof-pack-template.md](production-proof-pack-template.md) with secrets redacted.
 
+**Provisional rule:** Smoke results are **provisional** until the deployment owner confirms the intended commit SHA is live on EB. Baseline health on `https://api.mosaicbizhub.com` alone does not prove the approved release is deployed.
+
+**Runbook:** [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md)
+
 **Production API base (canonical HTTPS):** `https://api.mosaicbizhub.com`  
 **EB hostname (HTTP health only; avoid raw HTTPS — cert CN mismatch):** `http://mosaic-backend.us-east-1.elasticbeanstalk.com/`
 

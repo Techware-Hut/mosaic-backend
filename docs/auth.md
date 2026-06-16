@@ -448,8 +448,8 @@ This is the strictest vendor guard — it ensures only fully email-verified vend
 | GET    | `/api/vendor-onboarding/draft`              | ✅ `authenticate` | `requireVerifiedVendor`    |
 | POST   | `/api/vendor-onboarding/submit`             | ✅ `authenticate` | `requireVerifiedVendor`    |
 | GET    | `/api/vendor-onboarding/onboarding-data`    | ✅ `authenticate` | `requireVerifiedVendor`    |
-| PUT    | `/api/vendor-onboarding/business-profile`   | ✅ `authenticate` | `requireVerifiedVendor`    |
-| PATCH  | `/api/vendor-onboarding/business-profile`   | ✅ `authenticate` | `requireVerifiedVendor`    |
+| PUT    | `/api/vendor-onboarding/business-profile`   | ✅ `authenticate` | `requireStage1Verified` (via `requireVerifiedVendor.create`) |
+| PATCH  | `/api/vendor-onboarding/business-profile`   | ✅ `authenticate` | `requireStage1Verified` (via `requireVerifiedVendor.create`) |
 | GET    | `/api/vendor-onboarding/stage1/upload-url`  | ✅ `authenticate` | `requireVerifiedVendor`    |
 | POST   | `/api/vendor-onboarding/stage1/create-payment` | ✅ `authenticate` | `requireVerifiedVendor` |
 

@@ -1,6 +1,6 @@
 # Deploy Verification Log
 
-Records post-deploy verification for Mosaic Biz Hub backend. For full smoke tiers see [production-smoke-checklist.md](production-smoke-checklist.md).
+Records post-deploy verification for Mosaic Biz Hub backend. For the full release workflow see [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md). For smoke tiers see [production-smoke-checklist.md](production-smoke-checklist.md).
 
 ---
 
@@ -105,3 +105,38 @@ Current release path: validate on `staging` branch → merge to `main` → deplo
 **Integration verdict:** **GO** for opening PR `staging` → `main` (automated tests + local boot + auth smoke pass).
 
 **Production deploy verdict:** **NO-GO** for unrestricted launch until post-merge EB deploy smoke (P1–P6) and P0 blocker sign-off.
+
+---
+
+## Post-merge gate — 2026-06-14 (PR #9 merged)
+
+PR [#9](https://github.com/DeveloperTWH/backend/pull/9) merged to `main` at `2026-06-14T21:38:12Z`.
+
+| Item | Value |
+|------|-------|
+| Merge commit | `efbf0fb` — Merge pull request #9 from DeveloperTWH/staging |
+| `origin/main` HEAD | `2e41cd6` — post-merge evidence docs (docs-only vs `efbf0fb`) |
+| Local `main` synced | **PASS** @ `2e41cd6`; `645a282` contained |
+| `npm test` on `main` | **57/57 pass** |
+| Auto-deploy on merge | **No** — manual EB deploy per [DEPLOYMENT.md](../DEPLOYMENT.md); no CI workflows |
+| EB deployed commit | **UNKNOWN** — pending infra owner confirmation |
+| Rollback target (documented) | `2dd52c4` |
+
+### Production baseline probes (baseline only — does not prove PR #9 live)
+
+Probed `2026-06-14T21:42:14Z`:
+
+| Check | Result |
+|-------|--------|
+| `GET https://api.mosaicbizhub.com/` | **200** — `{"message":"Mosaic Biz Hub API is working 9 feb "}` |
+| `GET https://api.mosaicbizhub.com/api/users/auth/check` (unauth) | **401** |
+
+**Note:** Health probes confirm production is responding. They do **not** confirm Wave 2 / PR #9 is deployed until infra confirms EB version/commit.
+
+### Controlled production smoke
+
+**BLOCKED** until infra confirms Wave 2 (`efbf0fb` or newer) is live on EB and approves smoke (Q9).
+
+**Provisional safe probes recorded** — see [production-proof-pack-template.md](production-proof-pack-template.md) § Provisional Production Smoke — Commit Unconfirmed (`2026-06-14T21:56:27Z`). Does not prove deployed commit.
+
+Infra confirmation request: see [integration-gate-asana-evidence.md](integration-gate-asana-evidence.md) § Infra owner request (post-merge).

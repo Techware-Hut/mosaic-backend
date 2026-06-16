@@ -24,7 +24,7 @@ Node.js/Express backend for Mosaic Biz Hub. This service exposes marketplace, on
 | `middlewares/` | Authentication, authorization, and request middleware |
 | `utils/` | Mailers, uploads, payments, PDF helpers, and shared utilities |
 | `helpers/` | Focused helper modules such as Stripe plan helpers |
-| `docs/` | Security remediation and Stripe ownership documentation |
+| `docs/` | Operational and architecture documentation — start at [docs/README.md](docs/README.md) |
 | `jobs/` | Background job entrypoints |
 | `services/`, `validators/`, `lib/` | Supporting service code, validation, and library logic |
 
@@ -33,7 +33,7 @@ Node.js/Express backend for Mosaic Biz Hub. This service exposes marketplace, on
 The application follows a conventional Express layered structure:
 
 1. `index.js` loads environment variables, connects to MongoDB, and starts the server.
-2. `app.js` configures security and transport middleware such as CORS, cookies, JSON parsing, Mongo sanitization, and XSS cleanup.
+2. `app.js` configures transport middleware (CORS, cookies, JSON parsing). `express-mongo-sanitize` and `xss-clean` are imported but not currently mounted — see [launch-readiness-report.md](docs/launch-readiness-report.md) §8.
 3. Route modules in `routes/` map URL namespaces to controller functions.
 4. Controllers orchestrate validation, Stripe/AWS/mail integrations, and persistence through Mongoose models.
 5. Models in `models/` define the MongoDB document structure for users, businesses, orders, subscriptions, onboarding, and related entities.
@@ -83,25 +83,27 @@ npm run dev
 | `npm install` | Install project dependencies |
 | `npm run dev` | Start the API with `nodemon` |
 | `npm start` | Start the API with `node index.js` |
-| `npm test` | Placeholder script, currently exits with an error |
+| `npm test` | Run automated tests (`node --test tests/**/*.test.js`, 57 cases) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) |
 
 ## Operational docs
 
-- [SETUP.md](SETUP.md)
-- [STAGING.md](STAGING.md)
-- [DEPLOYMENT.md](DEPLOYMENT.md)
-- [docs/launch-readiness-report.md](docs/launch-readiness-report.md)
-- [docs/production-env-checklist.md](docs/production-env-checklist.md)
-- [docs/production-smoke-checklist.md](docs/production-smoke-checklist.md)
-- [docs/stripe-webhook-registration.md](docs/stripe-webhook-registration.md)
-- [docs/security-remediation-notes.md](docs/security-remediation-notes.md)
+**Documentation home:** [docs/README.md](docs/README.md) — full index, read-first guides, and maintenance rules.
+
+Key entry points:
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — backend map for contributors and LLMs
+- [docs/API_SURFACE.md](docs/API_SURFACE.md) — HTTP route map, auth boundaries, smoke notes
+- [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) — production deploy, smoke, rollback, sign-off
+- [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) — automated tests vs manual smoke mapping
+- [docs/DECISION_REGISTER.md](docs/DECISION_REGISTER.md) — MVP decisions, deferrals, and launch assumptions
+- [SETUP.md](SETUP.md) · [STAGING.md](STAGING.md) · [DEPLOYMENT.md](DEPLOYMENT.md)
 
 ## Release workflow (MVP)
 
 1. Work on a feature branch; open PR to `staging`.
 2. Complete integration checklist in [STAGING.md](STAGING.md) (code review, local boot — no hosted staging).
 3. Open PR `staging` → `main`; required reviewers approve.
-4. Deploy `main` to AWS Elastic Beanstalk; smoke `https://api.mosaicbizhub.com` per [DEPLOYMENT.md](DEPLOYMENT.md).
+4. Deploy `main` to AWS Elastic Beanstalk; follow [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) for smoke and sign-off.
 5. Record proof in [docs/production-proof-pack-template.md](docs/production-proof-pack-template.md).
 
 Hosted staging is deferred — see [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md).
@@ -196,7 +198,7 @@ See [docs/security-remediation-notes.md](docs/security-remediation-notes.md) for
 - The root health-style route is `GET /` and returns a simple JSON message.
 - The codebase uses a flat JavaScript Express structure, not TypeScript and not a formal service container.
 - Create a `.env` file in the project root (the app loads `.env` only — not `.env.local`).
-- `npm test` is not implemented yet; validation is done through manual flow testing and [production-smoke-checklist.md](docs/production-smoke-checklist.md).
+- `npm test` runs 57 mocked unit/integration-style tests locally; passing does **not** replace post-deploy smoke on [production-smoke-checklist.md](docs/production-smoke-checklist.md).
 
 ## Key route groups
 

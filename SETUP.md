@@ -94,7 +94,7 @@ npm run dev
 | `npm install` | Install dependencies |
 | `npm run dev` | Run with nodemon for development |
 | `npm start` | Run with Node.js |
-| `npm test` | Placeholder script; currently not implemented |
+| `npm test` | Run automated tests (57 cases, Node built-in runner) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) |
 
 ## Environment file guidance
 
@@ -108,6 +108,8 @@ npm run dev
 - [README.md](README.md)
 - [STAGING.md](STAGING.md)
 - [DEPLOYMENT.md](DEPLOYMENT.md)
+- [docs/README.md](docs/README.md) — documentation index
+- [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md)
 - [docs/launch-readiness-report.md](docs/launch-readiness-report.md)
 - [docs/security-remediation-notes.md](docs/security-remediation-notes.md)
 
