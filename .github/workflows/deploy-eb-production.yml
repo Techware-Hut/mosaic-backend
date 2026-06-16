@@ -2,9 +2,10 @@ name: Deploy to Elastic Beanstalk
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+  # push:
+  #   branches:
+  #     - main
+  # Re-enable after first successful manual deploy and production environment + AWS OIDC role are confirmed.
 
 concurrency:
   group: deploy-production
@@ -12,8 +13,8 @@ concurrency:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  EB_APPLICATION_NAME: ${{ vars.EB_APPLICATION_NAME || 'mosaic-backend' }}
-  EB_ENVIRONMENT_NAME: ${{ vars.EB_ENVIRONMENT_NAME || 'Mosaic-backend' }}
+  EB_APPLICATION_NAME: ${{ vars.EB_APPLICATION_NAME || 'mosaic-biz-hub-backend' }}
+  EB_ENVIRONMENT_NAME: ${{ vars.EB_ENVIRONMENT_NAME || 'mosaic-backend-env' }}
   PRODUCTION_API_URL: https://api.mosaicbizhub.com
 
 jobs:
@@ -27,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "22"
           cache: npm
 
       - name: Install dependencies
@@ -42,6 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 45
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout
@@ -66,11 +70,20 @@ jobs:
             -x "test-products.js" \
             -x "*.txt"
 
+      - name: Configure AWS credentials
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: true
+
       - name: Deploy to Elastic Beanstalk
         uses: einaregilsson/beanstalk-deploy@v22
         with:
-          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_access_key: ${{ steps.aws_creds.outputs.aws-access-key-id }}
+          aws_secret_key: ${{ steps.aws_creds.outputs.aws-secret-access-key }}
+          aws_session_token: ${{ steps.aws_creds.outputs.aws-session-token }}
           application_name: ${{ env.EB_APPLICATION_NAME }}
           environment_name: ${{ env.EB_ENVIRONMENT_NAME }}
           region: ${{ env.AWS_REGION }}
