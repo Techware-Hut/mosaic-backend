@@ -90,6 +90,7 @@ const allowedOrigins = Array.from(
   new Set([
     'https://www.mosaicbizhub.com',
     'https://app.mosaicbizhub.com',
+    'https://mosaic-biz-frontend-launch.vercel.app',
     'http://localhost:3000',
     'http://localhost:8081',
     'https://app.minorityownedbusiness.info',
