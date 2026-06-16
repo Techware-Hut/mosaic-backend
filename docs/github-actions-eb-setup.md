@@ -171,6 +171,20 @@ After first successful manual deploy, push-to-`main` auto-deploy is enabled in t
 
 ---
 
+## First deploy attempt (2026-06-16)
+
+Workflow run on merge of PR #12 (`main` @ `8b098ad`):
+
+| Step | Result |
+|------|--------|
+| `npm ci` + `npm test` | **PASS** |
+| Create deployment ZIP | **PASS** |
+| Deploy to EB | **FAIL** — `AWS Access Key not specified!` |
+
+**Action required:** Repo admin adds `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets, creates `production` environment (optional reviewers), then re-runs **Deploy to Elastic Beanstalk** via Actions → Run workflow on `main`.
+
+---
+
 ## Rollback
 
 1. GitHub Actions → **Deploy to Elastic Beanstalk** → **Run workflow** → select previous known-good commit on `main`
