@@ -15,6 +15,16 @@ const clip = (n, lo, hi, d) => {
   return Math.min(hi, Math.max(lo, x));
 };
 
+async function getVisibleBusinessIds() {
+  const businesses = await Business.find({
+    isActive: true,
+  })
+    .select('_id')
+    .lean();
+
+  return businesses.map((business) => business._id);
+}
+
 
 async function listProductsRanked(req, res) {
   try {
@@ -29,10 +39,14 @@ async function listProductsRanked(req, res) {
     const pageNum = Math.max(1, Number(page));
     const pageSizeN = Math.max(1, Math.min(60, Number(pageSize)));
     const skip = (pageNum - 1) * pageSizeN;
+    const visibleBusinessIds = await getVisibleBusinessIds();
 
     // Simple query first - if no businessType, return all products
     if (!businessType && !location && !minority) {
-      const products = await Product.find({ isDeleted: false })
+      const products = await Product.find({
+        isDeleted: false,
+        businessId: { $in: visibleBusinessIds },
+      })
         .populate('businessId', 'businessName')
         .populate('categoryId', 'name')
         .populate('subcategoryId', 'name')
@@ -40,7 +54,10 @@ async function listProductsRanked(req, res) {
         .skip(skip)
         .limit(pageSizeN);
 
-      const total = await Product.countDocuments({ isDeleted: false });
+      const total = await Product.countDocuments({
+        isDeleted: false,
+        businessId: { $in: visibleBusinessIds },
+      });
 
       return res.json({
         items: products,
@@ -66,7 +83,8 @@ async function listProductsRanked(req, res) {
       },
       {
         $match: {
-          isDeleted: false
+          isDeleted: false,
+          businessId: { $in: visibleBusinessIds },
         }
       }
     ];
@@ -93,7 +111,8 @@ async function listProductsRanked(req, res) {
       
       pipeline.push({
         $match: {
-          'business.listingType': listingType
+          'business.listingType': listingType,
+          'business.isActive': true,
         }
       });
     }
@@ -102,6 +121,7 @@ async function listProductsRanked(req, res) {
     if (location) {
       pipeline.push({
         $match: {
+          'business.isActive': true,
           $or: [
             { 'business.address.city': new RegExp(location, 'i') },
             { 'business.address.state': new RegExp(location, 'i') }
@@ -122,6 +142,7 @@ async function listProductsRanked(req, res) {
       });
       pipeline.push({
         $match: {
+          'business.isActive': true,
           'minorityTypeData.name': new RegExp(minority.replace('-', ' '), 'i')
         }
       });

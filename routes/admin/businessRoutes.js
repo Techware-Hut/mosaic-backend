@@ -16,4 +16,11 @@ router.post(
   businessController.toggleBusinessStatus
 );
 
+router.patch(
+  "/status/:id",
+  authenticate,
+  isAdmin,
+  businessController.patchBusinessActivationStatus
+);
+
 module.exports = router;

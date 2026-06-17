@@ -236,7 +236,6 @@ exports.createService = async (req, res) => {
     if (!business)
       return res.status(403).json({ error: 'You do not own this business.' });
 
-    // if (!business.isApproved)
     //   return res.status(400).json({ error: 'Business is not approved yet.' });
 
     // if (business.listingType !== 'service')
@@ -376,7 +375,6 @@ exports.createService = async (req, res) => {
 //     if (!business)
 //       return res.status(403).json({ error: 'You do not own this business.' });
 
-//     if (!business.isApproved)
 //       return res.status(400).json({ error: 'Business is not approved yet.' });
 
 //     if (business.listingType !== 'service')
@@ -858,6 +856,17 @@ exports.getBusinessServiceById = async (req, res) => {
     }
 
     if (!service) {
+      return res.status(404).json({
+        message: 'Business service not found.'
+      });
+    }
+
+    const visibleBusiness = await Business.findOne({
+      _id: service.businessId?._id,
+      isActive: true,
+    }).select('_id').lean();
+
+    if (!visibleBusiness) {
       return res.status(404).json({
         message: 'Business service not found.'
       });

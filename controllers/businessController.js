@@ -150,7 +150,8 @@ exports.createBusiness = async (req, res) => {
       logo: logoUrl,
       coverImage: coverUrl,
       owner: user._id,
-      isApproved: false,
+      isApproved: true,
+      isActive: true,
       subscriptionId: subscription._id,
       stripeSubscriptionId,
       minorityType: user.minorityType,
@@ -727,8 +728,8 @@ exports.retryCreateBusiness = async (req, res) => {
       logo: formData.logo || "", // Assuming logo is passed in formData, if no logo, set it to an empty string
       coverImage: formData.coverImage || "", // Same for coverImage
       minorityType: subscription.userId.minorityType,
-      isApproved: false, // Not active until admin approval
-      isActive: false, // Mark as active after admin approval
+      isApproved: true,
+      isActive: true, // Default to active; admin can deactivate later if needed
       subscriptionId: subscription._id,
       stripeSubscriptionId: subscription.stripeSubscriptionId,
     });

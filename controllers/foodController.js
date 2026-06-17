@@ -186,6 +186,15 @@ exports.getBusinessFoodById = async (req, res) => {
       return res.status(404).json({ message: 'Business food not found.' });
     }
 
+    const visibleBusiness = await Business.findOne({
+      _id: food.businessId?._id,
+      isActive: true,
+    }).select('_id').lean();
+
+    if (!visibleBusiness) {
+      return res.status(404).json({ message: 'Business food not found.' });
+    }
+
     const mappedFood = {
       _id: food._id,
       title: food.title || '',
