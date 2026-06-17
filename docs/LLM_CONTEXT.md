@@ -18,8 +18,22 @@ For full route maps and lifecycle detail, see [ARCHITECTURE.md](ARCHITECTURE.md)
 | Default port | `3001` |
 | Production API | `https://api.mosaicbizhub.com` |
 | Deploy target | AWS Elastic Beanstalk (manual deploy from `main`) |
+| **MVP program status** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) — production SHA, open PRs, #26–#35 roadmap |
 
 ---
+
+## Backend MVP sprint (#26–#35)
+
+Before starting or reviewing issue work, read [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md).
+
+| State (2026-06-17) | Detail |
+| --- | --- |
+| Production EB | `6cdf587` — issue #30 live |
+| Open PR | [#40](https://github.com/Techware-Hut/mosaic-backend/pull/40) — issue #31 (**not deployed**) |
+| Test suite | **107/107** on production lineage; **123/123** on PR #40 branch |
+| Next scheduled | **#32** Stripe Connect runtime — do not start until scheduled |
+
+Issue-specific docs: [docs/README.md](README.md) § MVP backend sprint.
 
 ## Backend purpose
 
@@ -240,6 +254,7 @@ POST finalizeVerification  → status verified → syncBusinessFromOnboarding �
 | [production-env-checklist.md](production-env-checklist.md) | EB env var audit before deploy |
 | [production-smoke-checklist.md](production-smoke-checklist.md) | Post-deploy smoke tiers P0–P6 |
 | [deploy-verification.md](deploy-verification.md) | Deploy verification log |
+| [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) | MVP sprint hub — prod SHA, PRs, roadmap |
 | [hosted-staging-decision.md](hosted-staging-decision.md) | No hosted staging backend (deferred) |
 | [launch-readiness-report.md](launch-readiness-report.md) | Full route audit and blockers |
 
@@ -254,7 +269,7 @@ POST finalizeVerification  → status verified → syncBusinessFromOnboarding �
 | `npm install` | Install dependencies |
 | `npm run dev` | Start with nodemon (port 3001 default) |
 | `npm start` | Production-style start |
-| `npm test` | Run all tests: `node --test tests/**/*.test.js` (~57 cases) |
+| `npm test` | Run all tests: `node --test tests/**/*.test.js` (**123** cases on PR #40 branch; **107** on production lineage — see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md)) |
 | `node scripts/verify-auth-check-smoke.js` | Manual auth smoke against local/prod API |
 
 **When to run tests:**

@@ -2,7 +2,7 @@
 
 Maps backend features to automated tests (`npm test`), manual smoke checks, and proof-pack evidence.
 
-**Runner:** `npm test` → `node --test tests/**/*.test.js` (92 tests, Node built-in runner)
+**Runner:** `npm test` → `node --test tests/**/*.test.js` (123 tests, Node built-in runner)
 
 **Test style:** Unit/integration-style tests with mocked Mongoose models and module hooks. They prove **handler logic and wiring** — not full end-to-end flows against live MongoDB, Stripe, or AWS in CI.
 
@@ -14,7 +14,7 @@ Maps backend features to automated tests (`npm test`), manual smoke checks, and 
 
 | Layer | Count | What it validates |
 |-------|-------|-------------------|
-| Automated (`tests/`) | **92** | DTOs, middleware, controller logic, webhook wiring, search filters (mocked) |
+| Automated (`tests/`) | **123** | DTOs, middleware, controller logic, webhook wiring, search filters, vendor listing/order/stock (mocked) |
 | Manual smoke script | 1 | Live API + DB auth/check per role |
 | Production smoke tiers | P0–P6 | Post-deploy on `https://api.mosaicbizhub.com` |
 | Proof pack | Per release | Redacted evidence matrix |
@@ -116,6 +116,19 @@ Maps backend features to automated tests (`npm test`), manual smoke checks, and 
 | Signed Dashboard delivery | — | *(no automated test)* | Stripe → EB HTTP 200 end-to-end | Yes — P4.1 |
 
 See [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) for route ownership and curl smoke commands.
+
+---
+
+## Vendor listing / order / stock tests (#31)
+
+| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
+| --- | --- | --- | --- | --- |
+| Product+variant tier quota | [`tests/vendor/listing-tier-limits.test.js`](../tests/vendor/listing-tier-limits.test.js) | Usage count + 403 quota messages | Live subscription plan on prod | Yes — create until limit |
+| Product ownership | [`tests/vendor/vendor-listing-ownership.test.js`](../tests/vendor/vendor-listing-ownership.test.js) | `updateProduct` 403 wrong owner, 404 deleted | Service/food update paths | Yes — P6 vendor dashboard |
+| Variant stock PATCH | [`tests/vendor/vendor-variant-stock.test.js`](../tests/vendor/vendor-variant-stock.test.js) | set/increment/decrement; negative + unknown op rejected | Order accept stock decrement | Yes — stock update on test variant |
+| Vendor order inbox | [`tests/vendor/vendor-orders.test.js`](../tests/vendor/vendor-orders.test.js) | `getVendorOrders` vendorId filter; accept 404/400 guards | Live paid order E2E | Yes — P5.5 |
+
+See [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md).
 
 ---
 
@@ -251,7 +264,7 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 ## How to run
 
 ```bash
-# All automated tests (107)
+# All automated tests (123)
 npm test
 
 # Manual auth smoke (live API + DB)
@@ -267,7 +280,7 @@ node scripts/verify-auth-check-smoke.js
 
 | Evidence type | Source | Automated equivalent |
 | --- | --- | --- |
-| `npm test` 92/92 pass | Pre-merge local/CI | Yes — full suite |
+| `npm test` 123/123 pass | Pre-merge local/CI | Yes — full suite (see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for prod vs branch) |
 | Auth smoke script output | `scripts/verify-auth-check-smoke.js` | Partial — live auth/check only |
 | Smoke matrix P0–P6 | [production-smoke-checklist.md](production-smoke-checklist.md) | No — human execution |
 | Webhook unsigned 400 | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) curl | Partial — 9 tests cover handler logic |
@@ -295,8 +308,12 @@ node scripts/verify-auth-check-smoke.js
 | `tests/vendor/vendor-onboarding-upload-mime.test.js` | 5 | Upload MIME + auth |
 | `tests/vendor/vendor-onboarding-business-sync.test.js` | 5 | Business sync |
 | `tests/vendor/vendor-profile-field-allowlist.test.js` | 6 | Field allowlists |
+| `tests/vendor/listing-tier-limits.test.js` | 5 | Product+variant tier quota util |
+| `tests/vendor/vendor-listing-ownership.test.js` | 2 | Product update ownership |
+| `tests/vendor/vendor-variant-stock.test.js` | 5 | Variant stock PATCH |
+| `tests/vendor/vendor-orders.test.js` | 4 | Vendor order filter + accept guards |
 | `tests/stripe/stripe-webhook-routing-signature.test.js` | 9 | Webhook routing + signatures |
 | `tests/marketplace/public-listing-dto.test.js` | 18 | Marketplace DTO normalization |
 | `tests/marketplace/featured-products-response.test.js` | 2 | Featured products wiring |
 | `tests/marketplace/public-search-filters.test.js` | 15 | Search/filter helpers + handler |
-| **Total** | **107** | |
+| **Total** | **123** | |

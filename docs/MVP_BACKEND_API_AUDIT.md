@@ -259,7 +259,7 @@ Full list: [`models/`](../models/). No Prisma/SQL/Zod schema layer.
 | [#28](https://github.com/Techware-Hut/mosaic-backend/issues/28) | Marketplace data contract | Implemented in PR #37 — DTO layer + controller wiring | 20 marketplace tests ([TEST_MATRIX.md](TEST_MATRIX.md)) | Card/detail field audit vs frontend on prod | See [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md) |
 | [#29](https://github.com/Techware-Hut/mosaic-backend/issues/29) | Search/filter API readiness | `GET /api/public/search`, list endpoints, `GET /api/products/filters` | 15 search-filter tests ([TEST_MATRIX.md](TEST_MATRIX.md)) | Query param smoke on prod after merge | **ZIP exact** on `address.zipCode`; **no radius/geolocation**; tag + verified filters; see [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md) |
 | [#30](https://github.com/Techware-Hut/mosaic-backend/issues/30) | Vendor onboarding + email | Full onboarding + `WellcomeMailer.js` + validation/email delivery helpers | 21 vendor/admin tests (incl. finalize + validation) | Payment webhook + approval email on prod | Submit MVP validation at `/submit`; finalize emails graceful when SMTP missing; see [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) |
-| [#31](https://github.com/Techware-Hut/mosaic-backend/issues/31) | Vendor profile/listings/orders | Business, product, order vendor routes | Field allowlist + business sync tests | End-to-end vendor flows | Listing tier limits documented in [tier-listing-limit-implementation.md](tier-listing-limit-implementation.md) — runtime enforcement unverified |
+| [#31](https://github.com/Techware-Hut/mosaic-backend/issues/31) | Vendor profile/listings/orders | Business, product, order vendor routes + `listingTierLimits` — **PR #40 open; not on production** | 16 new vendor listing/order/stock tests (123 total on PR branch) | End-to-end vendor flows on prod after merge+deploy | Product+variant tier limit aligned; service/food limits pre-existing; see [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) |
 | [#32](https://github.com/Techware-Hut/mosaic-backend/issues/32) | Stripe Connect checkout | Connect + 5 webhooks + order PI | Webhook routing/signature tests | Live PI + split payout on prod | `/stripe/*` routes **lack auth** — security risk |
 | [#33](https://github.com/Techware-Hut/mosaic-backend/issues/33) | Email notifications | Order + onboarding + approval mails | None for delivery | SMTP on EB | **No review follow-up email** implemented |
 | [#34](https://github.com/Techware-Hut/mosaic-backend/issues/34) | Admin dashboard APIs | Approve vendors, categories, featured toggle, `GET /api/orders/admin` | Admin user + pending queue tests | Admin role smoke | **No tags CRUD**; **no sales/revenue summary API** |
@@ -282,7 +282,7 @@ Full list: [`models/`](../models/). No Prisma/SQL/Zod schema layer.
 - Reviews: list (public), upsert/delete (customer) for product, service, food
 - Admin: vendor pending queue, business approve, category CRUD, featured product toggle
 - Email utilities for OTP, welcome, order confirmation, listing approval, onboarding
-- **92 automated tests** (auth DTOs, vendor middleware, webhook wiring, admin guards, business sync, marketplace DTOs, search filters)
+- **107 automated tests** (auth DTOs, vendor middleware, webhook wiring, admin guards, business sync, marketplace DTOs, search filters, vendor listing/order/stock)
 
 ---
 
@@ -316,7 +316,7 @@ Cannot be proven by CI alone (mocked MongoDB/Stripe/email):
 | No radius/geolocation filter | Location search is text regex; ZIP exact on `address.zipCode` (#29 branch); no lat/lng radius |
 | No review follow-up email | Post-purchase review prompt not found in mail utilities |
 | Unauthenticated routes | `GET /api/admin/categories`, `POST /stripe/*`, `POST /api/payments/create-payment-intent` |
-| Reduced submit validation | `validateStage1Payload` enforces business name only (most rules commented out) |
+| Reduced submit validation | ~~`validateStage1Payload` business name only~~ — **#30 expanded** submit validation (fee paid, required fields, MIME allowlist); see [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) |
 | Partial automated tests | Search filters covered (#29 branch); reviews, checkout, email content still untested |
 | Unmounted CMS router | `routes/cms/cmsRoutes.js` dead code |
 
@@ -364,7 +364,7 @@ Cannot be proven by CI alone (mocked MongoDB/Stripe/email):
 ## 9. Test commands available
 
 ```powershell
-npm test                    # 77 unit/integration tests (mocked)
+npm test                    # full suite — see Current suite below
 npm run dev                 # local server :3001
 npm start                   # production mode locally
 node scripts/verify-auth-check-smoke.js   # live auth/check per role (manual)
@@ -372,7 +372,9 @@ node scripts/verify-auth-check-smoke.js   # live auth/check per role (manual)
 
 **CI:** [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs `npm test` on PR/push to `main`/`staging`.
 
-### Audit run result (2026-06-17, branch `sprint/backend-mvp-api-audit`)
+### Historical baseline (issue #26 audit, 2026-06-17)
+
+Branch `sprint/backend-mvp-api-audit` at audit time:
 
 ```
 npm test
@@ -382,7 +384,7 @@ npm test
 ℹ duration_ms ~988
 ```
 
-All 77 tests passed. Test files:
+All 77 tests passed at audit baseline. Test files at that time:
 
 | Domain | Files |
 |--------|-------|
@@ -391,7 +393,14 @@ All 77 tests passed. Test files:
 | Vendor | `tests/vendor/*.test.js` (5 files) |
 | Stripe | `tests/stripe/stripe-webhook-routing-signature.test.js` |
 
-See [TEST_MATRIX.md](TEST_MATRIX.md) for manual smoke mapping.
+### Current suite (2026-06-17)
+
+| Context | Count | Notes |
+| --- | --- | --- |
+| Production lineage (`6cdf587` / `main` app) | **107/107** | Through issue #30 merge |
+| PR #40 branch (issue #31) | **123/123** | +16 vendor listing/order/stock tests |
+
+See [TEST_MATRIX.md](TEST_MATRIX.md) for file-level mapping and [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for prod vs branch state.
 
 ---
 
@@ -402,7 +411,7 @@ Aligned to issue dependencies (audit → implementation → smoke proof):
 1. ~~**#28 Marketplace data contract**~~ — **Done (PR #37):** null-safe DTOs for public listing/featured/detail; see [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md)
 2. ~~**#29 Search/filter**~~ — **Done (branch `sprint/backend-search-filter-readiness`):** shared filter module, ZIP exact, tag/verified, tests + [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md); geolocation explicitly unsupported
 3. ~~**#30 Vendor onboarding email**~~ — **Done (branch `sprint/backend-vendor-onboarding-email-flow`):** submit validation, graceful finalize emails, tests + [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md)
-4. **#31 Vendor MVP APIs** — confirm listing tier limit enforcement; vendor order list smoke
+4. ~~**#31 Vendor MVP APIs**~~ — **Done — [PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40) open; merge + deploy pending:** product+variant tier limits, stock guards, vendor order tests + [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md)
 5. **#32 Stripe Connect runtime** — prod smoke for checkout + webhooks; remediate unauthenticated `/stripe/*` routes
 6. **#33 Email notifications** — order confirmation smoke; document review-email gap
 7. **#34 Admin APIs** — document sales summary gap; optional orders aggregation endpoint

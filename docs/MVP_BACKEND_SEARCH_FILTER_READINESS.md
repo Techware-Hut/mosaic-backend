@@ -172,4 +172,4 @@ Future phase requires a geocoding pipeline and indexed coordinates (Business Geo
 
 **Soft gaps (not blockers):** No prod businesses match `tag=organic` + `zip=90210`; empty arrays are expected and safe.
 
-**Conclusion:** Issue #29 search/filter readiness verified on production. Backend safe to proceed to issue #30 planning.
+**Conclusion:** Issue #29 search/filter readiness verified on production. For current program-wide status and what followed (#30 live, #31 in PR #40), see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md).

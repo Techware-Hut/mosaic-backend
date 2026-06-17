@@ -271,4 +271,45 @@ Full matrix: [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ON
 
 ### Conclusion
 
-**Deploy Go** for issue #30 validation guards and auth boundaries on `6cdf587`. Authenticated submit/finalize email proof **PENDING** until dedicated `SMOKE_TEST_*` accounts exist. Backend **safe to proceed to issue #31** for vendor MVP APIs (listing/orders) per sprint plan — do not start #31 until scheduled.
+**Deploy Go** for issue #30 validation guards and auth boundaries on `6cdf587`. Authenticated submit/finalize email proof **PENDING** until dedicated `SMOKE_TEST_*` accounts exist. Issue #31 implementation is complete on [PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40) — merge, deploy, and smoke pending; see section below and [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md).
+
+---
+
+## Verification — 2026-06-17 (PR #40 / issue #31 — pending merge)
+
+Pre-merge record for [PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40) (vendor self-service APIs, issue #31). **NOT DEPLOYED.**
+
+### Pre-merge record
+
+| Field | Value |
+|-------|-------|
+| PR | [#40](https://github.com/Techware-Hut/mosaic-backend/pull/40) — **OPEN** |
+| Branch | `sprint/backend-vendor-profile-listings-orders-stock` |
+| Pre-merge tests | **123/123** (`npm test`) |
+| Production status | **Not deployed** — production remains at `6cdf587` (#30) |
+
+### Deploy record (fill after merge)
+
+| Field | Value |
+|-------|-------|
+| Merge commit | _TBD after merge_ |
+| GHA deploy run | _TBD_ |
+| EB version label | _TBD_ |
+| EB application / environment | `mosaic-biz-hub-backend` / `mosaic-backend-env` |
+| API base | `https://api.mosaicbizhub.com` |
+
+### Smoke summary (fill after deploy)
+
+Full matrix: [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) § Post-merge manual smoke.
+
+| Area | Result |
+|------|--------|
+| Product create tier limit | _TBD_ |
+| Variant add tier limit | _TBD_ |
+| Stock PATCH validation (negative/unknown op) | _TBD_ |
+| Vendor order list (vendorId from token) | _TBD_ |
+| #30 regression canary (onboarding auth guards) | _TBD_ |
+
+### Conclusion
+
+**Pending merge and deploy.** After human merge of PR #40 → manual GHA deploy → run smoke per vendor self-service doc → update this section and [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md). **Next scheduled issue after #31 deploy:** #32 Stripe Connect runtime.

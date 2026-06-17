@@ -56,7 +56,8 @@ Business and technical decisions for Mosaic Biz Hub backend MVP. Captures what i
 | Vendor onboarding upload MIME: **JPEG, PNG, WebP, PDF only** | **Accepted** | Presigned S3 upload gate | Backend engineer | [vendorOnboardingUploadMimeAllowlist.js](../utils/vendorOnboardingUploadMimeAllowlist.js) |
 | `saveDraft` strips **protected fields** (status, badge, payment, checklist) | **Accepted** | Prevent vendor self-approval via payload | Backend engineer | [vendorOnboardingProfileFields.js](../utils/vendorOnboardingProfileFields.js) |
 | Business profile PUT/PATCH uses **field allowlist** | **Accepted** | PATCH/PUT apply `VENDOR_BUSINESS_PROFILE_ALLOWLIST` | Backend engineer | [vendor-profile-field-allowlist.test.js](../tests/vendor/vendor-profile-field-allowlist.test.js) |
-| `validateStage1Payload` at submit enforces **business name only** (most rules commented out) | **Accepted (MVP gap)** | Reduced server validation; frontend gating assumed | Product | [vendorOnboarding.controller.js](../controllers/vendorOnboarding.controller.js) |
+| `validateStage1Payload` at submit enforces **expanded MVP rules** (#30: fee paid, required fields, document MIME allowlist) | **Accepted** | Server-side submit gate; not business-name-only | Backend engineer | [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md), [vendorOnboarding.controller.js](../controllers/vendorOnboarding.controller.js) |
+| Product + variant **tier limit** counts both products and variants toward quota (#31) | **Accepted** | `utils/listingTierLimits.js`; aligned with subscription tier caps | Backend engineer | [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md), [tier-listing-limit-implementation.md](tier-listing-limit-implementation.md) |
 
 ---
 

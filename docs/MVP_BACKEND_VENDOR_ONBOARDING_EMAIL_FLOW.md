@@ -1,7 +1,7 @@
 # MVP Backend Vendor Onboarding Email Flow (Issue #30)
 
 **Branch:** merged via PR #39 → `main`  
-**Status:** **Deployed to production** (2026-06-17)
+**Status:** **Deployed to production** (2026-06-17) — program snapshot: [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md)
 
 **Related:** [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) (full lifecycle reference)
 
@@ -138,7 +138,8 @@ Secrets and full payloads are never logged.
 | [`tests/admin/vendor-onboarding-finalize.test.js`](../tests/admin/vendor-onboarding-finalize.test.js) | 5 | Approve/reject, email graceful failure |
 | Existing vendor/admin tests | 16 | Resubmit, pending queue, middleware |
 
-Full suite: **107/107** (`npm test`)
+Full suite at **#30 merge:** **107/107** (`npm test` on production lineage `6cdf587`).  
+**Current full suite (PR #40 / issue #31 on branch):** **123/123** — see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for what's live vs in PR.
 
 ---
 
@@ -193,6 +194,6 @@ Workflow post-deploy probes in GHA: health **200**, unauth auth/check **401**.
 | D | Finalize approve/reject on submitted app | — | **SKIP** | Real pending app exists; no disposable smoke application |
 | E | CORS OPTIONS/GET (`mosaic-biz-frontend-launch.vercel.app`) | 204 / ACAO match | **PASS** | — |
 
-**Email outcome on production:** Not observed at runtime — submit/finalize success paths were not exercised to avoid mutating real vendor applications. Contract covered by **107/107** automated tests; production EB may return `emailSkipped: true` when SMTP env vars are unset (valid **PASS** per graceful-failure design).
+**Email outcome on production:** Not observed at runtime — submit/finalize success paths were not exercised to avoid mutating real vendor applications. Contract covered by **107/107** automated tests at #30 merge (123/123 on PR #40 branch); production EB may return `emailSkipped: true` when SMTP env vars are unset (valid **PASS** per graceful-failure design).
 
 **Regression canary:** Geo search `filters.unsupported` still populated post-deploy (**PASS**).

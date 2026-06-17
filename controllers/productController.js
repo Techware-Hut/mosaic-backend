@@ -9,6 +9,10 @@ const { PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const mongoose = require('mongoose');
 const VendorOnboardingStage1 = require('../models/VendorOnboardingStage1');
+const {
+  countProductListingUsage,
+  assertProductListingQuota,
+} = require('../utils/listingTierLimits');
 const { Decimal128 } = mongoose.Types;
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -185,12 +189,16 @@ exports.createProductWithVariants = async (req, res) => {
     const productLimit = subscriptionPlan?.limits?.productListings || 0;
     const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
 
-    const productCount = await Product.countDocuments({ businessId, isDeleted: false });
+    const incomingVariantCount = Array.isArray(variants) ? variants.length : 0;
+    const usage = await countProductListingUsage({ Product, ProductVariant, businessId });
+    const quotaCheck = assertProductListingQuota({
+      total: usage.total,
+      incomingCount: 1 + incomingVariantCount,
+      limit: productLimit,
+    });
 
-    if (productCount >= productLimit) {
-      return res.status(403).json({
-        error: `Product listing limit reached. You can add up to ${productLimit} products.`,
-      });
+    if (!quotaCheck.ok) {
+      return res.status(quotaCheck.status).json({ error: quotaCheck.error });
     }
 
     const galleryCount = countGalleryImages(galleryImages);
@@ -1046,6 +1054,23 @@ exports.addVariants = async (req, res) => {
       return res.status(404).json({ error: 'Subscription plan not found' });
     }
 
+    const productLimit = subscriptionPlan?.limits?.productListings || 0;
+    const incomingVariantCount = Array.isArray(variants) ? variants.length : 0;
+    const usage = await countProductListingUsage({
+      Product,
+      ProductVariant,
+      businessId: product.businessId,
+    });
+    const quotaCheck = assertProductListingQuota({
+      total: usage.total,
+      incomingCount: incomingVariantCount,
+      limit: productLimit,
+    });
+
+    if (!quotaCheck.ok) {
+      return res.status(quotaCheck.status).json({ error: quotaCheck.error });
+    }
+
     // Create new variants with unique SKUs
     const variantDocs = variants.map((variant) => {
       // Generate unique SKU for each variant
@@ -1279,21 +1304,37 @@ exports.updateVariantStock = async (req, res) => {
       return res.status(404).json({ error: 'Variant not found' });
     }
 
+    const stockValue = Number(stock);
+    if (!Number.isFinite(stockValue)) {
+      return res.status(400).json({ error: 'Invalid stock value' });
+    }
+
     switch (operation) {
       case 'set':
-        variant.stock = stock;
+        if (stockValue < 0) {
+          return res.status(400).json({ error: 'Stock cannot be negative' });
+        }
+        variant.stock = stockValue;
         break;
       case 'increment':
-        variant.stock += stock;
+        if (stockValue < 0) {
+          return res.status(400).json({ error: 'Increment amount cannot be negative' });
+        }
+        variant.stock += stockValue;
         break;
       case 'decrement':
-        if (variant.stock - stock < 0) {
+        if (stockValue < 0) {
+          return res.status(400).json({ error: 'Decrement amount cannot be negative' });
+        }
+        if (variant.stock - stockValue < 0) {
           return res.status(400).json({ error: 'Insufficient stock' });
         }
-        variant.stock -= stock;
+        variant.stock -= stockValue;
         break;
       default:
-        variant.stock = stock;
+        return res.status(400).json({
+          error: 'Invalid operation. Allowed: set, increment, decrement',
+        });
     }
 
     await variant.save();

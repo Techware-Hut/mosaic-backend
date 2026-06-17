@@ -11,11 +11,28 @@ Application map: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 | If you are… | Read in this order |
 | --- | --- |
-| **LLM / AI agent** | [LLM_CONTEXT.md](LLM_CONTEXT.md) → [API_SURFACE.md](API_SURFACE.md) → [ARCHITECTURE.md](ARCHITECTURE.md) |
+| **LLM / AI agent** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [LLM_CONTEXT.md](LLM_CONTEXT.md) → [API_SURFACE.md](API_SURFACE.md) → [ARCHITECTURE.md](ARCHITECTURE.md) |
 | **New backend developer** | [ARCHITECTURE.md](ARCHITECTURE.md) → [SETUP.md](../SETUP.md) → [AUTH_FLOW.md](AUTH_FLOW.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **QA / smoke tester** | [production-smoke-checklist.md](production-smoke-checklist.md) → [TEST_MATRIX.md](TEST_MATRIX.md) → [API_SURFACE.md](API_SURFACE.md) |
-| **Release / deploy owner** | [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) → [DEPLOYMENT.md](../DEPLOYMENT.md) → [production-proof-pack-template.md](production-proof-pack-template.md) |
-| **Product / launch reviewer** | [DECISION_REGISTER.md](DECISION_REGISTER.md) → [launch-readiness-report.md](launch-readiness-report.md) |
+| **Release / deploy owner** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) → [DEPLOYMENT.md](../DEPLOYMENT.md) → [production-proof-pack-template.md](production-proof-pack-template.md) |
+| **Product / launch reviewer** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [DECISION_REGISTER.md](DECISION_REGISTER.md) → [launch-readiness-report.md](launch-readiness-report.md) |
+
+---
+
+## MVP backend sprint (#26–#35)
+
+**Start here for sprint state:** [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) — production SHA, open PRs, roadmap, known gaps.
+
+| Doc | What it covers |
+| --- | --- |
+| [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) | **Canonical hub** — where we are, what's live, what's next |
+| [MVP_BACKEND_API_AUDIT.md](MVP_BACKEND_API_AUDIT.md) | Full API audit, coverage matrix (#26–#35), recommended fix order |
+| [MVP_BACKEND_SMOKE_PROOF_PACK.md](MVP_BACKEND_SMOKE_PROOF_PACK.md) | Issue #27 smoke proof pack evidence |
+| [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md) | Issue #28 public listing/featured/detail DTO contract |
+| [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md) | Issue #29 search/filter API readiness |
+| [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) | Issue #30 vendor onboarding validation + email flow |
+| [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) | Issue #31 vendor profile, listings, orders, stock |
+| [deploy-verification.md](deploy-verification.md) | Chronological MVP deploy verification log |
 
 ---
 
@@ -147,6 +164,7 @@ Follow these when changing code **or** docs.
 
 ## Quick links (required deliverables)
 
+- [MVP program status](MVP_BACKEND_PROGRAM_STATUS.md)
 - [Architecture map](ARCHITECTURE.md)
 - [LLM context guide](LLM_CONTEXT.md)
 - [Auth flow](AUTH_FLOW.md)
