@@ -19,6 +19,11 @@ const s3Client = new S3Client({
 });
 
 const DEFAULT_PRODUCT_SHIPPING = { standard: 0, overnight: 0, local: 0 };
+const getGalleryImageLimit = (subscriptionPlan) =>
+  subscriptionPlan?.limits?.galleryImageLimit ?? subscriptionPlan?.limits?.imageLimit ?? 0;
+
+const countGalleryImages = (images) =>
+  Array.isArray(images) ? images.filter(Boolean).length : 0;
 
 const toShippingNumber = (value) => {
   if (value === undefined || value === null || value === "") {
@@ -178,9 +183,22 @@ exports.createProductWithVariants = async (req, res) => {
 
     const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
     const productLimit = subscriptionPlan?.limits?.productListings || 0;
+    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
 
-    // Count existing variants for the business
-    const variantCount = await ProductVariant.countDocuments({ businessId, isDeleted: false });
+    const productCount = await Product.countDocuments({ businessId, isDeleted: false });
+
+    if (productCount >= productLimit) {
+      return res.status(403).json({
+        error: `Product listing limit reached. You can add up to ${productLimit} products.`,
+      });
+    }
+
+    const galleryCount = countGalleryImages(galleryImages);
+    if (galleryCount > galleryImageLimit) {
+      return res.status(400).json({
+        error: `Product gallery can have maximum ${galleryImageLimit} images for your plan.`,
+      });
+    }
 
     // Create Product
     const product = new Product({
@@ -632,6 +650,29 @@ exports.updateProduct = async (req, res) => {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
+    const subscription = await Subscription.findOne({
+      userId,
+      status: 'active',
+      endDate: { $gte: new Date() },
+    }).sort({ createdAt: -1 });
+
+    if (!subscription) {
+      return res.status(403).json({
+        error: 'Valid subscription not found.',
+        details: 'Please ensure you have an active subscription with completed payment.'
+      });
+    }
+
+    const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
+    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
+    const nextGalleryImages = galleryImages !== undefined ? galleryImages : product.galleryImages;
+
+    if (countGalleryImages(nextGalleryImages) > galleryImageLimit) {
+      return res.status(400).json({
+        error: `Product gallery can have maximum ${galleryImageLimit} images for your plan.`,
+      });
+    }
+
     // Handle cover image change
     if (coverImage && product.coverImage !== coverImage) {
       await deleteCloudinaryFile(product.coverImage);
@@ -648,7 +689,9 @@ exports.updateProduct = async (req, res) => {
     product.attributes = attributes || product.attributes;
     product.shipping = normalizeProductShipping(shipping, product.shipping);
     product.coverImage = coverImage || product.coverImage;
-    product.galleryImages = galleryImages || product.galleryImages;
+    if (galleryImages !== undefined) {
+      product.galleryImages = Array.isArray(galleryImages) ? galleryImages.filter(Boolean) : [];
+    }
     product.metaFields = metaFields || product.metaFields;
     product.discount = discount || product.discount;
     product.isPublished =
@@ -1003,21 +1046,6 @@ exports.addVariants = async (req, res) => {
       return res.status(404).json({ error: 'Subscription plan not found' });
     }
 
-    const productLimit = subscriptionPlan?.limits?.productListings || 0;
-    
-    // Count existing variants
-    const currentVariantCount = await ProductVariant.countDocuments({
-      businessId: business._id,
-      isDeleted: false,
-    });
-
-    // Check limit
-    if (currentVariantCount + variants.length > productLimit) {
-      return res.status(403).json({
-        error: `Variant limit reached. You can add ${productLimit - currentVariantCount} more.`,
-      });
-    }
-
     // Create new variants with unique SKUs
     const variantDocs = variants.map((variant) => {
       // Generate unique SKU for each variant
@@ -1286,7 +1314,7 @@ exports.updateVariantStock = async (req, res) => {
 exports.getProductUploadUrl = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { fileName, fileType, documentType, productId, variantIndex } = req.query;
+    const { fileName, fileType, documentType, productId, variantIndex, currentImageCount } = req.query;
 
     if (!fileName || !fileType || !documentType) {
       return res.status(400).json({
@@ -1313,6 +1341,30 @@ exports.getProductUploadUrl = async (req, res) => {
       return res.status(400).json({
         message: "Only image files are allowed (JPEG, JPG, PNG, GIF, WEBP)",
       });
+    }
+
+    if (documentType === "product-gallery") {
+      const subscription = await Subscription.findOne({
+        userId,
+        status: 'active',
+        endDate: { $gte: new Date() },
+      }).sort({ createdAt: -1 });
+
+      if (!subscription) {
+        return res.status(403).json({
+          message: 'Valid subscription not found.',
+        });
+      }
+
+      const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
+      const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
+      const currentCount = Number(currentImageCount || 0);
+
+      if (currentCount + 1 > galleryImageLimit) {
+        return res.status(403).json({
+          message: `Gallery image upload limit reached. Maximum ${galleryImageLimit} gallery images allowed for your plan.`,
+        });
+      }
     }
 
     const bucketName = process.env.AWS_S3_BUCKET;

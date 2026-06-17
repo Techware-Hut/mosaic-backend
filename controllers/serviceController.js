@@ -19,6 +19,24 @@ const s3Client = new S3Client({
   },
 });
 
+const getGalleryImageLimit = (subscriptionPlan) =>
+  subscriptionPlan?.limits?.galleryImageLimit ?? subscriptionPlan?.limits?.imageLimit ?? 0;
+
+const countGalleryImages = (images) =>
+  Array.isArray(images) ? images.filter(Boolean).length : 0;
+
+const getOwnerChildServiceCount = async (ownerId, excludeServiceId = null) => {
+  const filters = { ownerId };
+  if (excludeServiceId) {
+    filters._id = { $ne: excludeServiceId };
+  }
+
+  const services = await Service.find(filters).select('services').lean();
+  return services.reduce((sum, item) => (
+    sum + (Array.isArray(item.services) ? item.services.length : 0)
+  ), 0);
+};
+
 const parseDurationMinutes = (value) => {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
     return value;
@@ -79,7 +97,7 @@ const getMinimumChildServicePrice = (childServices = [], fallbackPrice = 0) => {
 exports.createParentService = async (req, res) => {
   const session = await Service.startSession();
   session.startTransaction();
-  
+
   try {
     const {
       title,
@@ -124,12 +142,11 @@ exports.createParentService = async (req, res) => {
       return res.status(403).json({ error: 'Valid subscription not found.' });
 
     const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    const serviceLimit = subscriptionPlan?.limits?.serviceListings || 0;
-    const existingServiceCount = await Service.countDocuments({ ownerId: userId });
+    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
 
-    if (existingServiceCount >= serviceLimit) {
-      return res.status(403).json({
-        error: `Service listing limit reached for your subscription. You can add up to ${serviceLimit} services.`,
+    if (countGalleryImages(images) > galleryImageLimit) {
+      return res.status(400).json({
+        error: `Service gallery can have maximum ${galleryImageLimit} images for your plan.`,
       });
     }
 
@@ -139,7 +156,7 @@ exports.createParentService = async (req, res) => {
       description: description || '',
       price: 0, // Will be updated when child services are added
       duration: '',
-      
+
       categoryId,
       subcategoryId,
       businessId,
@@ -148,17 +165,17 @@ exports.createParentService = async (req, res) => {
       location: location?.address || '',
       businessHours: businessHours || [],
       bookingToolLink: bookingToolLink || '',
-      
+
       // Empty arrays for child services to be added later
       services: [],
-      
+
       contact: {
         phone: '',
         email: '',
         address: location?.address || '',
         website: ''
       },
-      
+
       ownerId: userId,
       minorityType: business.minorityType,
       isPublished: false, // Keep unpublished until child services are added
@@ -183,7 +200,7 @@ exports.createParentService = async (req, res) => {
       message: 'Parent service created successfully. You can now add child services.',
       service,
     });
-    
+
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -197,7 +214,7 @@ exports.createParentService = async (req, res) => {
 exports.createService = async (req, res) => {
   const session = await Service.startSession();
   session.startTransaction();
-  
+
   try {
     const {
       categoryId,
@@ -216,8 +233,8 @@ exports.createService = async (req, res) => {
 
     // 🛡️ Step 1: Verify ownership
     const business = await Business.findOne({ _id: businessId, owner: userId });
-    // if (!business)
-    //   return res.status(403).json({ error: 'You do not own this business.' });
+    if (!business)
+      return res.status(403).json({ error: 'You do not own this business.' });
 
     // if (!business.isApproved)
     //   return res.status(400).json({ error: 'Business is not approved yet.' });
@@ -237,14 +254,7 @@ exports.createService = async (req, res) => {
 
     const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
     const serviceLimit = subscriptionPlan?.limits?.serviceListings || 0;
-
-    const existingServiceCount = await Service.countDocuments({ ownerId: userId });
-
-    if (existingServiceCount >= serviceLimit) {
-      return res.status(403).json({
-        error: `Service listing limit reached for your subscription. You can add up to ${serviceLimit} services.`,
-      });
-    }
+    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
 
     // ------------------------
     // Step 3: Determine default parent price from child services
@@ -254,6 +264,19 @@ exports.createService = async (req, res) => {
     if (invalidDurationService) {
       return res.status(400).json({
         error: 'Each child service must include a valid duration or durationMinutes value.'
+      });
+    }
+
+    const currentChildServiceCount = await getOwnerChildServiceCount(userId);
+    if (currentChildServiceCount + normalizedServices.length > serviceLimit) {
+      return res.status(403).json({
+        error: `Service listing limit reached. You can add only ${Math.max(serviceLimit - currentChildServiceCount, 0)}  services.`,
+      });
+    }
+
+    if (countGalleryImages(images) > galleryImageLimit) {
+      return res.status(400).json({
+        error: `Service gallery can have maximum ${galleryImageLimit} images for your plan.`,
       });
     }
 
@@ -267,7 +290,7 @@ exports.createService = async (req, res) => {
       description: '',
       price: defaultPrice, // <-- Set parent price as minimum of children
       duration: '',
-      
+
       categoryId,
       subcategoryId,
       businessId,
@@ -278,14 +301,14 @@ exports.createService = async (req, res) => {
       isPublished: isPublished || false,
       businessHours: businessHours || [],
       location: location?.address || '',
-      
+
       contact: {
         phone: '',
         email: '',
         address: location?.address || '',
         website: ''
       },
-      
+
       ownerId: userId,
       minorityType: business.minorityType,
       maxBookingsPerSlot: 1,
@@ -310,7 +333,7 @@ exports.createService = async (req, res) => {
       message: 'Service created successfully.',
       service,
     });
-    
+
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -318,8 +341,8 @@ exports.createService = async (req, res) => {
     // Clean up uploaded images on error
     const usedImages = [req.body.coverImage, ...(req.body.images || [])].filter(Boolean);
     for (const image of usedImages) {
-      await deleteCloudinaryFile(image).catch(() => {});
-      await PendingImage.deleteOne({ url: image }).catch(() => {});
+      await deleteCloudinaryFile(image).catch(() => { });
+      await PendingImage.deleteOne({ url: image }).catch(() => { });
     }
 
     console.error('Service creation failed:', err.message);
@@ -331,7 +354,7 @@ exports.createService = async (req, res) => {
 // exports.createService = async (req, res) => {
 //   const session = await Service.startSession();
 //   session.startTransaction();
-  
+
 //   try {
 //     const {
 //       categoryId,
@@ -387,7 +410,7 @@ exports.createService = async (req, res) => {
 //       description: '',
 //       price: 0,
 //       duration: '60 minutes',
-      
+
 //       // Your actual data
 //       categoryId,
 //       subcategoryId,
@@ -399,7 +422,7 @@ exports.createService = async (req, res) => {
 //       isPublished: isPublished || false,
 //       businessHours: businessHours || [],
 //       location: location?.address || '',
-      
+
 //       // Default contact
 //       contact: {
 //         phone: '',
@@ -407,7 +430,7 @@ exports.createService = async (req, res) => {
 //         address: location?.address || '',
 //         website: ''
 //       },
-      
+
 //       ownerId: userId,
 //       minorityType: business.minorityType,
 //       maxBookingsPerSlot: 1,
@@ -432,7 +455,7 @@ exports.createService = async (req, res) => {
 //       message: 'Service created successfully.',
 //       service,
 //     });
-    
+
 //   } catch (err) {
 //     await session.abortTransaction();
 //     session.endSession();
@@ -457,7 +480,7 @@ exports.createService = async (req, res) => {
 exports.getParentServices = async (req, res) => {
   try {
     const userId = req.user._id;
-    
+
     const parentServices = await Service.find({
       ownerId: userId,
       $or: [
@@ -481,7 +504,7 @@ exports.getChildServices = async (req, res) => {
   try {
     const { parentServiceId } = req.params;
     const userId = req.user._id;
-    
+
     const parentService = await Service.findOne({
       _id: parentServiceId,
       ownerId: userId
@@ -553,6 +576,20 @@ exports.addChildServices = async (req, res) => {
       return res.status(403).json({ error: 'You do not own this parent service/business.' });
     }
 
+    const subscription = await Subscription.findOne({
+      userId,
+      status: 'active',
+      endDate: { $gte: new Date() },
+    }).sort({ createdAt: -1 });
+
+    if (!subscription) {
+      return res.status(403).json({ error: 'Valid subscription not found.' });
+    }
+
+    const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
+    const serviceLimit = subscriptionPlan?.limits?.serviceListings || 0;
+    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
+
     // Add new child services to existing ones
     const normalizedChildServices = normalizeChildServices(childServices);
     const invalidDurationService = normalizedChildServices.find((item) => !item.durationMinutes);
@@ -562,8 +599,22 @@ exports.addChildServices = async (req, res) => {
       });
     }
 
+    const currentChildServiceCount = await getOwnerChildServiceCount(userId);
+    if (currentChildServiceCount + normalizedChildServices.length > serviceLimit) {
+      return res.status(403).json({
+        error: `Service listing limit reached. You can add only ${Math.max(serviceLimit - currentChildServiceCount, 0)} more services.`,
+      });
+    }
+
+    const nextGalleryImages = images !== undefined ? images : parentService.images;
+    if (countGalleryImages(nextGalleryImages) > galleryImageLimit) {
+      return res.status(400).json({
+        error: `Service gallery can have maximum ${galleryImageLimit} images for your plan.`,
+      });
+    }
+
     const updatedChildServices = [...parentService.services, ...normalizedChildServices];
-    
+
     // Update parent service price to minimum of all child services
     const newParentPrice = getMinimumChildServicePrice(updatedChildServices, parentService.price);
 
@@ -647,13 +698,13 @@ exports.deleteService = async (req, res) => {
 
     const usedImages = [service.coverImage, ...service.images].filter(Boolean);
     for (const image of usedImages) {
-      await deleteCloudinaryFile(image).catch(() => {});
+      await deleteCloudinaryFile(image).catch(() => { });
     }
 
     await service.deleteOne();
 
     res.status(200).json({ message: 'Service deleted successfully.' });
-    
+
   } catch (err) {
     console.error('Failed to delete service:', err.message);
     res.status(500).json({ error: 'Failed to delete service.' });
@@ -670,15 +721,29 @@ exports.updateService = async (req, res) => {
       return res.status(404).json({ message: 'Service not found' });
     }
 
+    const subscription = await Subscription.findOne({
+      userId,
+      status: 'active',
+      endDate: { $gte: new Date() },
+    }).sort({ createdAt: -1 });
+
+    if (!subscription) {
+      return res.status(403).json({ message: 'Valid subscription not found.' });
+    }
+
+    const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
+    const serviceLimit = subscriptionPlan?.limits?.serviceListings || 0;
+    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
+
     // Handle image updates
     if (req.body.coverImage && req.body.coverImage !== service.coverImage) {
-      await deleteCloudinaryFile(service.coverImage).catch(() => {});
+      await deleteCloudinaryFile(service.coverImage).catch(() => { });
     }
 
     if (Array.isArray(req.body.images) && Array.isArray(service.images)) {
       const removedImages = service.images.filter(img => !req.body.images.includes(img));
       for (const image of removedImages) {
-        await deleteCloudinaryFile(image).catch(() => {});
+        await deleteCloudinaryFile(image).catch(() => { });
       }
     }
 
@@ -701,6 +766,13 @@ exports.updateService = async (req, res) => {
             });
           }
 
+          const otherChildServiceCount = await getOwnerChildServiceCount(userId, service._id);
+          if (otherChildServiceCount + normalizedServices.length > serviceLimit) {
+            return res.status(403).json({
+              message: `Service listing limit reached. You can add only ${Math.max(serviceLimit - otherChildServiceCount, 0)} more child services.`,
+            });
+          }
+
           service.services = normalizedServices;
           service.price = getMinimumChildServicePrice(normalizedServices, service.price);
           service.duration = '';
@@ -709,6 +781,13 @@ exports.updateService = async (req, res) => {
 
         service[field] = req.body[field];
       }
+    }
+
+    const nextGalleryImages = req.body.images !== undefined ? req.body.images : service.images;
+    if (countGalleryImages(nextGalleryImages) > galleryImageLimit) {
+      return res.status(400).json({
+        message: `Service gallery can have maximum ${galleryImageLimit} images for your plan.`,
+      });
     }
 
     // Handle location as string
@@ -725,7 +804,7 @@ exports.updateService = async (req, res) => {
       message: 'Service updated successfully',
       service
     });
-    
+
   } catch (error) {
     console.error('Service update error:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -820,22 +899,22 @@ exports.getBusinessServiceById = async (req, res) => {
       duration: service.duration || '',
       categoryId: service.categoryId
         ? {
-            _id: service.categoryId._id,
-            name: service.categoryId.name || ''
-          }
+          _id: service.categoryId._id,
+          name: service.categoryId.name || ''
+        }
         : null,
       subcategoryId: service.subcategoryId
         ? {
-            _id: service.subcategoryId._id,
-            name: service.subcategoryId.name || ''
-          }
+          _id: service.subcategoryId._id,
+          name: service.subcategoryId.name || ''
+        }
         : null,
       businessId: service.businessId
         ? {
-            _id: service.businessId._id,
-            name: service.businessId.businessName || service.businessId.name || '',
-            owner: service.businessId.owner || null
-          }
+          _id: service.businessId._id,
+          name: service.businessId.businessName || service.businessId.name || '',
+          owner: service.businessId.owner || null
+        }
         : null,
       coverImage: service.coverImage || '',
       images: Array.isArray(service.images) ? service.images : [],
@@ -876,7 +955,7 @@ exports.getBusinessServiceById = async (req, res) => {
 exports.getServiceUploadUrl = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { fileName, fileType, documentType, serviceId } = req.query;
+    const { fileName, fileType, documentType, serviceId, currentImageCount } = req.query;
 
     if (!fileName || !fileType || !documentType) {
       return res.status(400).json({
@@ -902,6 +981,30 @@ exports.getServiceUploadUrl = async (req, res) => {
       return res.status(400).json({
         message: "Only image files are allowed (JPEG, JPG, PNG, GIF, WEBP)",
       });
+    }
+
+    if (documentType === "service-gallery") {
+      const subscription = await Subscription.findOne({
+        userId,
+        status: 'active',
+        endDate: { $gte: new Date() },
+      }).sort({ createdAt: -1 });
+
+      if (!subscription) {
+        return res.status(403).json({
+          message: 'Valid subscription not found.',
+        });
+      }
+
+      const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
+      const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
+      const currentCount = Number(currentImageCount || 0);
+
+      if (currentCount + 1 > galleryImageLimit) {
+        return res.status(403).json({
+          message: `Gallery image upload limit reached. Maximum ${galleryImageLimit} gallery images allowed for your plan.`,
+        });
+      }
     }
 
     const bucketName = process.env.AWS_S3_BUCKET;
