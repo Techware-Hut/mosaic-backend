@@ -13,12 +13,11 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | --- | --- |
 | **Product** | Mosaic Biz Hub backend — minority-owned business marketplace REST API |
 | **Production API** | `https://api.mosaicbizhub.com` |
-| **Production deploy SHA** | `6cdf587` — issue #30 vendor onboarding + email ([PR #39](https://github.com/Techware-Hut/mosaic-backend/pull/39)) |
-| **EB version label** | `mosaic-6cdf587f0f3178a13634686bbfc12db8daee4ae4` |
-| **`main` HEAD** | `268ee50` — post-#30 verification docs; **app runtime matches EB** (no newer app code on `main` than production) |
-| **Open PR** | [#40](https://github.com/Techware-Hut/mosaic-backend/pull/40) — issue #31 vendor self-service APIs (**not merged, not deployed**) |
-| **Automated tests (production lineage)** | **107/107** at `6cdf587` / `main` app code |
-| **Automated tests (PR #40 branch)** | **123/123** — includes 16 new vendor listing/order/stock tests |
+| **Production deploy SHA** | `2134231` — issue #31 vendor self-service + program docs ([PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40)) |
+| **EB version label** | `mosaic-213423163964db9f32505ecb500d034b40fc583e` |
+| **`main` HEAD** | `2134231` — **matches production EB** |
+| **Open PR** | None for #31 — merged and deployed |
+| **Automated tests** | **123/123** on `main` / production |
 | **Release model** | Controlled issue-by-issue merge → manual GHA EB deploy → tiered prod smoke → evidence in [deploy-verification.md](deploy-verification.md) |
 
 ---
@@ -32,7 +31,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | [#28](https://github.com/Techware-Hut/mosaic-backend/issues/28) | Marketplace data contract | **Merged** (PR #37) | **Live** | [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md) |
 | [#29](https://github.com/Techware-Hut/mosaic-backend/issues/29) | Search/filter readiness | **Merged** (PR #38) | **Live** (`9f66c07`+) | [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md) |
 | [#30](https://github.com/Techware-Hut/mosaic-backend/issues/30) | Vendor onboarding + email | **Merged** (PR #39) | **Live** (`6cdf587`) | [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) |
-| [#31](https://github.com/Techware-Hut/mosaic-backend/issues/31) | Vendor self-service APIs | **In PR** [#40](https://github.com/Techware-Hut/mosaic-backend/pull/40) OPEN | **Not deployed** | [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) |
+| [#31](https://github.com/Techware-Hut/mosaic-backend/issues/31) | Vendor self-service APIs | **Merged** (PR #40) | **Live** (`2134231`) | [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) |
 | [#32](https://github.com/Techware-Hut/mosaic-backend/issues/32) | Stripe Connect runtime | **Not started** | N/A | [MVP_BACKEND_API_AUDIT.md](MVP_BACKEND_API_AUDIT.md) §10 |
 | [#33](https://github.com/Techware-Hut/mosaic-backend/issues/33) | Email notifications | **Not started** | N/A | Audit §10 |
 | [#34](https://github.com/Techware-Hut/mosaic-backend/issues/34) | Admin APIs | **Not started** | N/A | Audit §10 |
@@ -46,10 +45,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 
 ### Immediate gate
 
-1. Human review and merge of [PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40) (issue #31)
-2. Manual GHA deploy from `main` per [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md)
-3. Production smoke per [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md)
-4. Update this file and [deploy-verification.md](deploy-verification.md) with deploy SHA and smoke results
+Issue #31 complete (merged, deployed, partial smoke). Tier-limit and vendor-order prod proof **PENDING** `SMOKE_TEST_*` accounts.
 
 ### Next scheduled work
 

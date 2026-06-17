@@ -1,8 +1,8 @@
 # MVP Backend Vendor Self-Service APIs (Issue #31)
 
-> **Status:** [PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40) **OPEN** — not merged, **not on production**. Program snapshot: [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md).
+> **Status:** **Deployed to production** (2026-06-17) via [PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40) — EB `2134231`. Program snapshot: [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md).
 
-**Branch:** `sprint/backend-vendor-profile-listings-orders-stock`
+**Merged:** PR #40 → `main`
 
 **Related:** [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md), [tier-listing-limit-implementation.md](tier-listing-limit-implementation.md), [business-sync.md](business-sync.md)
 
@@ -183,4 +183,6 @@ Use dedicated test vendor only. Do not mutate real production applications.
 
 ## Production deployment
 
-**Not deployed.** Branch/PR only; no merge, no EB deploy in this issue pass.
+**Deployed** 2026-06-17 — merge `2134231`, GHA [27723981617](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27723981617), EB label `mosaic-213423163964db9f32505ecb500d034b40fc583e`.
+
+Tier-limit / stock / vendor-order authenticated smoke **PENDING** (no disposable smoke vendor). Auth canaries and search regression **PASS** — see [deploy-verification.md](deploy-verification.md).

@@ -271,45 +271,42 @@ Full matrix: [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ON
 
 ### Conclusion
 
-**Deploy Go** for issue #30 validation guards and auth boundaries on `6cdf587`. Authenticated submit/finalize email proof **PENDING** until dedicated `SMOKE_TEST_*` accounts exist. Issue #31 implementation is complete on [PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40) — merge, deploy, and smoke pending; see section below and [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md).
+**Deploy Go** for issue #30 validation guards and auth boundaries on `6cdf587`. Authenticated submit/finalize email proof **PENDING** until dedicated `SMOKE_TEST_*` accounts exist. Issue #31 merged and deployed — see section below.
 
 ---
 
-## Verification — 2026-06-17 (PR #40 / issue #31 — pending merge)
+## Verification — 2026-06-17 (PR #40 / issue #31 vendor self-service)
 
-Pre-merge record for [PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40) (vendor self-service APIs, issue #31). **NOT DEPLOYED.**
+Post-merge controlled deploy and production smoke after [PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40) (vendor self-service APIs, issue #31).
 
-### Pre-merge record
-
-| Field | Value |
-|-------|-------|
-| PR | [#40](https://github.com/Techware-Hut/mosaic-backend/pull/40) — **OPEN** |
-| Branch | `sprint/backend-vendor-profile-listings-orders-stock` |
-| Pre-merge tests | **123/123** (`npm test`) |
-| Production status | **Not deployed** — production remains at `6cdf587` (#30) |
-
-### Deploy record (fill after merge)
+### Deploy record
 
 | Field | Value |
 |-------|-------|
-| Merge commit | _TBD after merge_ |
-| GHA deploy run | _TBD_ |
-| EB version label | _TBD_ |
+| Merge commit | `213423163964db9f32505ecb500d034b40fc583e` |
+| GHA deploy run | [27723981617](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27723981617) — **success** |
+| EB version label | `mosaic-213423163964db9f32505ecb500d034b40fc583e` |
 | EB application / environment | `mosaic-biz-hub-backend` / `mosaic-backend-env` |
 | API base | `https://api.mosaicbizhub.com` |
 
-### Smoke summary (fill after deploy)
+Workflow post-deploy probes in GHA: health **200**, unauth auth/check **401**.
 
-Full matrix: [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) § Post-merge manual smoke.
+Pre-merge tests: **123/123** (`npm test`).
+
+### Smoke summary
+
+Full matrix: [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) § Manual smoke after merge/deploy.
 
 | Area | Result |
 |------|--------|
-| Product create tier limit | _TBD_ |
-| Variant add tier limit | _TBD_ |
-| Stock PATCH validation (negative/unknown op) | _TBD_ |
-| Vendor order list (vendorId from token) | _TBD_ |
-| #30 regression canary (onboarding auth guards) | _TBD_ |
+| Health + auth probe (GHA) | **PASS** — 200 / 401 |
+| Onboarding unauth submit | **PASS** — 401 (#30 regression) |
+| Search/filter geo canary | **PASS** — `filters.unsupported` populated |
+| Product create tier limit | **PENDING** — no disposable smoke vendor |
+| Variant add tier limit | **PENDING** — no disposable smoke vendor |
+| Stock PATCH validation (negative/unknown op) | **PENDING** — requires vendor token + variant ID |
+| Vendor order list (vendorId from token) | **PENDING** — requires vendor token |
 
 ### Conclusion
 
-**Pending merge and deploy.** After human merge of PR #40 → manual GHA deploy → run smoke per vendor self-service doc → update this section and [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md). **Next scheduled issue after #31 deploy:** #32 Stripe Connect runtime.
+**Deploy Go** for issue #31 vendor self-service APIs on `2134231`. Auth boundaries and search canary **PASS**. Tier-limit, stock, and vendor-order flows **PENDING** until dedicated `SMOKE_TEST_*` accounts exist. **Next scheduled issue:** #32 Stripe Connect runtime — do not start until scheduled. Program snapshot: [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md).

@@ -28,9 +28,9 @@ Before starting or reviewing issue work, read [MVP_BACKEND_PROGRAM_STATUS.md](MV
 
 | State (2026-06-17) | Detail |
 | --- | --- |
-| Production EB | `6cdf587` — issue #30 live |
-| Open PR | [#40](https://github.com/Techware-Hut/mosaic-backend/pull/40) — issue #31 (**not deployed**) |
-| Test suite | **107/107** on production lineage; **123/123** on PR #40 branch |
+| Production EB | `2134231` — issues #30 + #31 live |
+| Open PR | None — #31 merged and deployed |
+| Test suite | **123/123** on `main` / production |
 | Next scheduled | **#32** Stripe Connect runtime — do not start until scheduled |
 
 Issue-specific docs: [docs/README.md](README.md) § MVP backend sprint.
