@@ -270,4 +270,6 @@ node scripts/verify-auth-check-smoke.js
 | `tests/vendor/vendor-onboarding-business-sync.test.js` | 5 | Business sync |
 | `tests/vendor/vendor-profile-field-allowlist.test.js` | 6 | Field allowlists |
 | `tests/stripe/stripe-webhook-routing-signature.test.js` | 9 | Webhook routing + signatures |
-| **Total** | **57** | |
+| `tests/marketplace/public-listing-dto.test.js` | 18 | Marketplace DTO normalization |
+| `tests/marketplace/featured-products-response.test.js` | 2 | Featured products wiring |
+| **Total** | **77** | |
