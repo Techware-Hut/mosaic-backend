@@ -13,6 +13,12 @@ const s3Client = new S3Client({
   },
 });
 
+const getGalleryImageLimit = (subscriptionPlan) =>
+  subscriptionPlan?.limits?.galleryImageLimit ?? subscriptionPlan?.limits?.imageLimit ?? 0;
+
+const countGalleryImages = (images) =>
+  Array.isArray(images) ? images.filter(Boolean).length : 0;
+
 const normalizeMetaFields = (metaFields) => {
   if (!Array.isArray(metaFields)) return [];
   return metaFields
@@ -69,11 +75,18 @@ exports.createFood = async (req, res) => {
 
     const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
     const foodLimit = subscriptionPlan?.limits?.foodListings || 0;
+    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
     const existingFoodCount = await Food.countDocuments({ ownerId: userId });
 
     if (existingFoodCount >= foodLimit) {
       return res.status(403).json({
         error: `Food listing limit reached for your subscription. You can add up to ${foodLimit} foods.`,
+      });
+    }
+
+    if (countGalleryImages(images) > galleryImageLimit) {
+      return res.status(400).json({
+        error: `Food gallery can have maximum ${galleryImageLimit} images for your plan.`,
       });
     }
 
@@ -245,6 +258,26 @@ exports.updateFood = async (req, res) => {
       return res.status(404).json({ message: 'Food not found.' });
     }
 
+    const subscription = await Subscription.findOne({
+      userId,
+      status: 'active',
+      endDate: { $gte: new Date() },
+    }).sort({ createdAt: -1 });
+
+    if (!subscription) {
+      return res.status(403).json({ message: 'Valid subscription not found.' });
+    }
+
+    const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
+    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
+    const nextGalleryImages = req.body.images !== undefined ? req.body.images : food.images;
+
+    if (countGalleryImages(nextGalleryImages) > galleryImageLimit) {
+      return res.status(400).json({
+        message: `Food gallery can have maximum ${galleryImageLimit} images for your plan.`,
+      });
+    }
+
     const updatableFields = [
       'title',
       'description',
@@ -314,7 +347,7 @@ exports.deleteFood = async (req, res) => {
 exports.getFoodUploadUrl = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { fileName, fileType, documentType, foodId } = req.query;
+    const { fileName, fileType, documentType, foodId, currentImageCount } = req.query;
 
     if (!fileName || !fileType || !documentType) {
       return res.status(400).json({
@@ -334,6 +367,30 @@ exports.getFoodUploadUrl = async (req, res) => {
       return res.status(400).json({
         message: 'Only image files are allowed (JPEG, JPG, PNG, GIF, WEBP)',
       });
+    }
+
+    if (documentType === 'food-gallery') {
+      const subscription = await Subscription.findOne({
+        userId,
+        status: 'active',
+        endDate: { $gte: new Date() },
+      }).sort({ createdAt: -1 });
+
+      if (!subscription) {
+        return res.status(403).json({
+          message: 'Valid subscription not found.',
+        });
+      }
+
+      const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
+      const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
+      const currentCount = Number(currentImageCount || 0);
+
+      if (currentCount + 1 > galleryImageLimit) {
+        return res.status(403).json({
+          message: `Gallery image upload limit reached. Maximum ${galleryImageLimit} gallery images allowed for your plan.`,
+        });
+      }
     }
 
     const bucketName = process.env.AWS_S3_BUCKET;
