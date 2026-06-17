@@ -310,3 +310,34 @@ Full matrix: [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_S
 ### Conclusion
 
 **Deploy Go** for issue #31 vendor self-service APIs on `2134231`. Auth boundaries and search canary **PASS**. Tier-limit, stock, and vendor-order flows **PENDING** until dedicated `SMOKE_TEST_*` accounts exist. **Next scheduled issue:** #32 Stripe Connect runtime — do not start until scheduled. Program snapshot: [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md).
+
+---
+
+## Issue #32 — Stripe Connect runtime verification (audit branch)
+
+**Branch:** `sprint/backend-stripe-connect-runtime-verification`  
+**Scope:** Audit + docs + mocked tests only — **no deploy**, **no live charges**
+
+### Audit record
+
+| Field | Value |
+|-------|-------|
+| Base commit | `76713f2` (docs-only `main` after #31 deploy) |
+| EB production runtime | `2134231` (unchanged) |
+| Connect pattern | Express + destination charges + `application_fee_amount` |
+| Automated tests | **138/138** pass (`123` → `138`, +15 Connect/webhook handler tests) |
+| Evidence doc | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) |
+
+### Smoke summary
+
+| Area | Result |
+|------|--------|
+| Static code audit (Connect checkout, webhooks, guards) | **PASS** |
+| Mocked unit tests (initiateOrder, webhook handlers) | **PASS** — 138/138 |
+| Tier A prod smoke (unsigned webhook, health) | **Not run** — optional read-only |
+| Tier B test-mode E2E checkout + split payout | **BLOCKED** — requires `sk_test_*` env + smoke accounts |
+| Tier C prod live charge | **BLOCKED** — requires written approval + `SMOKE_TEST_*` accounts |
+
+### Conclusion
+
+**Audit Go** for issue #32 on branch `sprint/backend-stripe-connect-runtime-verification`. Connect destination-charge implementation verified in code and tests. Production runtime checkout proof **PENDING** until `SMOKE_TEST_*` accounts exist and Tier B/C gates are cleared. No deployment in this issue.

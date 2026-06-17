@@ -17,7 +17,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | **EB version label** | `mosaic-213423163964db9f32505ecb500d034b40fc583e` |
 | **`main` HEAD** | `6aa71ee` — post-#31 verification docs; **app runtime on EB matches `2134231`** |
 | **Open PR** | None for #31 — merged and deployed |
-| **Automated tests** | **123/123** on `main` / production |
+| **Automated tests** | **138/138** on audit branch (`123` baseline on prod runtime `2134231`) |
 | **Release model** | Controlled issue-by-issue merge → manual GHA EB deploy → tiered prod smoke → evidence in [deploy-verification.md](deploy-verification.md) |
 
 ---
@@ -32,7 +32,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | [#29](https://github.com/Techware-Hut/mosaic-backend/issues/29) | Search/filter readiness | **Merged** (PR #38) | **Live** (`9f66c07`+) | [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md) |
 | [#30](https://github.com/Techware-Hut/mosaic-backend/issues/30) | Vendor onboarding + email | **Merged** (PR #39) | **Live** (`6cdf587`) | [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) |
 | [#31](https://github.com/Techware-Hut/mosaic-backend/issues/31) | Vendor self-service APIs | **Merged** (PR #40) | **Live** (`2134231`) | [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) |
-| [#32](https://github.com/Techware-Hut/mosaic-backend/issues/32) | Stripe Connect runtime | **Not started** | N/A | [MVP_BACKEND_API_AUDIT.md](MVP_BACKEND_API_AUDIT.md) §10 |
+| [#32](https://github.com/Techware-Hut/mosaic-backend/issues/32) | Stripe Connect runtime | **In progress** (audit branch) | N/A (not deployed) | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) |
 | [#33](https://github.com/Techware-Hut/mosaic-backend/issues/33) | Email notifications | **Not started** | N/A | Audit §10 |
 | [#34](https://github.com/Techware-Hut/mosaic-backend/issues/34) | Admin APIs | **Not started** | N/A | Audit §10 |
 | [#35](https://github.com/Techware-Hut/mosaic-backend/issues/35) | Reviews | **Not started** | N/A | Audit §10 |
@@ -49,7 +49,7 @@ Issue #31 complete (merged, deployed, partial smoke). Tier-limit and vendor-orde
 
 ### Next scheduled work
 
-- **#32 Stripe Connect runtime** — prod smoke for checkout + webhooks; remediate unauthenticated `/stripe/*` routes. **Do not start until scheduled.**
+- **#32 Stripe Connect runtime** — audit complete on branch `sprint/backend-stripe-connect-runtime-verification` (docs + 15 tests); prod checkout smoke **PENDING** smoke accounts + live-charge gate. See [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md).
 
 ### Parallel / later
 

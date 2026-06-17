@@ -2,7 +2,7 @@
 
 Maps backend features to automated tests (`npm test`), manual smoke checks, and proof-pack evidence.
 
-**Runner:** `npm test` → `node --test tests/**/*.test.js` (123 tests, Node built-in runner)
+**Runner:** `npm test` → `node --test tests/**/*.test.js` (138 tests, Node built-in runner)
 
 **Test style:** Unit/integration-style tests with mocked Mongoose models and module hooks. They prove **handler logic and wiring** — not full end-to-end flows against live MongoDB, Stripe, or AWS in CI.
 
@@ -14,7 +14,7 @@ Maps backend features to automated tests (`npm test`), manual smoke checks, and 
 
 | Layer | Count | What it validates |
 |-------|-------|-------------------|
-| Automated (`tests/`) | **123** | DTOs, middleware, controller logic, webhook wiring, search filters, vendor listing/order/stock (mocked) |
+| Automated (`tests/`) | **138** | DTOs, middleware, controller logic, webhook wiring, search filters, vendor listing/order/stock, **Stripe Connect checkout guards** (mocked) |
 | Manual smoke script | 1 | Live API + DB auth/check per role |
 | Production smoke tiers | P0–P6 | Post-deploy on `https://api.mosaicbizhub.com` |
 | Proof pack | Per release | Redacted evidence matrix |
@@ -116,6 +116,25 @@ Maps backend features to automated tests (`npm test`), manual smoke checks, and 
 | Signed Dashboard delivery | — | *(no automated test)* | Stripe → EB HTTP 200 end-to-end | Yes — P4.1 |
 
 See [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) for route ownership and curl smoke commands.
+
+---
+
+## Stripe Connect checkout tests (#32)
+
+| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
+| --- | --- | --- | --- | --- |
+| Missing Connect account | [`tests/stripe/order-initiate-connect.test.js`](../tests/stripe/order-initiate-connect.test.js) | 400 when `stripeConnectAccountId` absent; no PI create | Live Stripe account state on prod | Yes — P5.2 |
+| Incomplete Connect onboarding | same | 400 when `charges_enabled` false or transfers inactive | Dashboard onboarding UX | Yes — P5.1 |
+| Connect PI params | same | `transfer_data.destination`, `application_fee_amount`, metadata, idempotency key | Actual split payout on Stripe | Yes — P5.3 Dashboard |
+| Platform fee env | same | `PLATFORM_FEE_CENTS` maps to `application_fee_amount` | EB env value in prod | Yes — infra review |
+| Cent rounding | same | `Math.round(total * 100)` for PI amount | All tax/shipping edge cases | Partial |
+| Price / vendor guards | same | Price mismatch 400; single-vendor only | Live cart E2E | Yes — P5.2 |
+| Safe error responses | same | No `sk_`/`whsec_` in JSON; generic 500 on Stripe API errors | All error paths | Partial |
+| Order status webhook | [`tests/stripe/order-webhook-handlers.test.js`](../tests/stripe/order-webhook-handlers.test.js) | `payment_intent.succeeded` → paid/ordered; failed → cancelled | Signed Dashboard delivery | Yes — P4.4, P5.3 |
+| Post-payment webhook | same | Stores charge/transfer/fee IDs; duplicate succeed idempotent | Email dedup on retry | Yes — P5.3 |
+| Full checkout E2E | — | *(no automated test)* | Client Stripe.js confirm + live webhooks | Yes — P5.2–P5.5 (test mode) |
+
+See [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md).
 
 ---
 
@@ -280,7 +299,7 @@ node scripts/verify-auth-check-smoke.js
 
 | Evidence type | Source | Automated equivalent |
 | --- | --- | --- |
-| `npm test` 123/123 pass | Pre-merge local/CI | Yes — full suite (see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for prod vs branch) |
+| `npm test` 138/138 pass | Pre-merge local/CI | Yes — full suite (see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for prod vs branch) |
 | Auth smoke script output | `scripts/verify-auth-check-smoke.js` | Partial — live auth/check only |
 | Smoke matrix P0–P6 | [production-smoke-checklist.md](production-smoke-checklist.md) | No — human execution |
 | Webhook unsigned 400 | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) curl | Partial — 9 tests cover handler logic |
@@ -313,7 +332,9 @@ node scripts/verify-auth-check-smoke.js
 | `tests/vendor/vendor-variant-stock.test.js` | 5 | Variant stock PATCH |
 | `tests/vendor/vendor-orders.test.js` | 4 | Vendor order filter + accept guards |
 | `tests/stripe/stripe-webhook-routing-signature.test.js` | 9 | Webhook routing + signatures |
+| `tests/stripe/order-initiate-connect.test.js` | 10 | Connect checkout guards + PI params |
+| `tests/stripe/order-webhook-handlers.test.js` | 5 | Order payment webhook handlers |
 | `tests/marketplace/public-listing-dto.test.js` | 18 | Marketplace DTO normalization |
 | `tests/marketplace/featured-products-response.test.js` | 2 | Featured products wiring |
 | `tests/marketplace/public-search-filters.test.js` | 15 | Search/filter helpers + handler |
-| **Total** | **123** | |
+| **Total** | **138** | |
