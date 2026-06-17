@@ -7,6 +7,7 @@ const {
   normalizePrice,
   normalizeImages,
   normalizeListingStatus,
+  normalizeLocation,
   toPublicListingCard,
   toPublicListingDetail,
   toPublicBusinessCard,
@@ -187,4 +188,63 @@ test('normalizeListingStatus marks unpublished and out-of-stock as unavailable',
   assert.equal(normalizeListingStatus({ isPublished: false }), 'unavailable');
   assert.equal(normalizeListingStatus({ stockQuantity: 0 }), 'unavailable');
   assert.equal(normalizeListingStatus({ isPublished: true }), 'available');
+});
+
+test('displayPrice mirrors priceLabel on listing cards', () => {
+  const withPrice = toPublicListingCard(
+    { _id: '507f1f77bcf86cd799439011', title: 'Priced', price: 12.5 },
+    { listingType: 'product' }
+  );
+  assert.equal(withPrice.priceLabel, '$12.50');
+  assert.equal(withPrice.displayPrice, '$12.50');
+
+  const noPrice = toPublicListingCard(
+    { _id: '507f1f77bcf86cd799439011', title: 'Free quote' },
+    { listingType: 'service' }
+  );
+  assert.equal(noPrice.displayPrice, 'Contact for price');
+});
+
+test('vendorLogo comes from populated businessId without inventing values', () => {
+  const card = toPublicListingCard(
+    {
+      _id: '507f1f77bcf86cd799439011',
+      title: 'Widget',
+      businessId: {
+        _id: '507f1f77bcf86cd799439012',
+        businessName: 'Acme Co',
+        logo: 'https://cdn.example.com/logo.jpg',
+      },
+    },
+    { listingType: 'product' }
+  );
+  assert.equal(card.vendorLogo, 'https://cdn.example.com/logo.jpg');
+  assert.equal(card.business?.logo, 'https://cdn.example.com/logo.jpg');
+});
+
+test('normalizeLocation extracts city and state from address when present', () => {
+  const result = normalizeLocation(
+    {
+      location: { city: 'Austin', state: 'TX', country: 'US' },
+    },
+    null
+  );
+  assert.equal(result.city, 'Austin');
+  assert.equal(result.state, 'TX');
+  assert.deepEqual(result.location, { city: 'Austin', state: 'TX', country: 'US' });
+});
+
+test('normalizeLocation returns null fields when no source data exists', () => {
+  const result = normalizeLocation({}, null);
+  assert.equal(result.location, null);
+  assert.equal(result.city, null);
+  assert.equal(result.state, null);
+
+  const card = toPublicListingCard(
+    { _id: '507f1f77bcf86cd799439011', title: 'No location' },
+    { listingType: 'product' }
+  );
+  assert.equal(card.location, null);
+  assert.equal(card.city, null);
+  assert.equal(card.state, null);
 });
