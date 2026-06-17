@@ -11,6 +11,14 @@ const {
   buildTaxAwareAmounts,
 } = require('../utils/vendorTax');
 
+const getVisibleBusinessIds = async () => {
+  const businesses = await Business.find({
+    isActive: true,
+  }).select('_id').lean();
+
+  return businesses.map((business) => business._id.toString());
+};
+
 exports.getAllServices = async (req, res) => {
   try {
     const {
@@ -54,7 +62,19 @@ exports.getAllServices = async (req, res) => {
     if (minorityType) filters.minorityType = minorityType;
     if (city) filters['contact.address'] = { $regex: city, $options: 'i' };
 
-    if (businessId) filters.businessId = businessId;
+    const visibleBusinessIds = await getVisibleBusinessIds();
+    if (!visibleBusinessIds.length) {
+      return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+    }
+
+    if (businessId) {
+      if (!visibleBusinessIds.includes(String(businessId))) {
+        return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+      }
+      filters.businessId = businessId;
+    } else {
+      filters.businessId = { $in: visibleBusinessIds };
+    }
 
     // Category filtering - accept both slug and ID
     if (categoryId) {
@@ -102,6 +122,7 @@ exports.getAllServices = async (req, res) => {
         .map((value) => badgeValueMap[value] || value);
 
       const badgeBusinesses = await Business.find({
+        isActive: true,
         badge: { $in: requestedBadges }
       }).select('_id').lean();
 
@@ -154,7 +175,10 @@ exports.getAllServices = async (req, res) => {
         .filter(Boolean)
     )];
 
-    const serviceBusinesses = await Business.find({ _id: { $in: serviceBusinessIds } })
+    const serviceBusinesses = await Business.find({
+      _id: { $in: serviceBusinessIds },
+      isActive: true,
+    })
       .select('_id businessName description logo email phone address socialLinks badge')
       .lean();
 
@@ -277,6 +301,18 @@ exports.getServiceById = async (req, res) => {
       });
 
     if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: 'Service not found',
+      });
+    }
+
+    const visibleBusiness = await Business.findOne({
+      _id: service.businessId?._id,
+      isActive: true,
+    }).select('_id').lean();
+
+    if (!visibleBusiness) {
       return res.status(404).json({
         success: false,
         message: 'Service not found',
@@ -554,6 +590,18 @@ exports.getFoodById = async (req, res) => {
       });
     }
 
+    const visibleBusiness = await Business.findOne({
+      _id: food.businessId?._id,
+      isActive: true,
+    }).select('_id').lean();
+
+    if (!visibleBusiness) {
+      return res.status(404).json({
+        success: false,
+        message: 'Food item not found',
+      });
+    }
+
     const vendorInfo = await VendorOnboardingStage1.findOne({
       businessId: food.businessId?._id,
     })
@@ -819,7 +867,6 @@ const resolveBusinessIdsByKeyword = async (keyword) => {
 
   const [businessMatches, vendorMatches] = await Promise.all([
     Business.find({
-      isApproved: true,
       isActive: true,
       $or: [
         { businessName: keywordRegex },
@@ -872,7 +919,6 @@ const resolveBusinessIdsForPublicSearch = async ({ location, minorityType }) => 
   if (locationRegex) {
     const [businessLocationMatches, vendorLocationMatches] = await Promise.all([
       Business.find({
-        isApproved: true,
         isActive: true,
         $or: [
           { businessName: locationRegex },
@@ -905,7 +951,6 @@ const resolveBusinessIdsForPublicSearch = async ({ location, minorityType }) => 
   if (minorityType) {
     const [businessMinorityMatches, vendorMinorityMatches] = await Promise.all([
       Business.find({
-        isApproved: true,
         isActive: true,
         ...(minorityTypeIds.length ? { minorityType: { $in: minorityTypeIds } } : { _id: null }),
       }).select('_id').lean(),
@@ -978,7 +1023,19 @@ exports.getAllProducts = async (req, res) => {
     if (city) filters['address.city'] = { $regex: city, $options: 'i' };
     if (state) filters['address.state'] = { $regex: state, $options: 'i' };
     if (country) filters['address.country'] = { $regex: country, $options: 'i' };
-    if (businessId) filters.businessId = businessId;
+
+    const visibleBusinessIds = await getVisibleBusinessIds();
+    if (!visibleBusinessIds.length) {
+      return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+    }
+    if (businessId) {
+      if (!visibleBusinessIds.includes(String(businessId))) {
+        return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+      }
+      filters.businessId = businessId;
+    } else {
+      filters.businessId = { $in: visibleBusinessIds };
+    }
 
     // Category filtering - accept both slug and ID
     if (categoryId) {
@@ -1035,6 +1092,7 @@ if (price) {
         .map((value) => badgeValueMap[value] || value);
 
       const badgeBusinesses = await Business.find({
+        isActive: true,
         badge: { $in: requestedBadges }
       }).select('_id').lean();
 
@@ -1085,7 +1143,10 @@ if (price) {
         .filter(Boolean)
     )];
 
-    const businesses = await Business.find({ _id: { $in: businessIds } })
+    const businesses = await Business.find({
+      _id: { $in: businessIds },
+      isActive: true,
+    })
       .select('_id badge')
       .lean();
 
@@ -1175,7 +1236,19 @@ exports.getProductsByFilters = async (req, res) => {
     if (city) filters['address.city'] = { $regex: city, $options: 'i' };
     if (state) filters['address.state'] = { $regex: state, $options: 'i' };
     if (country) filters['address.country'] = { $regex: country, $options: 'i' };
-    if (businessId) filters.businessId = businessId;
+
+    const visibleBusinessIds = await getVisibleBusinessIds();
+    if (!visibleBusinessIds.length) {
+      return res.json({ success: true, total: 0, data: [] });
+    }
+    if (businessId) {
+      if (!visibleBusinessIds.includes(String(businessId))) {
+        return res.json({ success: true, total: 0, data: [] });
+      }
+      filters.businessId = businessId;
+    } else {
+      filters.businessId = { $in: visibleBusinessIds };
+    }
     if (offers === 'true') filters.features = { $in: ['Offers Available'] };
     if (outOfStock === 'true') filters.stockQuantity = { $lte: 0 };
 
@@ -1277,6 +1350,18 @@ exports.getProductById = async (req, res) => {
       .lean();
 
     if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+
+    const visibleBusiness = await Business.findOne({
+      _id: product.businessId?._id,
+      isActive: true,
+    }).select('_id').lean();
+
+    if (!visibleBusiness) {
       return res.status(404).json({
         success: false,
         message: "Product not found"
@@ -1439,7 +1524,8 @@ exports.getVendorProfile = async (req, res) => {
     const { businessId } = req.params;
 
     const business = await Business.findOne({
-      _id: businessId
+      _id: businessId,
+      isActive: true,
     })
     .select('businessName description logo coverImage email phone address socialLinks website listingType badge metrics businessHours')
     .lean();
@@ -1478,6 +1564,21 @@ exports.getProductsByBusinessId = async (req, res) => {
   try {
     const { businessId } = req.params;
     const { page = 1, limit = 10, sort } = req.query;
+
+    const visibleBusiness = await Business.findOne({
+      _id: businessId,
+      isActive: true,
+    }).select('_id').lean();
+
+    if (!visibleBusiness) {
+      return res.json({
+        success: true,
+        total: 0,
+        page: parseInt(page),
+        totalPages: 0,
+        data: [],
+      });
+    }
 
     const filters = { 
       businessId, 
@@ -1721,3 +1822,4 @@ exports.searchPublicListings = async (req, res) => {
     });
   }
 };
+

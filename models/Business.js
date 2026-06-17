@@ -143,13 +143,24 @@ const businessSchema = new mongoose.Schema(
     // ===== STATUS FIELDS =====
     isApproved: {
       type: Boolean,
-      default: false,
+      default: true,
     },
     isActive: {
       type: Boolean,
       default: true,
     },
     approvalDate: Date,
+    adminStatusRemark: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    adminStatusUpdatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    adminStatusUpdatedAt: Date,
+    deactivatedAt: Date,
 
     // ===== VERIFICATION SCORE & BADGE =====
     points: {

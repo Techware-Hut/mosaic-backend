@@ -30,7 +30,7 @@ async function syncBusinessFromOnboarding({
     business = new Business({
       owner: userId,
       ...businessData,
-      isApproved: false,
+      isApproved: true,
       isActive: true,
       usage: {
         totalProducts: 0,

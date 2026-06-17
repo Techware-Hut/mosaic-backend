@@ -169,6 +169,7 @@ app.use('/admin/faqs', adminFaqRoutes);
 app.use('/api/admin/testimonials', testimonialRoutes);
 app.use('/admin/api/blogs', blogRoutes);
 app.use('/admin/api/business', adminBusinessRoutes);
+app.use('/api/admin/business', adminBusinessRoutes);
 app.use('/admin/api/products', adminProductRoutes);
 app.use('/api/business-profile', businessProfileRoutes);
 app.use('/api/admin/category/product', productCategoryRoutes);

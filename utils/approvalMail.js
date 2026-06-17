@@ -2,7 +2,7 @@
 const nodemailer = require("nodemailer");
 
 const APP_URL = process.env.FRONTEND_URL || "https://app.mosaicbizhub.com";
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || process.env.MAIL_USER;
+const SUPPORT_EMAIL ="support@mosaicbizhub.com";
 
 // If you already have a transporter elsewhere, delete this block and import that one.
 const transporter = nodemailer.createTransport({
@@ -44,7 +44,6 @@ function baseLayout({ preheader, heading, introHtml, bodyHtml, ctaHref, ctaText 
           <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:640px;background:#ffffff;border-radius:12px;overflow:hidden;">
             <tr>
               <td align="center" style="padding:24px 24px 8px;">
-                <img src="cid:platformLogo" alt="Mosaic Biz Hub" width="120" style="display:block;border:0;outline:none;text-decoration:none;margin:0 auto 8px;" />
                 <h1 style="font-family:Arial,Helvetica,sans-serif;font-size:22px;line-height:28px;margin:12px 0 0;color:#111827;">${heading}</h1>
                 ${introHtml || ""}
                 ${
@@ -134,13 +133,6 @@ async function sendApproved({ to, vendorName = "there", business }) {
     subject: `✅ ${business.name} is approved on Mosaic Biz Hub`,
     text,
     html,
-    attachments: [
-      {
-        filename: "logo.png",
-        path: "https://app.mosaicbizhub.com/_next/image?url=%2Flogo.png&w=750&q=75",
-        cid: "platformLogo",
-      },
-    ],
     headers: {
       "X-Entity-Ref-ID": `biz-approved-${Date.now()}`,
       "List-Unsubscribe": `<mailto:${SUPPORT_EMAIL}?subject=unsubscribe>`,
@@ -205,15 +197,72 @@ async function sendBlocked({ to, vendorName = "there", business, adminNote }) {
     subject: `⛔ ${business.name} has been temporarily blocked`,
     text,
     html,
-    attachments: [
-      {
-        filename: "logo.png",
-        path: "https://app.mosaicbizhub.com/_next/image?url=%2Flogo.png&w=750&q=75",
-        cid: "platformLogo",
-      },
-    ],
     headers: {
       "X-Entity-Ref-ID": `biz-blocked-${Date.now()}`,
+      "List-Unsubscribe": `<mailto:${SUPPORT_EMAIL}?subject=unsubscribe>`,
+    },
+  });
+}
+
+/** DEACTIVATED (admin-managed) */
+async function sendDeactivated({ to, vendorName = "there", business, adminNote }) {
+  const introHtml = `
+    <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#6b7280;margin:8px 0 0;">
+      Hi ${escapeHtml(vendorName)},<br/>
+      Your business <strong>${escapeHtml(business.name)}</strong> has been deactivated on Mosaic Biz Hub.
+    </p>`;
+
+  const reasonHtml = adminNote
+    ? `<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#374151;margin:8px 0 0;">
+         <strong>Admin remark:</strong> ${escapeHtml(adminNote)}
+       </p>`
+    : "";
+
+  const bodyHtml = `
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;">
+      <tr>
+        <td style="padding:16px;">
+          <p style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:22px;color:#9a3412;margin:0 0 6px;"><strong>What this means</strong></p>
+          <ul style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#7c2d12;margin:0;padding-left:18px;">
+            <li>Your public listing is hidden for now.</li>
+            <li>You can reply to this email if you need clarification.</li>
+            <li>Your business can be reactivated after review.</li>
+          </ul>
+          ${reasonHtml}
+          <div style="height:12px;"></div>
+          <p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#6b7280;margin:0;">
+            Questions? Contact <a href="mailto:${SUPPORT_EMAIL}" style="color:#0d6efd;text-decoration:none;">${SUPPORT_EMAIL}</a>.
+          </p>
+        </td>
+      </tr>
+    </table>`;
+
+  const html = baseLayout({
+    preheader: "Your business has been deactivated.",
+    heading: "Your business has been deactivated",
+    introHtml,
+    bodyHtml,
+    ctaHref: null,
+  });
+
+  const text = [
+    `Hi ${vendorName},`,
+    ``,
+    `${business.name} has been deactivated on Mosaic Biz Hub.`,
+    adminNote ? `Admin remark: ${adminNote}\n` : "",
+    `Please reply to this email if you need any clarification.`,
+    ``,
+    `- Mosaic Biz Hub Team`,
+  ].join("\n");
+
+  await transporter.sendMail({
+    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    to,
+    subject: `${business.name} has been deactivated on Mosaic Biz Hub`,
+    text,
+    html,
+    headers: {
+      "X-Entity-Ref-ID": `biz-deactivated-${Date.now()}`,
       "List-Unsubscribe": `<mailto:${SUPPORT_EMAIL}?subject=unsubscribe>`,
     },
   });
@@ -223,5 +272,6 @@ async function sendBlocked({ to, vendorName = "there", business, adminNote }) {
 exports.sendBusinessStatusEmail = async ({ to, vendorName, business, action, adminNote }) => {
   if (action === "approved") return sendApproved({ to, vendorName, business });
   if (action === "blocked") return sendBlocked({ to, vendorName, business, adminNote });
+  if (action === "deactivated") return sendDeactivated({ to, vendorName, business, adminNote });
   throw new Error(`Unknown action: ${action}`);
 };

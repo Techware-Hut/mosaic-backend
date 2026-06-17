@@ -2,6 +2,12 @@
 const Business = require("../../models/Business");
 const { sendBusinessStatusEmail } = require("../../utils/approvalMail");
 
+const parseBoolean = (value) => {
+  if (value === true || value === "true" || value === 1 || value === "1") return true;
+  if (value === false || value === "false" || value === 0 || value === "0") return false;
+  return null;
+};
+
 exports.getAllBusinesses = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10; // default 10
@@ -10,24 +16,51 @@ exports.getAllBusinesses = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // Fetch paginated businesses
-    const businesses = await Business.find().skip(skip).limit(limit);
+    const filter = {};
+
+    if (req.query.isActive !== undefined) {
+      const activeFilter = parseBoolean(req.query.isActive);
+      if (activeFilter === null) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid isActive filter. Use true or false.",
+        });
+      }
+      filter.isActive = activeFilter;
+    }
+
+    if (req.query.isApproved !== undefined) {
+      const approvedFilter = parseBoolean(req.query.isApproved);
+      if (approvedFilter === null) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid isApproved filter. Use true or false.",
+        });
+      }
+      filter.isApproved = approvedFilter;
+    }
+
+    const businesses = await Business.find(filter)
+      .populate("owner", "name email mobile")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     // Total count (for frontend pagination)
-    const totalBusinesses = await Business.countDocuments();
-
-    // Not approved count
-    const notApprovedCount = await Business.countDocuments({ isApproved: false });
-
-    // If none found
-    if (!businesses || businesses.length === 0) {
-      return res.status(404).json({ success: true, message: "No businesses found." });
-    }
+    const [totalBusinesses, activeBusinesses, inactiveBusinesses, notApprovedCount] = await Promise.all([
+      Business.countDocuments(filter),
+      Business.countDocuments({ ...filter, isActive: true }),
+      Business.countDocuments({ ...filter, isActive: false }),
+      Business.countDocuments({ ...filter, isApproved: false }),
+    ]);
 
     return res.status(200).json({
       success: true,
       data: businesses,
       message: "Businesses retrieved successfully",
       totalBusinesses,
+      activeBusinesses,
+      inactiveBusinesses,
       notApprovedCount,
       currentPage: page,
       totalPages: Math.ceil(totalBusinesses / limit),
@@ -109,6 +142,87 @@ exports.toggleBusinessStatus = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: `Business has been ${statusText} successfully.`,
+      data: business,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
+  }
+};
+
+exports.patchBusinessActivationStatus = async (req, res) => {
+  try {
+    const business = await Business.findById(req.params.id)
+      .populate("owner", "name email")
+      .populate("adminStatusUpdatedBy", "name email");
+
+    if (!business) {
+      return res.status(404).json({
+        success: false,
+        message: "Business not found.",
+      });
+    }
+
+    const nextIsActive = parseBoolean(req.body.isActive);
+    if (nextIsActive === null) {
+      return res.status(400).json({
+        success: false,
+        message: "isActive is required and must be true or false.",
+      });
+    }
+
+    const remark = String(
+      req.body.remark || req.body.reason || req.body.adminNote || ""
+    ).trim();
+
+    if (!nextIsActive && !remark) {
+      return res.status(400).json({
+        success: false,
+        message: "A remark is required when deactivating a business.",
+      });
+    }
+
+    const previousIsActive = business.isActive;
+    business.isActive = nextIsActive;
+    business.adminStatusRemark = remark || business.adminStatusRemark || "";
+    business.adminStatusUpdatedBy = req.user?._id || business.adminStatusUpdatedBy;
+    business.adminStatusUpdatedAt = new Date();
+    business.deactivatedAt = nextIsActive ? null : new Date();
+
+    await business.save();
+
+    if (previousIsActive && !nextIsActive) {
+      try {
+        const ownerEmail = business?.owner?.email || null;
+        const bizEmail = business?.email || null;
+        const recipients = [...new Set([ownerEmail, bizEmail].filter(Boolean))];
+
+        if (recipients.length > 0) {
+          const vendorName = business?.owner?.name || business.businessName || "there";
+
+          await sendBusinessStatusEmail({
+            to: recipients,
+            vendorName,
+            business: {
+              name: business.businessName,
+              slug: business.slug,
+              type: business.listingType,
+            },
+            action: "deactivated",
+            adminNote: remark,
+          });
+        }
+      } catch (mailErr) {
+        console.error("Email send failed (patchBusinessActivationStatus):", mailErr);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Business has been ${nextIsActive ? "activated" : "deactivated"} successfully.`,
       data: business,
     });
   } catch (error) {
