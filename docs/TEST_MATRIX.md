@@ -217,6 +217,17 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 
 ---
 
+## Vendor onboarding email tests (issue #30)
+
+| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
+| --- | --- | --- | --- | --- |
+| Submit validation | [`tests/vendor/vendor-onboarding-validation.test.js`](../tests/vendor/vendor-onboarding-validation.test.js) | MVP required fields at submit | Live MongoDB draft/submit | Yes — P2.5 after merge |
+| Finalize approve/reject | [`tests/admin/vendor-onboarding-finalize.test.js`](../tests/admin/vendor-onboarding-finalize.test.js) | Status transitions, email helper wiring, SMTP skip/failure | Live SMTP delivery | Yes — P3.4 after merge |
+
+**Readiness doc:** [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md)
+
+---
+
 ## Launch-critical area → coverage map
 
 | Launch-critical area | Automated | Manual smoke | Gap / honest limit |
@@ -224,7 +235,8 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 | Auth DTO / session shape | Yes (12 tests) | P1.x | No live login E2E |
 | Password reset security | Yes (7 tests) | P1.7 | No SMTP proof |
 | Vendor status machine | Yes (resubmit + middleware) | P2.x | Payment/webhook E2E manual |
-| Admin pending queue | Yes (5 tests) | P3.1 | Finalize/verify manual |
+| Admin pending queue | Yes (5 tests) | P3.1 | Finalize live SMTP manual |
+| Admin finalize approve/reject | Yes (5 tests) | P3.4 | Live email delivery |
 | Field protection | Yes (6 tests) | Partial | Theoretical PUT bypass untested live |
 | Upload MIME | Yes (5 tests) | P2.6 | No real S3 |
 | Webhook wiring | Yes (9 tests) | P4.x | Event DB side-effects manual |
@@ -239,7 +251,7 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 ## How to run
 
 ```bash
-# All automated tests (92)
+# All automated tests (107)
 npm test
 
 # Manual auth smoke (live API + DB)
@@ -276,7 +288,9 @@ node scripts/verify-auth-check-smoke.js
 | `tests/auth/password-reset-session-invalidation.test.js` | 3 | Session invalidation |
 | `tests/admin/admin-users-response.test.js` | 3 | Admin user DTO + guard |
 | `tests/admin/vendorOnboardVerifyStage1.pending-applications.test.js` | 5 | Admin pending queue |
+| `tests/admin/vendor-onboarding-finalize.test.js` | 5 | Finalize approve/reject + email graceful failure |
 | `tests/vendor/rejected-application-resubmit.test.js` | 5 | Resubmit state machine |
+| `tests/vendor/vendor-onboarding-validation.test.js` | 10 | Submit-time validation |
 | `tests/vendor/require-verified-vendor.test.js` | 6 | Vendor middleware |
 | `tests/vendor/vendor-onboarding-upload-mime.test.js` | 5 | Upload MIME + auth |
 | `tests/vendor/vendor-onboarding-business-sync.test.js` | 5 | Business sync |
@@ -285,4 +299,4 @@ node scripts/verify-auth-check-smoke.js
 | `tests/marketplace/public-listing-dto.test.js` | 18 | Marketplace DTO normalization |
 | `tests/marketplace/featured-products-response.test.js` | 2 | Featured products wiring |
 | `tests/marketplace/public-search-filters.test.js` | 15 | Search/filter helpers + handler |
-| **Total** | **92** | |
+| **Total** | **107** | |

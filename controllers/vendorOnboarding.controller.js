@@ -13,103 +13,11 @@ const {
   applyVendorDraftField,
 } = require('../utils/vendorOnboardingProfileFields');
 const { syncBusinessFromOnboarding } = require('../utils/syncBusinessFromOnboarding');
-
-/* =====================================================
-   COMMON VALIDATION HELPERS
-===================================================== */
-
-const isValidUrl = (url) => {
-  const pattern =
-    /^(https?:\/\/)?([\w\-])+\.{1}([a-zA-Z]{2,63})([\w\-._~:/?#[\]@!$&'()*+,;=]*)?$/;
-  return pattern.test(url);
-};
-
-const validateStage1Payload = (body) => {
-  const errors = [];
-
-  // 1. Business Name
-  if (!body.businessName || body.businessName.trim().length < 2) {
-    errors.push("Business name is required");
-  }
-
-  // 2. Minority owned validation
-  // if (body.isMinorityOwned === false) {
-  //   errors.push("Only minority-owned businesses are allowed");
-  // }
-
-  // if (
-  //   body.isMinorityOwned === true &&
-  //   (!Array.isArray(body.minorityCategories) ||
-  //     body.minorityCategories.length === 0)
-  // ) {
-  //   errors.push("At least one minority category must be selected");
-  // }
-
-  // // 3. EIN / SSN validation
-  // if (body.hasEIN === true) {
-  //   if (!/^[0-9]{9}$/.test(body.einNumber || "")) {
-  //     errors.push("Valid 9-digit EIN is required");
-  //   }
-  // } else {
-  //   if (!/^[0-9]{9}$/.test(body.ssnLast9 || "")) {
-  //     errors.push("Valid 9-digit SSN is required");
-  //   }
-  // }
-
-  // // 4. Business License
-  // if (body.hasBusinessLicense === false) {
-  //   errors.push("Business license is mandatory to proceed");
-  // }
-
-  // // 5. Franchise validation
-  // if (body.isFranchise === true && !body.franchiseName) {
-  //   errors.push("Franchise name is required");
-  // }
-
-  // // 6. Business type
-  // if (!["product", "service", "food"].includes(body.businessType)) {
-  //   errors.push("Invalid business type");
-  // }
-
-  // // 7. URLs (optional but validated)
-  // ["website", "facebook", "instagram", "linkedin", "tiktok"].forEach((field) => {
-  //   if (body[field] && !isValidUrl(body[field])) {
-  //     errors.push(`Invalid URL provided for ${field}`);
-  //   }
-  // });
-
-  // // 8. Contact person
-  // if (!body.primaryContactName) {
-  //   errors.push("Primary contact name is required");
-  // }
-
-  // if (!body.primaryContactDesignation) {
-  //   errors.push("Primary contact designation is required");
-  // }
-
-  // // 9. Address
-  // if (!body.address?.street || !body.address?.city || !body.address?.country) {
-  //   errors.push("Complete address is required");
-  // }
-
-  // // 10. Employees
-  // if (
-  //   body.employeesCount &&
-  //   !["0-1", "2-5", "6-10", "10+"].includes(body.employeesCount)
-  // ) {
-  //   errors.push("Invalid employees count");
-  // }
-
-  // // 11. Agreements
-  // if (!body.acceptedTerms || !body.declarationAccepted) {
-  //   errors.push("Terms & declaration must be accepted");
-  // }
-
-  return errors;
-};
+const { validateStage1Payload } = require('../utils/vendorOnboardingValidation');
+const { deliverVendorOnboardingEmails } = require('../utils/vendorOnboardingEmailDelivery');
 
 const isNonEmptyString = (value) =>
-  typeof value === "string" && value.trim().length > 0;
+  typeof value === 'string' && value.trim().length > 0;
 
 const isVendorProfileReadyForTrustBadgeVerification = (onboarding) => {
   const hasLogo = isNonEmptyString(onboarding?.businessProfileImage?.url);
@@ -1064,30 +972,32 @@ if (
     /* ------------------------------
        EMAIL NOTIFICATIONS (NON-BLOCKING)
     ------------------------------ */
-    try {
-      // 1️⃣ Notify Admin
-      await sendAdminOnboardingSubmissionEmail({
-        adminEmail: process.env.ADMIN_EMAIL, // e.g. admin@mosaicbizhub.com
-        applicationId: onboarding.applicationId,
-        businessName: onboarding.businessName,
-        vendorName: user.name,
-      });
-
-      // 2️⃣ Notify Vendor
-      await sendVendorSubmissionConfirmationEmail({
-        to: user.email,
-        vendorName: user.name,
-        applicationId: onboarding.applicationId,
-      });
-    } catch (emailError) {
-      // Emails should NEVER block submission
-      console.error("Stage-1 email notification failed:", emailError);
-    }
+    const emailDelivery = await deliverVendorOnboardingEmails([
+      {
+        label: 'admin_submission',
+        send: () => sendAdminOnboardingSubmissionEmail({
+          adminEmail: process.env.ADMIN_EMAIL,
+          applicationId: onboarding.applicationId,
+          businessName: onboarding.businessName,
+          vendorName: user.name,
+        }),
+      },
+      {
+        label: 'vendor_submission_confirmation',
+        send: () => sendVendorSubmissionConfirmationEmail({
+          to: user.email,
+          vendorName: user.name,
+          applicationId: onboarding.applicationId,
+        }),
+      },
+    ]);
 
     return res.status(200).json({
       success: true,
       message: "Stage 1 submitted successfully for admin verification",
       applicationId: onboarding.applicationId,
+      emailSent: emailDelivery.emailSent,
+      emailSkipped: emailDelivery.emailSkipped,
     });
   } catch (error) {
     console.error("Stage-1 submit error:", error);
