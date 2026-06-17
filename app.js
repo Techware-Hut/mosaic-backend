@@ -231,7 +231,15 @@ app.get('/', (req, res) => {
   res.json({ message: 'Mosaic Biz Hub API is working 9 feb ' });
 });
 
-if (process.env.SENTRY_DSN) {
+const { isSentryEnabled } = require('./instrument');
+
+if (process.env.ENABLE_SENTRY_DEBUG_ROUTE === 'true' && isSentryEnabled()) {
+  app.get('/internal/sentry-debug', (_req, _res) => {
+    throw new Error('Sentry debug route test error');
+  });
+}
+
+if (isSentryEnabled()) {
   const Sentry = require('./instrument');
   Sentry.setupExpressErrorHandler(app);
 }

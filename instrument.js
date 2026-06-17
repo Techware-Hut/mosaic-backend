@@ -38,12 +38,30 @@ function scrubObject(input) {
   );
 }
 
-if (process.env.SENTRY_DSN) {
+function parseSampleRate(envVal, fallback) {
+  if (envVal === undefined || envVal === '') return fallback;
+  const parsed = Number.parseFloat(envVal);
+  if (Number.isNaN(parsed) || parsed < 0 || parsed > 1) return fallback;
+  return parsed;
+}
+
+function isSentryEnabled() {
+  const dsn = process.env.SENTRY_DSN;
+  if (!dsn) return false;
+  const enabled = process.env.SENTRY_ENABLED;
+  if (enabled === 'false' || enabled === '0') return false;
+  return true;
+}
+
+if (isSentryEnabled()) {
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
     environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development',
     release: process.env.SENTRY_RELEASE,
-    tracesSampleRate: 0,
+    enabled: true,
+    sendDefaultPii: false,
+    tracesSampleRate: parseSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE, 0),
+    profilesSampleRate: parseSampleRate(process.env.SENTRY_PROFILES_SAMPLE_RATE, 0),
     beforeSend(event) {
       if (event.request?.headers) {
         event.request.headers = scrubObject(event.request.headers);
@@ -60,3 +78,4 @@ if (process.env.SENTRY_DSN) {
 }
 
 module.exports = Sentry;
+module.exports.isSentryEnabled = isSentryEnabled;

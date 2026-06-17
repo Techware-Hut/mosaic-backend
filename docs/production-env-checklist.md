@@ -109,12 +109,32 @@ See `mosaic-biz-frontend/.env.example` when present.
 
 ## Observability (optional but recommended)
 
-Set in Elastic Beanstalk only — **not** in GitHub Actions variables.
+Set in Elastic Beanstalk only — **not** in GitHub Actions variables. Never commit DSN values to git.
 
 | Variable | Notes |
 |----------|-------|
-| `SENTRY_DSN` | Sentry project DSN; when unset, Sentry is disabled |
+| `SENTRY_DSN` | Sentry project DSN; required to enable monitoring |
 | `SENTRY_ENVIRONMENT` | e.g. `production` |
-| `SENTRY_RELEASE` | e.g. `mosaic-<git-sha>` for deploy correlation |
+| `SENTRY_RELEASE` | e.g. `mosaic-c7955cc06f7ef87ac6d8747e053a2f5f66ff3037` (match EB version label) |
+| `SENTRY_TRACES_SAMPLE_RATE` | e.g. `0.05` — parsed as float 0–1; default `0` if unset |
+| `SENTRY_PROFILES_SAMPLE_RATE` | e.g. `0` — parsed as float 0–1; default `0` if unset |
+| `SENTRY_ENABLED` | `true` to enable when DSN is set; `false` or `0` disables Sentry |
+| `ENABLE_SENTRY_DEBUG_ROUTE` | `true` only for temporary verification; default off (`false` or unset) |
 
-After first deploy with `SENTRY_DSN`, verify a test event appears in the Sentry project dashboard. The SDK scrubs OTP, passwords, tokens, and webhook secrets from payloads ([`instrument.js`](../instrument.js)).
+**Production example (set in EB console):**
+
+```
+SENTRY_DSN=<from Sentry project settings>
+SENTRY_ENVIRONMENT=production
+SENTRY_RELEASE=mosaic-c7955cc06f7ef87ac6d8747e053a2f5f66ff3037
+SENTRY_TRACES_SAMPLE_RATE=0.05
+SENTRY_PROFILES_SAMPLE_RATE=0
+SENTRY_ENABLED=true
+ENABLE_SENTRY_DEBUG_ROUTE=false
+```
+
+After deploy with Sentry vars set, verify events in the Sentry dashboard. For a one-time test, temporarily set `ENABLE_SENTRY_DEBUG_ROUTE=true`, call `GET /internal/sentry-debug`, then set back to `false`.
+
+The SDK uses `sendDefaultPii: false` and scrubs OTP, passwords, tokens, and webhook secrets from payloads ([`instrument.js`](../instrument.js)).
+
+**Not used in backend runtime:** `SENTRY_AUTH_TOKEN` (CI/build/source maps only).
