@@ -898,7 +898,7 @@ exports.getUserOrders = async (req, res) => {
 
 exports.getVendorOrders = async (req, res) => {
   try {
-    const vendorId = req.user.id;
+    const vendorId = req.user._id;
     const status = req.query.status;
     const businessId = req.query.businessId;
 
@@ -925,7 +925,7 @@ exports.getVendorOrders = async (req, res) => {
 
 exports.acceptOrder = async (req, res) => {
   try {
-    const vendorId = req.user.id;
+    const vendorId = req.user._id;
     const orderId = req.params.orderId;
 
     const order = await Order.findOne({ _id: orderId, vendorId }).populate('userId');
@@ -996,7 +996,7 @@ exports.acceptOrder = async (req, res) => {
 
 exports.rejectOrder = async (req, res) => {
   try {
-    const vendorId = req.user.id;
+    const vendorId = req.user._id;
     const orderId = req.params.orderId;
 
     const order = await Order.findOne({ _id: orderId, vendorId }).populate('businessId').populate('userId');
@@ -1074,7 +1074,7 @@ exports.rejectOrder = async (req, res) => {
 
 exports.shipOrder = async (req, res) => {
   try {
-    const vendorId = req.user.id;
+    const vendorId = req.user._id;
     const orderId = req.params.orderId;
     const { trackingId, trackingUrl, vendorNote } = req.body;
 
@@ -1132,7 +1132,7 @@ exports.shipOrder = async (req, res) => {
 
 exports.deliverOrder = async (req, res) => {
   try {
-    const vendorId = req.user.id;
+    const vendorId = req.user._id;
     const orderId = req.params.orderId;
 
     const order = await Order.findOne({ _id: orderId, vendorId })
@@ -1215,7 +1215,7 @@ exports.initiateReturn = async (req, res) => {
 
 exports.acceptReturn = async (req, res) => {
   try {
-    const vendorId = req.user.id;
+    const vendorId = req.user._id;
     const orderId = req.params.orderId;
 
     const order = await Order.findOne({ _id: orderId, vendorId }).populate('businessId');
