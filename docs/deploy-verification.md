@@ -235,3 +235,40 @@ Full matrix: [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_
 ### Conclusion
 
 **Deploy Go** for issue #29 search/filter on `9f66c07`. Supported filters return 200 with safe empty sets. Geo/radius honestly reported as unsupported. CORS unchanged. Backend **safe to proceed to issue #30** (vendor onboarding email — do not start until scheduled).
+
+---
+
+## Verification — 2026-06-17 (PR #39 / issue #30 vendor onboarding email)
+
+Post-merge controlled deploy and production smoke after [PR #39](https://github.com/Techware-Hut/mosaic-backend/pull/39) (vendor onboarding validation + email flow, issue #30).
+
+### Deploy record
+
+| Field | Value |
+|-------|-------|
+| Merge commit | `6cdf587f0f3178a13634686bbfc12db8daee4ae4` |
+| GHA deploy run | [27722069277](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27722069277) — **success** |
+| EB version label | `mosaic-6cdf587f0f3178a13634686bbfc12db8daee4ae4` |
+| EB application / environment | `mosaic-biz-hub-backend` / `mosaic-backend-env` |
+| API base | `https://api.mosaicbizhub.com` |
+
+Workflow post-deploy probes in GHA: health **200**, unauth auth/check **401**.
+
+### Smoke summary
+
+Full matrix: [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) § Production deployment.
+
+| Area | Result |
+|------|--------|
+| Unauth onboarding routes (draft/submit/pending/finalize) | **PASS** — 401 |
+| Vendor → admin route guards | **PASS** — 403 |
+| Admin pending queue | **PASS** — 200 |
+| Finalize non-submitted guard | **PASS** — 400 + `currentStatus` |
+| Submit validation / submit email flags | **PENDING** — no disposable smoke vendor |
+| Finalize approve/reject + email flags | **SKIP** — real pending application only |
+| CORS (launch Vercel origin) | **PASS** — OPTIONS 204; ACAO exact match |
+| Search/filter regression canary | **PASS** — geo `filters.unsupported` |
+
+### Conclusion
+
+**Deploy Go** for issue #30 validation guards and auth boundaries on `6cdf587`. Authenticated submit/finalize email proof **PENDING** until dedicated `SMOKE_TEST_*` accounts exist. Backend **safe to proceed to issue #31** for vendor MVP APIs (listing/orders) per sprint plan — do not start #31 until scheduled.

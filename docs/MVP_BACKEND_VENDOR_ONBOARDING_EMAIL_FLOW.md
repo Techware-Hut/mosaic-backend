@@ -1,7 +1,7 @@
 # MVP Backend Vendor Onboarding Email Flow (Issue #30)
 
-**Branch:** `sprint/backend-vendor-onboarding-email-flow`  
-**Status:** Implemented on branch — **not merged or deployed to production**
+**Branch:** merged via PR #39 → `main`  
+**Status:** **Deployed to production** (2026-06-17)
 
 **Related:** [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) (full lifecycle reference)
 
@@ -164,4 +164,35 @@ Full suite: **107/107** (`npm test`)
 
 ## Production deployment
 
-**Not deployed.** Branch/PR only; no merge, no EB deploy in this issue pass.
+| Field | Value |
+|-------|-------|
+| Merge commit | `6cdf587f0f3178a13634686bbfc12db8daee4ae4` (PR [#39](https://github.com/Techware-Hut/mosaic-backend/pull/39)) |
+| GHA deploy run | [27722069277](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27722069277) — **success** |
+| EB version label | `mosaic-6cdf587f0f3178a13634686bbfc12db8daee4ae4` |
+| EB application / environment | `mosaic-biz-hub-backend` / `mosaic-backend-env` |
+| API base | `https://api.mosaicbizhub.com` |
+| Smoke date | 2026-06-17 |
+
+Workflow post-deploy probes in GHA: health **200**, unauth auth/check **401**.
+
+### Production smoke results
+
+| Tier | Probe | HTTP | Result | Email flags |
+|------|-------|------|--------|-------------|
+| A | `GET /` | 200 | **PASS** | — |
+| A | `GET /api/users/auth/check` (unauth) | 401 | **PASS** | — |
+| A | `POST /api/vendor-onboarding/draft` (unauth) | 401 | **PASS** | — |
+| A | `POST /api/vendor-onboarding/submit` (unauth) | 401 | **PASS** | — |
+| A | `GET /api/vendor-onboarding/pending` (unauth) | 401 | **PASS** | — |
+| A | `POST .../finalize` (unauth) | 401 | **PASS** | — |
+| B | `POST .../finalize` (vendor token) | 403 | **PASS** | — |
+| B | `GET .../pending` (vendor token) | 403 | **PASS** | — |
+| C | Draft save / submit validation / submit success | — | **PENDING** | No disposable `SMOKE_TEST_*` vendor in prod DB |
+| D | `GET .../pending` (admin) | 200 | **PASS** | — |
+| D | Finalize guard (non-`submitted`, verified app) | 400 + `currentStatus: verified` | **PASS** | — |
+| D | Finalize approve/reject on submitted app | — | **SKIP** | Real pending app exists; no disposable smoke application |
+| E | CORS OPTIONS/GET (`mosaic-biz-frontend-launch.vercel.app`) | 204 / ACAO match | **PASS** | — |
+
+**Email outcome on production:** Not observed at runtime — submit/finalize success paths were not exercised to avoid mutating real vendor applications. Contract covered by **107/107** automated tests; production EB may return `emailSkipped: true` when SMTP env vars are unset (valid **PASS** per graceful-failure design).
+
+**Regression canary:** Geo search `filters.unsupported` still populated post-deploy (**PASS**).
