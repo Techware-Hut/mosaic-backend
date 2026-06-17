@@ -197,6 +197,8 @@ Full tier detail: [production-smoke-checklist.md](production-smoke-checklist.md)
 
 ## Phase 4 — Rollback procedure
 
+See [eb-rollback-runbook.md](eb-rollback-runbook.md) for the authoritative procedure (GitHub Actions + AWS Console, roles, incident template, post-rollback CORS probe).
+
 ### If rollback is needed
 
 1. Stop further promotions to `main`.

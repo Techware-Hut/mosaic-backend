@@ -2,7 +2,9 @@
 
 ## MVP decision (2026-06-07)
 
-**Hosted staging is deferred and not part of the MVP release strategy.**
+**MVP decision (2026-06-07):** Hosted staging backend was deferred.
+
+**Update (2026-06-17):** Staging deploy workflow added ([`.github/workflows/deploy-eb-staging.yml`](../.github/workflows/deploy-eb-staging.yml)). **AWS staging EB environment is not yet provisioned** — workflow is ready for infra setup. Until provisioned, `staging` branch remains integration-only (no deploy target).
 
 | Layer | Role | Deploy target |
 |-------|------|---------------|

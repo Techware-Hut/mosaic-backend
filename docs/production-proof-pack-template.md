@@ -6,6 +6,35 @@
 
 ---
 
+## Release — first OIDC production deploy 2026-06-17
+
+First successful GitHub Actions deploy via OIDC. See [deploy-verification.md](deploy-verification.md) § Production deploy verification — 2026-06-17.
+
+### Release metadata
+
+- Deployed commit (`main`): `c7955cc`
+- Previous known-good commit (EB rollback target): `c7955cc` (first confirmed OIDC deploy baseline)
+- EB version label: `mosaic-c7955cc06f7ef87ac6d8747e053a2f5f66ff3037`
+- GitHub Actions run: https://github.com/Techware-Hut/mosaic-backend/actions/runs/27704538486
+- Deploy timestamp: 2026-06-17
+- Push-to-main auto-deploy: **disabled** intentionally
+
+### Pre-deploy rollback confirmation
+
+- [x] Last good SHA recorded on EB — `c7955cc`
+- [x] EB rollback path documented — [eb-rollback-runbook.md](eb-rollback-runbook.md)
+- [x] Production env vars documented ([production-env-checklist.md](production-env-checklist.md))
+
+### Automated probes
+
+| Check | PASS/FAIL | Notes |
+|-------|-----------|-------|
+| P0.1 | PASS | `GET https://api.mosaicbizhub.com/` HTTP 200 |
+| P1.5 (unauth) | PASS | `GET /api/users/auth/check` → 401 |
+| CORS featured products (manual) | PASS | Launch frontend origin → `/api/featured-products` HTTP 200 |
+
+---
+
 ## Release — staging integration gate 2026-06-14 (pre-merge)
 
 Candidate not yet on EB. Records integration gate before PR `staging` → `main`.

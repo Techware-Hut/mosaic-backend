@@ -166,3 +166,44 @@ Probed `2026-06-14T21:42:14Z`:
 **Provisional safe probes recorded** — see [production-proof-pack-template.md](production-proof-pack-template.md) § Provisional Production Smoke — Commit Unconfirmed (`2026-06-14T21:56:27Z`). Does not prove deployed commit.
 
 Infra confirmation request: see [integration-gate-asana-evidence.md](integration-gate-asana-evidence.md) § Infra owner request (post-merge).
+
+---
+
+## Production deploy verification — 2026-06-17 (`main` @ `c7955cc`)
+
+First successful GitHub Actions deploy to AWS Elastic Beanstalk via OIDC. Tracking issue: [Techware-Hut/mosaic-backend#24](https://github.com/Techware-Hut/mosaic-backend/issues/24).
+
+| Field | Value |
+|-------|-------|
+| Branch / commit | `main` / `c7955cc` |
+| GitHub Actions run | [#27704538486](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27704538486) |
+| EB application version | `mosaic-c7955cc06f7ef87ac6d8747e053a2f5f66ff3037` |
+| EB environment | `mosaic-backend-env` (app: `mosaic-biz-hub-backend`, region: `us-east-1`) |
+| Deploy auth | GitHub OIDC → IAM role (no static AWS keys) |
+| Push-to-main auto-deploy | **Disabled** intentionally |
+
+### Automated post-deploy probes (workflow)
+
+| Check | Result |
+|-------|--------|
+| `GET https://api.mosaicbizhub.com/` | **PASS** — HTTP 200 |
+| `GET https://api.mosaicbizhub.com/api/users/auth/check` (unauth) | **PASS** — HTTP 401 |
+
+### Frontend smoke (launch site — manual)
+
+| Check | Result |
+|-------|--------|
+| `GET https://api.mosaicbizhub.com/api/featured-products` from `https://mosaic-biz-frontend-launch.vercel.app` | **PASS** — HTTP 200 |
+| CORS preflight | **PASS** — `Access-Control-Allow-Origin` echoes launch frontend origin |
+| Empty product list UI | **Valid empty state** — not a CORS/load failure |
+| `GET /api/products/featured` | **404** — not registered; canonical path is `/api/featured-products` |
+
+### Rollback baseline (record before next deploy)
+
+| Item | Value |
+|------|-------|
+| Known-good commit | `c7955cc` |
+| Known-good EB version | `mosaic-c7955cc06f7ef87ac6d8747e053a2f5f66ff3037` |
+| Rollback runbook | [eb-rollback-runbook.md](eb-rollback-runbook.md) |
+
+**Conclusion:** Production deploy pipeline validated via OIDC. CORS to launch frontend confirmed manually. Automated CORS probe added in post-hardening workflow. Full P1–P6 manual smoke and Sentry verification remain follow-up items.

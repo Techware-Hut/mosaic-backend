@@ -52,7 +52,14 @@ Do not merge `staging` → `main` until:
 
 ## Future hosted staging
 
-If a separate staging EB environment is approved later, provision isolated MongoDB, S3, mail, and Stripe test mode per [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md), then update this file and [DEPLOYMENT.md](DEPLOYMENT.md).
+A staging deploy workflow exists at [`.github/workflows/deploy-eb-staging.yml`](.github/workflows/deploy-eb-staging.yml) (`workflow_dispatch` on `staging` branch). **Hosted staging EB is not yet provisioned** — the workflow requires infra setup first:
+
+1. Provision isolated EB environment (e.g. `mosaic-backend-staging`), MongoDB, S3, mail, Stripe **test mode**
+2. Create GitHub `staging` environment and OIDC role per [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md) § Step D
+3. Set GitHub variables: `AWS_ROLE_TO_ASSUME_STAGING`, `EB_APPLICATION_NAME_STAGING`, `EB_ENVIRONMENT_NAME_STAGING`, `STAGING_API_URL`
+4. Run first manual staging deploy; update [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md)
+
+See [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md) for isolation requirements.
 
 ---
 

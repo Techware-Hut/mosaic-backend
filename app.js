@@ -231,6 +231,11 @@ app.get('/', (req, res) => {
   res.json({ message: 'Mosaic Biz Hub API is working 9 feb ' });
 });
 
+if (process.env.SENTRY_DSN) {
+  const Sentry = require('./instrument');
+  Sentry.setupExpressErrorHandler(app);
+}
+
 // require('./jobs/cleanupImages');
 
 module.exports = app;

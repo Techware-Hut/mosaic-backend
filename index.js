@@ -1,3 +1,5 @@
+require('./instrument');
+
 const dns = require('dns');
 
 // Windows + some ISP resolvers refuse SRV queries from Node (querySrv ECONNREFUSED)

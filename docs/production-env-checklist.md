@@ -104,3 +104,17 @@ Note: Backend code does **not** read `STRIPE_PUBLIC_KEY` (frontend uses `NEXT_PU
 | `JWT_SECRET` | Must match backend `JWT_SECRET` for middleware |
 
 See `mosaic-biz-frontend/.env.example` when present.
+
+---
+
+## Observability (optional but recommended)
+
+Set in Elastic Beanstalk only — **not** in GitHub Actions variables.
+
+| Variable | Notes |
+|----------|-------|
+| `SENTRY_DSN` | Sentry project DSN; when unset, Sentry is disabled |
+| `SENTRY_ENVIRONMENT` | e.g. `production` |
+| `SENTRY_RELEASE` | e.g. `mosaic-<git-sha>` for deploy correlation |
+
+After first deploy with `SENTRY_DSN`, verify a test event appears in the Sentry project dashboard. The SDK scrubs OTP, passwords, tokens, and webhook secrets from payloads ([`instrument.js`](../instrument.js)).

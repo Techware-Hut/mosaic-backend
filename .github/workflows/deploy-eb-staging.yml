@@ -1,22 +1,21 @@
-name: Deploy to Elastic Beanstalk
+name: Deploy to Elastic Beanstalk (Staging)
 
 on:
   workflow_dispatch:
   # push:
   #   branches:
-  #     - main
-  # Re-enable after first successful manual deploy and production environment + AWS OIDC role are confirmed.
+  #     - staging
+  # Enable after staging EB environment, OIDC role, and first manual deploy are confirmed.
 
 concurrency:
-  group: deploy-production
+  group: deploy-staging
   cancel-in-progress: false
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  EB_APPLICATION_NAME: ${{ vars.EB_APPLICATION_NAME || 'mosaic-biz-hub-backend' }}
-  EB_ENVIRONMENT_NAME: ${{ vars.EB_ENVIRONMENT_NAME || 'mosaic-backend-env' }}
-  PRODUCTION_API_URL: ${{ vars.PRODUCTION_API_URL || 'https://api.mosaicbizhub.com' }}
-  LAUNCH_FRONTEND_ORIGIN: ${{ vars.LAUNCH_FRONTEND_ORIGIN || 'https://mosaic-biz-frontend-launch.vercel.app' }}
+  EB_APPLICATION_NAME: ${{ vars.EB_APPLICATION_NAME_STAGING || 'mosaic-biz-hub-backend-staging' }}
+  EB_ENVIRONMENT_NAME: ${{ vars.EB_ENVIRONMENT_NAME_STAGING || 'mosaic-backend-staging' }}
+  STAGING_API_URL: ${{ vars.STAGING_API_URL || 'https://staging-api.mosaicbizhub.com' }}
 
 jobs:
   test:
@@ -42,7 +41,7 @@ jobs:
     name: Deploy
     needs: test
     runs-on: ubuntu-latest
-    environment: production
+    environment: staging
     timeout-minutes: 45
     permissions:
       id-token: write
@@ -75,7 +74,7 @@ jobs:
         id: aws_creds
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME_STAGING }}
           aws-region: ${{ env.AWS_REGION }}
           output-credentials: true
 
@@ -88,7 +87,7 @@ jobs:
           application_name: ${{ env.EB_APPLICATION_NAME }}
           environment_name: ${{ env.EB_ENVIRONMENT_NAME }}
           region: ${{ env.AWS_REGION }}
-          version_label: mosaic-${{ github.sha }}
+          version_label: mosaic-staging-${{ github.sha }}
           deployment_package: deploy.zip
           use_existing_version_if_available: true
           wait_for_deployment: true
@@ -97,12 +96,12 @@ jobs:
       - name: Post-deploy health probe
         run: |
           echo "Deployed commit: ${{ github.sha }}"
-          echo "Version label: mosaic-${{ github.sha }}"
+          echo "Version label: mosaic-staging-${{ github.sha }}"
           for i in 1 2 3 4 5; do
-            status=$(curl -s -o /tmp/health.json -w "%{http_code}" "${PRODUCTION_API_URL}/")
+            status=$(curl -s -o /tmp/staging-health.json -w "%{http_code}" "${STAGING_API_URL}/")
             echo "Attempt $i: HTTP $status"
             if [ "$status" = "200" ]; then
-              cat /tmp/health.json
+              cat /tmp/staging-health.json
               exit 0
             fi
             sleep 15
@@ -112,53 +111,24 @@ jobs:
 
       - name: Post-deploy auth probe
         run: |
-          status=$(curl -s -o /dev/null -w "%{http_code}" "${PRODUCTION_API_URL}/api/users/auth/check")
+          status=$(curl -s -o /dev/null -w "%{http_code}" "${STAGING_API_URL}/api/users/auth/check")
           echo "Auth check (unauthenticated): HTTP $status"
           if [ "$status" != "401" ]; then
             echo "Expected 401 for unauthenticated auth/check"
             exit 1
           fi
 
-      - name: Post-deploy CORS smoke (featured products)
-        run: |
-          set -euo pipefail
-          endpoint="${PRODUCTION_API_URL}/api/featured-products"
-          echo "CORS probe origin: ${LAUNCH_FRONTEND_ORIGIN}"
-          echo "CORS probe endpoint: ${endpoint}"
-          preflight_status=$(curl -s -o /tmp/cors-preflight.headers -w "%{http_code}" -X OPTIONS \
-            -H "Origin: ${LAUNCH_FRONTEND_ORIGIN}" \
-            -H "Access-Control-Request-Method: GET" \
-            "${endpoint}")
-          echo "Preflight HTTP ${preflight_status}"
-          if [ "${preflight_status}" -lt 200 ] || [ "${preflight_status}" -ge 300 ]; then
-            echo "Expected 2xx for OPTIONS preflight"
-            exit 1
-          fi
-          if ! grep -qi "access-control-allow-origin: ${LAUNCH_FRONTEND_ORIGIN}" /tmp/cors-preflight.headers; then
-            echo "Missing Access-Control-Allow-Origin for launch frontend"
-            cat /tmp/cors-preflight.headers
-            exit 1
-          fi
-          get_status=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Origin: ${LAUNCH_FRONTEND_ORIGIN}" \
-            "${endpoint}")
-          echo "GET with Origin header: HTTP ${get_status}"
-          if [ "${get_status}" != "200" ]; then
-            echo "Expected 200 for cross-origin GET /api/featured-products"
-            exit 1
-          fi
-
       - name: Deployment summary
         run: |
           {
-            echo "## Production deploy"
+            echo "## Staging deploy"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
             echo "| Commit | \`${{ github.sha }}\` |"
-            echo "| Version label | \`mosaic-${{ github.sha }}\` |"
+            echo "| Version label | \`mosaic-staging-${{ github.sha }}\` |"
             echo "| EB application | \`${{ env.EB_APPLICATION_NAME }}\` |"
             echo "| EB environment | \`${{ env.EB_ENVIRONMENT_NAME }}\` |"
             echo "| Region | \`${{ env.AWS_REGION }}\` |"
-            echo "| API URL | \`${{ env.PRODUCTION_API_URL }}\` |"
+            echo "| API URL | \`${{ env.STAGING_API_URL }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

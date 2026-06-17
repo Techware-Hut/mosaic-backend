@@ -67,8 +67,8 @@ Workflow: [`.github/workflows/deploy-eb-production.yml`](.github/workflows/deplo
 
 **Triggers:**
 
-- Push to `main` (after merge from `staging`)
-- Manual **Run workflow** (`workflow_dispatch`) on `main` — use for first deploy and rollbacks
+- Push to `main` — **disabled** until [push-to-main auto-deploy gate](#push-to-main-auto-deploy-gate) criteria are met
+- Manual **Run workflow** (`workflow_dispatch`) on `main` — use for production deploys and rollbacks
 
 **Flow:** `npm ci` → `npm test` → source-only ZIP → Elastic Beanstalk → health probe on `https://api.mosaicbizhub.com/`
 
@@ -105,6 +105,8 @@ If GitHub Actions is unavailable:
 
 ## Rollback steps
 
+See [docs/eb-rollback-runbook.md](docs/eb-rollback-runbook.md) for the authoritative rollback procedure (GitHub Actions + AWS Console paths, roles, incident template).
+
 ### Before deploy (mandatory)
 
 - [ ] Last good SHA recorded
@@ -134,6 +136,32 @@ If GitHub Actions is unavailable:
 
 ---
 
+## Push-to-main auto-deploy gate
+
+Push-to-main auto-deploy remains **disabled** in [`.github/workflows/deploy-eb-production.yml`](.github/workflows/deploy-eb-production.yml). Re-enable only when **all** prerequisites below are true:
+
+1. **≥2 consecutive successful** `workflow_dispatch` production deploys (including `c7955cc` run [#27704538486](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27704538486))
+2. Automated post-deploy probes green: health `/`, unauth `/api/users/auth/check` → 401, **CORS** `/api/featured-products` preflight + GET
+3. [eb-rollback-runbook.md](docs/eb-rollback-runbook.md) published and rollback baseline recorded
+4. OIDC IAM trust policy aligned to `repo:Techware-Hut/mosaic-backend:environment:production`; permissions tightened per [github-actions-eb-setup.md](docs/github-actions-eb-setup.md)
+5. Sentry receiving production errors; test event verified after setting `SENTRY_DSN` on EB
+6. GitHub `production` environment has **required reviewers** configured
+7. **Release owner + infra owner written sign-off**
+
+### Rollout when criteria met
+
+1. Open PR uncommenting `push: branches: [main]` in `deploy-eb-production.yml`
+2. Merge after reviewer approval; monitor first auto-deploy closely
+3. If auto-deploy misfires: revert workflow PR and redeploy known-good SHA per [eb-rollback-runbook.md](docs/eb-rollback-runbook.md)
+
+### Non-goals (unchanged after re-enable)
+
+- No runtime secrets in GitHub — EB environment properties only
+- No deploy without GitHub `production` environment gate
+- Merge to `main` alone does not bypass required reviewers on the environment
+
+---
+
 ## Known launch blockers
 
 Deployment and smoke tests **do not fix** open P0 code issues. See [launch-readiness-report.md](docs/launch-readiness-report.md) section 9. Sign-off must distinguish **deploy healthy** vs **launch-ready for unrestricted public traffic**.
@@ -142,7 +170,8 @@ Deployment and smoke tests **do not fix** open P0 code issues. See [launch-readi
 
 ## Related docs
 
-- [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md) — GitHub Actions + AWS one-time setup
+- [docs/eb-rollback-runbook.md](docs/eb-rollback-runbook.md) — **EB rollback procedure** (Actions + Console)
+- [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md) — GitHub Actions + AWS OIDC setup
 - [docs/DECISION_REGISTER.md](docs/DECISION_REGISTER.md) — MVP decisions and deferrals
 - [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) — **release owner runbook** (smoke, rollback, Go/No-Go)
 - [STAGING.md](STAGING.md)

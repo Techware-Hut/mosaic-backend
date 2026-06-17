@@ -24,6 +24,8 @@ Business and technical decisions for Mosaic Biz Hub backend MVP. Captures what i
 | Final sign-off requires **deployment owner to confirm EB commit SHA** | **Accepted** | Custom-domain health can pass while old commit is still live | Deployment owner | [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md), [production-proof-pack-template.md](production-proof-pack-template.md) |
 | Post-deploy validation uses **dedicated test accounts** on production | **Accepted** | No hosted staging; controlled smoke after deploy | Release owner | [hosted-staging-decision.md](hosted-staging-decision.md), [production-smoke-checklist.md](production-smoke-checklist.md) |
 | Per-release **proof pack** required | **Accepted** | Audit trail for deploy, smoke, rollback | Release owner | [production-proof-pack-template.md](production-proof-pack-template.md) |
+| GitHub Actions OIDC deploy to EB (no static AWS keys) | **Accepted** | First successful deploy 2026-06-17 @ `c7955cc` | Infrastructure owner | [deploy-verification.md](deploy-verification.md), [github-actions-eb-setup.md](github-actions-eb-setup.md) |
+| Push-to-main auto-deploy **disabled** until gate criteria met | **Accepted** | Controlled rollout after hardening | Release owner + infra owner | [DEPLOYMENT.md](../DEPLOYMENT.md) § Push-to-main auto-deploy gate |
 
 ---
 
@@ -119,6 +121,16 @@ These are **requirements**, not optional decisions. Failure blocks **Deploy Go**
 | Proof pack completed with redacted evidence | Launch sign-off | Release owner | [production-proof-pack-template.md](production-proof-pack-template.md) |
 | Product owner **written approval** (Bryan) | Launch sign-off | Product owner | [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) |
 | Open P0 code blockers reviewed — remediated or **business-accepted risk** documented | Launch sign-off | Product + release owner | [launch-readiness-report.md](launch-readiness-report.md) §9 |
+
+---
+
+## Push-to-main auto-deploy gate (deferred)
+
+| Decision | Status | Reason | Owner | Evidence/Link |
+| --- | --- | --- | --- | --- |
+| Re-enable push-to-`main` in deploy workflow | **Deferred** | Awaiting hardening prerequisites | Release owner + infra owner | [DEPLOYMENT.md](../DEPLOYMENT.md) § Push-to-main auto-deploy gate |
+
+**Prerequisites (all required):** ≥2 successful manual deploys; automated health + auth + CORS probes; rollback runbook; tightened OIDC IAM; Sentry verified; production environment reviewers; written sign-off.
 
 ---
 

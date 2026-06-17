@@ -19,7 +19,9 @@ Maps backend features to automated tests (`npm test`), manual smoke checks, and 
 | Production smoke tiers | P0–P6 | Post-deploy on `https://api.mosaicbizhub.com` |
 | Proof pack | Per release | Redacted evidence matrix |
 
-**Not covered by automation:** Live Stripe payments, S3 uploads, email delivery, full order checkout, admin finalize against real DB, CI pipeline (none in repo).
+**Not covered by automation:** Live Stripe payments, S3 uploads, email delivery, full order checkout, admin finalize against real DB.
+
+**Automated in deploy workflow (post-deploy):** Health probe (`GET /`), unauth auth check (`401`), CORS featured-products probe (`OPTIONS` + `GET /api/featured-products` with launch frontend Origin). See [`.github/workflows/deploy-eb-production.yml`](../.github/workflows/deploy-eb-production.yml).
 
 ---
 
@@ -179,6 +181,7 @@ These launch-critical areas have **no** meaningful automated coverage. They requ
 | **Admin finalize + emails** | Controller not tested | P3.4 | Approval/rejection email received |
 | **Frontend integration** | Backend tests only | Script + P6 | `verify-auth-check-smoke.js` page loads |
 | **Cross-domain cookies** | Cookie helper unit-tested only | P1.4 | Browser session on `app.mosaicbizhub.com` |
+| **CORS launch frontend → featured products** | Requires live Origin header | Deploy workflow | Automated OPTIONS + GET in production deploy |
 | **Open P0 blockers** | Documented gaps, not tested | Launch review | [launch-readiness-report.md](launch-readiness-report.md) §9 |
 
 ### Manual smoke script (not `npm test`)
