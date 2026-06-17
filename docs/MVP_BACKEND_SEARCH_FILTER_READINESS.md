@@ -1,7 +1,7 @@
 # MVP Backend Search & Filter Readiness (Issue #29)
 
-**Branch:** `sprint/backend-search-filter-readiness`  
-**Status:** Implemented on branch — **not merged or deployed to production**
+**Branch:** merged via PR #38 → `main`  
+**Status:** **Deployed to production** (2026-06-17)
 
 ## Purpose
 
@@ -150,4 +150,26 @@ Future phase requires a geocoding pipeline and indexed coordinates (Business Geo
 
 ## Production deployment
 
-**Not deployed.** Changes exist only on branch `sprint/backend-search-filter-readiness`. Merge and EB deploy are out of scope for this issue pass.
+| Field | Value |
+|-------|-------|
+| Merge commit | `9f66c079a80ec204e5c041cad3cc8799a266a1c8` (PR [#38](https://github.com/Techware-Hut/mosaic-backend/pull/38)) |
+| GHA deploy run | [27720127626](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27720127626) — **success** |
+| EB version label | `mosaic-9f66c079a80ec204e5c041cad3cc8799a266a1c8` |
+| EB application / environment | `mosaic-biz-hub-backend` / `mosaic-backend-env` |
+| API base | `https://api.mosaicbizhub.com` |
+| Smoke date | 2026-06-17 |
+
+### Production smoke results (2026-06-17)
+
+| Endpoint | HTTP | Result | Notes |
+|----------|------|--------|-------|
+| `GET /api/public/search?keyword=test&limit=5` | 200 | **PASS** | `filters.keyword=test`; `displayPrice` on cards |
+| `GET /api/public/search?zip=90210&listingType=product` | 200 | **PASS** | Empty result set safe; no crash |
+| `GET /api/public/search?tag=organic&verified=true` | 200 | **PASS** | Empty result set safe; filters echoed |
+| `GET /api/public/search?lat=33.7&lng=-84.4&radius=10` | 200 | **PASS** | `filters.unsupported` lists lat/lng/radius; no `distanceMiles` |
+| `GET /api/products/list?tag=organic&zip=90210` | 200 | **PASS** | Empty result set safe; DTO keys preserved on non-empty list |
+| CORS (launch Vercel origin) | 204/200 | **PASS** | `Access-Control-Allow-Origin` exact match |
+
+**Soft gaps (not blockers):** No prod businesses match `tag=organic` + `zip=90210`; empty arrays are expected and safe.
+
+**Conclusion:** Issue #29 search/filter readiness verified on production. Backend safe to proceed to issue #30 planning.

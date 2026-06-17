@@ -200,3 +200,38 @@ Full matrix: [MVP_BACKEND_SMOKE_PROOF_PACK.md](MVP_BACKEND_SMOKE_PROOF_PACK.md) 
 ### Conclusion
 
 **Deploy Go** for MVP public browse/auth/CORS on `7201f97`. Safe for frontend production integration testing. Issue #27 evidence complete. Next: issue #29 (search/filter) per sprint plan.
+
+---
+
+## Verification — 2026-06-17 (PR #38 / issue #29 search/filter)
+
+Post-merge controlled deploy and production smoke after [PR #38](https://github.com/Techware-Hut/mosaic-backend/pull/38) (search/filter readiness, issue #29).
+
+### Deploy record
+
+| Field | Value |
+|-------|-------|
+| Merge commit | `9f66c079a80ec204e5c041cad3cc8799a266a1c8` |
+| GHA deploy run | [27720127626](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27720127626) — **success** |
+| EB version label | `mosaic-9f66c079a80ec204e5c041cad3cc8799a266a1c8` |
+| EB application / environment | `mosaic-biz-hub-backend` / `mosaic-backend-env` |
+| API base | `https://api.mosaicbizhub.com` |
+
+Workflow post-deploy probes in GHA: health **200**, unauth auth/check **401**.
+
+### Smoke summary
+
+Full matrix: [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md) § Production deployment.
+
+| Area | Result |
+|------|--------|
+| Keyword search | **PASS** — `GET /api/public/search?keyword=test&limit=5` → 200 |
+| ZIP exact + listingType | **PASS** — empty result safe, no crash |
+| Tag + verified filter | **PASS** — empty result safe |
+| Geo unsupported (lat/lng/radius) | **PASS** — `filters.unsupported` populated; no `distanceMiles` |
+| Products list tag + zip | **PASS** — 200; DTO backward compat on non-empty list |
+| CORS (launch Vercel origin) | **PASS** — OPTIONS 204; GET 200; ACAO exact match |
+
+### Conclusion
+
+**Deploy Go** for issue #29 search/filter on `9f66c07`. Supported filters return 200 with safe empty sets. Geo/radius honestly reported as unsupported. CORS unchanged. Backend **safe to proceed to issue #30** (vendor onboarding email — do not start until scheduled).
