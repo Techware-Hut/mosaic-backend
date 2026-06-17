@@ -765,6 +765,9 @@ exports.getProductBusinesses = async (req, res) => {
       state,
       country,
       productCategory,
+      tag,
+      tags,
+      zip,
       page = 1,
       limit = 10,
     } = req.query;
@@ -782,6 +785,32 @@ exports.getProductBusinesses = async (req, res) => {
     if (productCategory) {
       const categoryIds = productCategory.split(",");
       filters.productCategories = { $in: categoryIds };
+    }
+
+    const tagList = String(tags || tag || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (tagList.length) {
+      const tagClause = {
+        $or: tagList.map((item) => ({
+          tags: new RegExp(`^${item.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
+        })),
+      };
+      if (filters.businessName) {
+        filters.$and = [{ businessName: filters.businessName }, tagClause];
+        delete filters.businessName;
+      } else {
+        Object.assign(filters, tagClause);
+      }
+    }
+
+    const normalizedZip = String(zip || "").trim();
+    if (normalizedZip) {
+      filters["address.zipCode"] = new RegExp(
+        `^${normalizedZip.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        "i"
+      );
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
