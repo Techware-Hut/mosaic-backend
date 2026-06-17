@@ -235,7 +235,7 @@ Full list: [`models/`](../models/). No Prisma/SQL/Zod schema layer.
 
 | Area | Location |
 |------|----------|
-| Automated tests (57) | [`tests/`](../tests/) |
+| Automated tests (77) | [`tests/`](../tests/) |
 | Test matrix | [TEST_MATRIX.md](TEST_MATRIX.md) |
 | Production smoke | [production-smoke-checklist.md](production-smoke-checklist.md) |
 | Runbook | [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) |
@@ -256,7 +256,7 @@ Full list: [`models/`](../models/). No Prisma/SQL/Zod schema layer.
 |-------|-------|--------------|-----------------|----------------------|-------------|
 | [#26](https://github.com/Techware-Hut/mosaic-backend/issues/26) | Backend MVP API audit | This document | N/A | N/A | — |
 | [#27](https://github.com/Techware-Hut/mosaic-backend/issues/27) | Backend MVP smoke proof pack | [production-smoke-checklist.md](production-smoke-checklist.md), [production-proof-pack-template.md](production-proof-pack-template.md) | Partial (deploy workflow health + CORS featured-products) | Full P0–P6 on production | No single consolidated proof pack filled for this release |
-| [#28](https://github.com/Techware-Hut/mosaic-backend/issues/28) | Marketplace data contract | Public listing + featured controllers | None for DTO shape | Card/detail field audit vs frontend | Missing-field handling varies by endpoint; price/image/vendor nullability inconsistent |
+| [#28](https://github.com/Techware-Hut/mosaic-backend/issues/28) | Marketplace data contract | Implemented in PR #37 — DTO layer + controller wiring | 20 marketplace tests ([TEST_MATRIX.md](TEST_MATRIX.md)) | Card/detail field audit vs frontend on prod | See [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md) |
 | [#29](https://github.com/Techware-Hut/mosaic-backend/issues/29) | Search/filter API readiness | `GET /api/public/search`, `GET /api/products/filters` | None | Query param smoke on prod | Location = **text regex** on address fields; **no ZIP/geolocation** |
 | [#30](https://github.com/Techware-Hut/mosaic-backend/issues/30) | Vendor onboarding + email | Full onboarding + `WellcomeMailer.js` | 6 vendor/admin tests | Payment webhook + approval email on prod | Submit validation reduced (business name only at server) |
 | [#31](https://github.com/Techware-Hut/mosaic-backend/issues/31) | Vendor profile/listings/orders | Business, product, order vendor routes | Field allowlist + business sync tests | End-to-end vendor flows | Listing tier limits documented in [tier-listing-limit-implementation.md](tier-listing-limit-implementation.md) — runtime enforcement unverified |
@@ -282,7 +282,7 @@ Full list: [`models/`](../models/). No Prisma/SQL/Zod schema layer.
 - Reviews: list (public), upsert/delete (customer) for product, service, food
 - Admin: vendor pending queue, business approve, category CRUD, featured product toggle
 - Email utilities for OTP, welcome, order confirmation, listing approval, onboarding
-- **57 automated tests** (auth DTOs, vendor middleware, webhook wiring, admin guards, business sync)
+- **77 automated tests** (auth DTOs, vendor middleware, webhook wiring, admin guards, business sync, marketplace DTOs)
 
 ---
 
@@ -364,7 +364,7 @@ Cannot be proven by CI alone (mocked MongoDB/Stripe/email):
 ## 9. Test commands available
 
 ```powershell
-npm test                    # 57 unit/integration tests (mocked)
+npm test                    # 77 unit/integration tests (mocked)
 npm run dev                 # local server :3001
 npm start                   # production mode locally
 node scripts/verify-auth-check-smoke.js   # live auth/check per role (manual)
@@ -376,13 +376,13 @@ node scripts/verify-auth-check-smoke.js   # live auth/check per role (manual)
 
 ```
 npm test
-ℹ tests 57
-ℹ pass 57
+ℹ tests 77
+ℹ pass 77
 ℹ fail 0
 ℹ duration_ms ~988
 ```
 
-All 57 tests passed. Test files:
+All 77 tests passed. Test files:
 
 | Domain | Files |
 |--------|-------|
@@ -399,7 +399,7 @@ See [TEST_MATRIX.md](TEST_MATRIX.md) for manual smoke mapping.
 
 Aligned to issue dependencies (audit → implementation → smoke proof):
 
-1. **#28 Marketplace data contract** — normalize public listing/featured/detail response shapes; document null-safe fields for image, price, vendor, category, status, contact
+1. ~~**#28 Marketplace data contract**~~ — **Done (PR #37):** null-safe DTOs for public listing/featured/detail; see [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md)
 2. **#29 Search/filter** — document supported query params; add tests for category/tag/location text filter; document ZIP gap explicitly (do not invent geolocation)
 3. **#30 Vendor onboarding email** — verify approval/rejection emails fire on finalize; tighten submit validation if product requires
 4. **#31 Vendor MVP APIs** — confirm listing tier limit enforcement; vendor order list smoke

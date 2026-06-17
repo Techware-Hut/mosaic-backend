@@ -1,4 +1,5 @@
 const Product = require('../models/Product');
+const { toPublicListingCard } = require('../lib/listing/publicListingDto');
 
 // Get featured products (public API)
 exports.getFeaturedProducts = async (req, res) => {
@@ -19,16 +20,17 @@ exports.getFeaturedProducts = async (req, res) => {
     .skip(skip)
     .limit(parseInt(limit));
 
-    // Transform products to include proper price and subcategory
-    const transformedProducts = products.map(product => {
+    const transformedProducts = products.map((product) => {
       const productObj = product.toObject();
-      return {
-        ...productObj,
-        price: productObj.price ? parseFloat(productObj.price.toString()) : 0,
-        category: productObj.categoryId,
-        subcategory: productObj.subcategoryId,
-        business: productObj.businessId
-      };
+      return toPublicListingCard(
+        {
+          ...productObj,
+          category: productObj.categoryId,
+          subcategory: productObj.subcategoryId,
+          business: productObj.businessId,
+        },
+        { listingType: 'product' }
+      );
     });
 
     const total = await Product.countDocuments({
