@@ -257,7 +257,7 @@ Full list: [`models/`](../models/). No Prisma/SQL/Zod schema layer.
 | [#26](https://github.com/Techware-Hut/mosaic-backend/issues/26) | Backend MVP API audit | This document | N/A | N/A | — |
 | [#27](https://github.com/Techware-Hut/mosaic-backend/issues/27) | Backend MVP smoke proof pack | [production-smoke-checklist.md](production-smoke-checklist.md), [production-proof-pack-template.md](production-proof-pack-template.md) | Partial (deploy workflow health + CORS featured-products) | Full P0–P6 on production | No single consolidated proof pack filled for this release |
 | [#28](https://github.com/Techware-Hut/mosaic-backend/issues/28) | Marketplace data contract | Implemented in PR #37 — DTO layer + controller wiring | 20 marketplace tests ([TEST_MATRIX.md](TEST_MATRIX.md)) | Card/detail field audit vs frontend on prod | See [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md) |
-| [#29](https://github.com/Techware-Hut/mosaic-backend/issues/29) | Search/filter API readiness | `GET /api/public/search`, `GET /api/products/filters` | None | Query param smoke on prod | Location = **text regex** on address fields; **no ZIP/geolocation** |
+| [#29](https://github.com/Techware-Hut/mosaic-backend/issues/29) | Search/filter API readiness | `GET /api/public/search`, list endpoints, `GET /api/products/filters` | 15 search-filter tests ([TEST_MATRIX.md](TEST_MATRIX.md)) | Query param smoke on prod after merge | **ZIP exact** on `address.zipCode`; **no radius/geolocation**; tag + verified filters; see [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md) |
 | [#30](https://github.com/Techware-Hut/mosaic-backend/issues/30) | Vendor onboarding + email | Full onboarding + `WellcomeMailer.js` | 6 vendor/admin tests | Payment webhook + approval email on prod | Submit validation reduced (business name only at server) |
 | [#31](https://github.com/Techware-Hut/mosaic-backend/issues/31) | Vendor profile/listings/orders | Business, product, order vendor routes | Field allowlist + business sync tests | End-to-end vendor flows | Listing tier limits documented in [tier-listing-limit-implementation.md](tier-listing-limit-implementation.md) — runtime enforcement unverified |
 | [#32](https://github.com/Techware-Hut/mosaic-backend/issues/32) | Stripe Connect checkout | Connect + 5 webhooks + order PI | Webhook routing/signature tests | Live PI + split payout on prod | `/stripe/*` routes **lack auth** — security risk |
@@ -282,7 +282,7 @@ Full list: [`models/`](../models/). No Prisma/SQL/Zod schema layer.
 - Reviews: list (public), upsert/delete (customer) for product, service, food
 - Admin: vendor pending queue, business approve, category CRUD, featured product toggle
 - Email utilities for OTP, welcome, order confirmation, listing approval, onboarding
-- **77 automated tests** (auth DTOs, vendor middleware, webhook wiring, admin guards, business sync, marketplace DTOs)
+- **92 automated tests** (auth DTOs, vendor middleware, webhook wiring, admin guards, business sync, marketplace DTOs, search filters)
 
 ---
 
@@ -311,13 +311,13 @@ Cannot be proven by CI alone (mocked MongoDB/Stripe/email):
 | Gap | Detail |
 |-----|--------|
 | No `/api/products/featured` | By design — use **`GET /api/featured-products`** |
-| No admin tags API | Tags on `Business.tags`; searchable in public search only |
+| No admin tags API | Tags on `Business.tags`; filterable via public search/list (#29 branch) |
 | No admin sales/revenue summary | Only raw `GET /api/orders/admin` |
-| No ZIP/geolocation filter | Location search is substring match on address/city/state/country |
+| No radius/geolocation filter | Location search is text regex; ZIP exact on `address.zipCode` (#29 branch); no lat/lng radius |
 | No review follow-up email | Post-purchase review prompt not found in mail utilities |
 | Unauthenticated routes | `GET /api/admin/categories`, `POST /stripe/*`, `POST /api/payments/create-payment-intent` |
 | Reduced submit validation | `validateStage1Payload` enforces business name only (most rules commented out) |
-| No automated tests | Marketplace DTOs, search filters, reviews, checkout, email content |
+| Partial automated tests | Search filters covered (#29 branch); reviews, checkout, email content still untested |
 | Unmounted CMS router | `routes/cms/cmsRoutes.js` dead code |
 
 ---
@@ -400,7 +400,7 @@ See [TEST_MATRIX.md](TEST_MATRIX.md) for manual smoke mapping.
 Aligned to issue dependencies (audit → implementation → smoke proof):
 
 1. ~~**#28 Marketplace data contract**~~ — **Done (PR #37):** null-safe DTOs for public listing/featured/detail; see [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md)
-2. **#29 Search/filter** — document supported query params; add tests for category/tag/location text filter; document ZIP gap explicitly (do not invent geolocation)
+2. ~~**#29 Search/filter**~~ — **Done (branch `sprint/backend-search-filter-readiness`):** shared filter module, ZIP exact, tag/verified, tests + [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md); geolocation explicitly unsupported
 3. **#30 Vendor onboarding email** — verify approval/rejection emails fire on finalize; tighten submit validation if product requires
 4. **#31 Vendor MVP APIs** — confirm listing tier limit enforcement; vendor order list smoke
 5. **#32 Stripe Connect runtime** — prod smoke for checkout + webhooks; remediate unauthenticated `/stripe/*` routes

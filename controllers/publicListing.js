@@ -15,6 +15,19 @@ const {
   toPublicListingDetail,
   toPublicBusinessCard,
 } = require('../lib/listing/publicListingDto');
+const {
+  parsePublicSearchQuery,
+  detectUnsupportedGeoParams,
+  shouldIncludeListingType,
+  resolveBusinessIdsByKeyword,
+  resolveCombinedBusinessFilters,
+  intersectBusinessIdSets,
+  loadVerifiedByBusinessIds,
+  loadTagsByBusinessIds,
+  narrowVisibleBusinessIds,
+  mergeBusinessIdFilter,
+  buildKeywordRegex,
+} = require('../lib/listing/publicSearchFilters');
 
 const getVisibleBusinessIds = async () => {
   const businesses = await Business.find({
@@ -23,6 +36,69 @@ const getVisibleBusinessIds = async () => {
 
   return businesses.map((business) => business._id.toString());
 };
+
+const emptyListResponse = (page = 1) => ({
+  success: true,
+  total: 0,
+  page: parseInt(page, 10),
+  totalPages: 0,
+  data: [],
+});
+
+async function applyBusinessScopeToFilters(filters, visibleBusinessIds, query, explicitBusinessId, options = {}) {
+  const narrowed = await narrowVisibleBusinessIds(visibleBusinessIds, query, options);
+  if (narrowed.empty) return { empty: true };
+
+  const merged = mergeBusinessIdFilter(explicitBusinessId || filters.businessId, narrowed.businessIds);
+  if (merged.empty) return { empty: true };
+
+  filters.businessId = merged.filter;
+  return { empty: false };
+}
+
+async function mapProductsWithBusinessMeta(products, listingType = 'product') {
+  const businessIds = [...new Set(
+    products
+      .map((item) => {
+        const id = item.businessId?._id || item.businessId;
+        return id ? String(id) : null;
+      })
+      .filter(Boolean)
+  )];
+
+  const [verifiedMap, tagsMap, businesses] = await Promise.all([
+    loadVerifiedByBusinessIds(businessIds),
+    loadTagsByBusinessIds(businessIds),
+    Business.find({ _id: { $in: businessIds }, isActive: true })
+      .select('_id badge tags')
+      .lean(),
+  ]);
+
+  const badgeByBusinessId = new Map(
+    businesses.map((business) => [business._id.toString(), business.badge || null])
+  );
+
+  return products.map((product) => {
+    const businessKey = product.businessId?._id
+      ? String(product.businessId._id)
+      : String(product.businessId || '');
+    const cardOptions = { listingType };
+    if (verifiedMap.has(businessKey)) cardOptions.verified = verifiedMap.get(businessKey);
+
+    const enriched = {
+      ...product,
+      badge: badgeByBusinessId.get(businessKey) || product.badge || null,
+    };
+
+    if (product.businessId && typeof product.businessId === 'object' && tagsMap.has(businessKey)) {
+      enriched.businessId = { ...product.businessId, tags: tagsMap.get(businessKey) };
+    } else if (tagsMap.has(businessKey)) {
+      enriched.tags = tagsMap.get(businessKey);
+    }
+
+    return toPublicListingCard(enriched, cardOptions);
+  });
+}
 
 exports.getAllServices = async (req, res) => {
   try {
@@ -45,9 +121,13 @@ exports.getAllServices = async (req, res) => {
       limit = 10,
       price,
       badge,
+      tag,
+      tags,
+      zip,
+      verified,
     } = req.query;
 
-    const filters = {};
+    const filters = { isPublished: true };
     const badgeValueMap = {
       silver: 'Silver',
       gold: 'Gold',
@@ -65,20 +145,30 @@ exports.getAllServices = async (req, res) => {
     }
 
     if (minorityType) filters.minorityType = minorityType;
-    if (city) filters['contact.address'] = { $regex: city, $options: 'i' };
 
     const visibleBusinessIds = await getVisibleBusinessIds();
     if (!visibleBusinessIds.length) {
-      return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+      return res.json(emptyListResponse(page));
     }
 
     if (businessId) {
       if (!visibleBusinessIds.includes(String(businessId))) {
-        return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+        return res.json(emptyListResponse(page));
       }
       filters.businessId = businessId;
     } else {
       filters.businessId = { $in: visibleBusinessIds };
+    }
+
+    const scoped = await applyBusinessScopeToFilters(
+      filters,
+      visibleBusinessIds,
+      req.query,
+      businessId,
+      { includeLocation: true }
+    );
+    if (scoped.empty) {
+      return res.json(emptyListResponse(page));
     }
 
     // Category filtering - accept both slug and ID
@@ -435,9 +525,13 @@ exports.getAllFood = async (req, res) => {
       outOfStock = false,
       price,
       badge,
+      tag,
+      tags,
+      zip,
+      verified,
     } = req.query;
 
-    const filters = {};
+    const filters = { isPublished: true };
     const badgeValueMap = {
       silver: 'Silver',
       gold: 'Gold',
@@ -458,7 +552,30 @@ exports.getAllFood = async (req, res) => {
     if (state) filters['address.state'] = { $regex: state, $options: 'i' };
     if (country) filters['address.country'] = { $regex: country, $options: 'i' };
 
-    if (businessId) filters.businessId = businessId;
+    const visibleBusinessIds = await getVisibleBusinessIds();
+    if (!visibleBusinessIds.length) {
+      return res.json(emptyListResponse(page));
+    }
+
+    if (businessId) {
+      if (!visibleBusinessIds.includes(String(businessId))) {
+        return res.json(emptyListResponse(page));
+      }
+      filters.businessId = businessId;
+    } else {
+      filters.businessId = { $in: visibleBusinessIds };
+    }
+
+    const scoped = await applyBusinessScopeToFilters(
+      filters,
+      visibleBusinessIds,
+      req.query,
+      businessId,
+      { includeLocation: false }
+    );
+    if (scoped.empty) {
+      return res.json(emptyListResponse(page));
+    }
 
     // Category filtering
     if (categoryId) {
@@ -491,7 +608,9 @@ exports.getAllFood = async (req, res) => {
     }
 
     // Price
-    if (price) {
+    if (price === 'all') {
+      // Explicit opt-out of default MVP price window
+    } else if (price) {
       const priceRange = price.split('-');
       if (priceRange.length === 2) {
         const minPrice = parseFloat(priceRange[0]);
@@ -511,6 +630,7 @@ exports.getAllFood = async (req, res) => {
         .map((value) => badgeValueMap[value] || value);
 
       const badgeBusinesses = await Business.find({
+        isActive: true,
         badge: { $in: requestedBadges }
       }).select('_id').lean();
 
@@ -845,150 +965,24 @@ const ProductCategory = require('../models/ProductCategory');
 const ProductSubcategory = require('../models/ProductSubcategory');
 const MinorityType = require('../models/MinorityType');
 
-const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+async function resolveCategoryIdForListingType(listingType, { categoryId, categorySlug }) {
+  if (categoryId) return categoryId;
+  if (!categorySlug) return null;
 
-const buildKeywordRegex = (value = '') => new RegExp(escapeRegex(value.trim()), 'i');
-
-const buildFlexibleMatchRegex = (value = '') => {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) return null;
-
-  const normalized = trimmed.replace(/[-_,]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const tokens = normalized.split(' ').filter(Boolean);
-
-  if (tokens.length > 1) {
-    return new RegExp(tokens.map(escapeRegex).join('[\\s,-]*'), 'i');
+  if (listingType === 'product') {
+    const category = await ProductCategory.findOne({ slug: categorySlug }).select('_id').lean();
+    return category?._id || null;
   }
-
-  if (normalized.length >= 5) {
-    return new RegExp(normalized.split('').map(escapeRegex).join('[\\s,-]*'), 'i');
+  if (listingType === 'service') {
+    const category = await ServiceCategory.findOne({ slug: categorySlug }).select('_id').lean();
+    return category?._id || null;
   }
-
-  return new RegExp(escapeRegex(normalized), 'i');
-};
-
-const resolveBusinessIdsByKeyword = async (keyword) => {
-  const keywordRegex = buildFlexibleMatchRegex(keyword);
-  if (!keywordRegex) {
-    return [];
+  if (listingType === 'food') {
+    const category = await FoodCategory.findOne({ slug: categorySlug }).select('_id').lean();
+    return category?._id || null;
   }
-
-  const [businessMatches, vendorMatches] = await Promise.all([
-    Business.find({
-      isActive: true,
-      $or: [
-        { businessName: keywordRegex },
-        { description: keywordRegex },
-        { tags: keywordRegex },
-      ],
-    }).select('_id').lean(),
-    VendorOnboardingStage1.find({
-      businessId: { $exists: true, $ne: null },
-      $or: [
-        { businessName: keywordRegex },
-        { businessBio: keywordRegex },
-      ],
-    }).select('businessId').lean(),
-  ]);
-
-  return [...new Set([
-    ...businessMatches.map((item) => item._id.toString()),
-    ...vendorMatches.map((item) => item.businessId?.toString()).filter(Boolean),
-  ])].map((id) => new mongoose.Types.ObjectId(id));
-};
-
-const resolveBusinessIdsForPublicSearch = async ({ location, minorityType }) => {
-  if (!location && !minorityType) {
-    return null;
-  }
-
-  const normalizedMinority = minorityType.replace(/-/g, ' ').trim();
-  const locationRegex = location ? buildFlexibleMatchRegex(location) : null;
-  const minorityRegex = minorityType ? buildFlexibleMatchRegex(normalizedMinority) : null;
-
-  let minorityTypeIds = [];
-  if (minorityType) {
-    if (mongoose.Types.ObjectId.isValid(minorityType)) {
-      minorityTypeIds.push(new mongoose.Types.ObjectId(minorityType));
-    }
-
-    const minorityMatches = await MinorityType.find({
-      name: minorityRegex,
-      isActive: true,
-    }).select('_id').lean();
-
-    minorityTypeIds.push(...minorityMatches.map((item) => item._id));
-    minorityTypeIds = [...new Set(minorityTypeIds.map((id) => id.toString()))]
-      .map((id) => new mongoose.Types.ObjectId(id));
-  }
-
-  const matchedSets = [];
-
-  if (locationRegex) {
-    const [businessLocationMatches, vendorLocationMatches] = await Promise.all([
-      Business.find({
-        isActive: true,
-        $or: [
-          { businessName: locationRegex },
-          { 'address.street': locationRegex },
-          { 'address.city': locationRegex },
-          { 'address.state': locationRegex },
-          { 'address.country': locationRegex },
-        ],
-      }).select('_id').lean(),
-      VendorOnboardingStage1.find({
-        businessId: { $exists: true, $ne: null },
-        $or: [
-          { businessName: locationRegex },
-          { 'address.street': locationRegex },
-          { 'address.city': locationRegex },
-          { 'address.state': locationRegex },
-          { 'address.country': locationRegex },
-        ],
-      }).select('businessId').lean(),
-    ]);
-
-    const locationIds = new Set([
-      ...businessLocationMatches.map((item) => item._id.toString()),
-      ...vendorLocationMatches.map((item) => item.businessId?.toString()).filter(Boolean),
-    ]);
-
-    matchedSets.push(locationIds);
-  }
-
-  if (minorityType) {
-    const [businessMinorityMatches, vendorMinorityMatches] = await Promise.all([
-      Business.find({
-        isActive: true,
-        ...(minorityTypeIds.length ? { minorityType: { $in: minorityTypeIds } } : { _id: null }),
-      }).select('_id').lean(),
-      VendorOnboardingStage1.find({
-        businessId: { $exists: true, $ne: null },
-        minorityCategories: { $elemMatch: { $regex: minorityRegex } },
-      }).select('businessId').lean(),
-    ]);
-
-    const minorityIds = new Set([
-      ...businessMinorityMatches.map((item) => item._id.toString()),
-      ...vendorMinorityMatches.map((item) => item.businessId?.toString()).filter(Boolean),
-    ]);
-
-    matchedSets.push(minorityIds);
-  }
-
-  if (!matchedSets.length) {
-    return null;
-  }
-
-  const [firstSet, ...restSets] = matchedSets;
-  const intersectedIds = [...firstSet].filter((id) => restSets.every((set) => set.has(id)));
-
-  if (!intersectedIds.length) {
-    return [];
-  }
-
-  return intersectedIds.map((id) => new mongoose.Types.ObjectId(id));
-};
+  return null;
+}
 
 exports.getAllProducts = async (req, res) => {
   try {
@@ -1010,6 +1004,10 @@ exports.getAllProducts = async (req, res) => {
       outOfStock = false,
       price,
       badge,
+      tag,
+      tags,
+      zip,
+      verified,
     } = req.query;
 
     const filters = { isDeleted: false, isPublished: true };
@@ -1038,11 +1036,22 @@ exports.getAllProducts = async (req, res) => {
     }
     if (businessId) {
       if (!visibleBusinessIds.includes(String(businessId))) {
-        return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+        return res.json(emptyListResponse(page));
       }
       filters.businessId = businessId;
     } else {
       filters.businessId = { $in: visibleBusinessIds };
+    }
+
+    const scoped = await applyBusinessScopeToFilters(
+      filters,
+      visibleBusinessIds,
+      req.query,
+      businessId,
+      { includeLocation: false }
+    );
+    if (scoped.empty) {
+      return res.json(emptyListResponse(page));
     }
 
     // Category filtering - accept both slug and ID
@@ -1051,7 +1060,7 @@ exports.getAllProducts = async (req, res) => {
     } else if (categorySlug) {
       const category = await ProductCategory.findOne({ slug: categorySlug });
       if (category) filters.categoryId = category._id;
-      else return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+      else return res.json(emptyListResponse(page));
     }
 
     // Subcategory filtering - accept both slug and ID
@@ -1060,23 +1069,12 @@ exports.getAllProducts = async (req, res) => {
     } else if (subcategorySlug) {
       const subcategory = await ProductSubcategory.findOne({ slug: subcategorySlug });
       if (subcategory) filters.subcategoryId = subcategory._id;
-      else return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+      else return res.json(emptyListResponse(page));
     }
 
     if (offers === 'true') filters.features = { $in: ['Offers Available'] };
     if (outOfStock === 'true') filters.stockQuantity = { $lte: 0 };
 
-    // Price filtering
-    // if (price) {
-    //   const priceRange = price.split('-');
-    //   if (priceRange.length === 2) {
-    //     const minPrice = parseFloat(priceRange[0]);
-    //     const maxPrice = parseFloat(priceRange[1]);
-    //     filters.price = { $gte: minPrice, $lte: maxPrice };
-    //   }
-    // } else {
-    //   filters.price = { $gte: 0, $lte: 200 };
-    // }
     // Price filtering (only apply if user sends price query)
 if (price) {
   const priceRange = price.split('-');
@@ -1140,37 +1138,13 @@ if (price) {
 
     let products = await Product.find(filters)
       .select('title description coverImage slug brand categoryId subcategoryId price businessId')
+      .populate('businessId', 'businessName logo badge address tags')
       .sort(sortOption)
       .skip(skip)
       .limit(parseInt(limit))
       .lean();
 
-    const businessIds = [...new Set(
-      products
-        .map((product) => product.businessId?.toString())
-        .filter(Boolean)
-    )];
-
-    const businesses = await Business.find({
-      _id: { $in: businessIds },
-      isActive: true,
-    })
-      .select('_id badge')
-      .lean();
-
-    const badgeByBusinessId = new Map(
-      businesses.map((business) => [business._id.toString(), business.badge || null])
-    );
-
-    products = products.map((product) =>
-      toPublicListingCard(
-        {
-          ...product,
-          badge: badgeByBusinessId.get(product.businessId?.toString()) || null,
-        },
-        { listingType: 'product' }
-      )
-    );
+    products = await mapProductsWithBusinessMeta(products, 'product');
 
     const total = await Product.countDocuments(filters);
     const totalPages = Math.ceil(total / limit);
@@ -1208,6 +1182,10 @@ exports.getProductsByFilters = async (req, res) => {
       page = 1,
       limit = 10,
       outOfStock = false,
+      tag,
+      tags,
+      zip,
+      verified,
     } = req.query;
 
     const filters = { isDeleted: false, isPublished: true };
@@ -1254,6 +1232,18 @@ exports.getProductsByFilters = async (req, res) => {
     } else {
       filters.businessId = { $in: visibleBusinessIds };
     }
+
+    const scoped = await applyBusinessScopeToFilters(
+      filters,
+      visibleBusinessIds,
+      req.query,
+      businessId,
+      { includeLocation: false }
+    );
+    if (scoped.empty) {
+      return res.json({ success: true, total: 0, data: [] });
+    }
+
     if (offers === 'true') filters.features = { $in: ['Offers Available'] };
     if (outOfStock === 'true') filters.stockQuantity = { $lte: 0 };
 
@@ -1322,13 +1312,13 @@ exports.getProductsByFilters = async (req, res) => {
     // Filter out products with no variants
     products = products.filter(product => product.variants && product.variants.length > 0);
 
-    const total = await Product.countDocuments(filters);
+    const filteredTotal = products.length;
 
     res.json({
       success: true,
-      total: products.length,
+      total: filteredTotal,
       page: parseInt(page),
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(filteredTotal / limit) || 0,
       data: products.map((product) => toPublicListingCard(product, { listingType: 'product' })),
     });
 
@@ -1632,61 +1622,58 @@ exports.getProductsByBusinessId = async (req, res) => {
 
 exports.searchPublicListings = async (req, res) => {
   try {
-    const {
-      keyword = '',
-      search = '',
-      location = '',
-      minorityType = '',
-      limit = 10,
-    } = req.query;
+    const parsed = parsePublicSearchQuery(req.query);
+    const unsupported = detectUnsupportedGeoParams(req.query);
+    const emptyPayload = {
+      success: true,
+      filters: {
+        keyword: parsed.keyword,
+        location: parsed.location,
+        city: parsed.city,
+        state: parsed.state,
+        country: parsed.country,
+        zip: parsed.zip,
+        minorityType: parsed.minorityType,
+        categoryId: parsed.categoryId,
+        categorySlug: parsed.categorySlug,
+        tag: parsed.tag,
+        tags: parsed.tags,
+        verified: parsed.verified,
+        listingType: parsed.listingType,
+        page: parsed.page,
+        limit: parsed.limit,
+        unsupported,
+      },
+      totals: { all: 0, products: 0, services: 0, foods: 0 },
+      data: { products: [], services: [], foods: [] },
+    };
 
-    const trimmedKeyword = String(keyword || search || '').trim();
-    const trimmedLocation = String(location || '').trim();
-    const trimmedMinorityType = String(minorityType || '').trim();
-    const parsedLimit = Math.max(1, Math.min(50, parseInt(limit, 10) || 10));
-
-    const [filteredBusinessIds, keywordBusinessIds] = await Promise.all([
-      resolveBusinessIdsForPublicSearch({
-        location: trimmedLocation,
-        minorityType: trimmedMinorityType,
+    const [combinedBusinessIds, keywordBusinessIds] = await Promise.all([
+      resolveCombinedBusinessFilters({
+        location: parsed.location,
+        city: parsed.city,
+        state: parsed.state,
+        country: parsed.country,
+        zip: parsed.zip,
+        minorityType: parsed.minorityType,
+        tag: parsed.tag,
+        tags: parsed.tags,
+        verified: parsed.verified,
       }),
-      trimmedKeyword ? resolveBusinessIdsByKeyword(trimmedKeyword) : Promise.resolve([]),
+      parsed.keyword ? resolveBusinessIdsByKeyword(parsed.keyword) : Promise.resolve([]),
     ]);
 
-    if (Array.isArray(filteredBusinessIds) && !filteredBusinessIds.length) {
-      return res.json({
-        success: true,
-        filters: {
-          keyword: trimmedKeyword,
-          location: trimmedLocation,
-          minorityType: trimmedMinorityType,
-        },
-        totals: {
-          all: 0,
-          products: 0,
-          services: 0,
-          foods: 0,
-        },
-        data: {
-          products: [],
-          services: [],
-          foods: [],
-        },
-      });
+    if (Array.isArray(combinedBusinessIds) && !combinedBusinessIds.length) {
+      return res.json(emptyPayload);
     }
 
-    const keywordRegex = trimmedKeyword ? buildKeywordRegex(trimmedKeyword) : null;
+    const keywordRegex = parsed.keyword ? buildKeywordRegex(parsed.keyword) : null;
 
-    let allowedBusinessIds = null;
+    let allowedBusinessIds = combinedBusinessIds;
     let useBusinessKeywordOnly = false;
 
-    if (Array.isArray(filteredBusinessIds)) {
-      allowedBusinessIds = filteredBusinessIds;
-    }
-
     if (Array.isArray(allowedBusinessIds) && keywordBusinessIds.length) {
-      const allowedSet = new Set(allowedBusinessIds.map((id) => id.toString()));
-      allowedBusinessIds = keywordBusinessIds.filter((id) => allowedSet.has(id.toString()));
+      allowedBusinessIds = intersectBusinessIdSets(allowedBusinessIds, keywordBusinessIds);
       useBusinessKeywordOnly = true;
     } else if (!Array.isArray(allowedBusinessIds) && keywordBusinessIds.length) {
       allowedBusinessIds = keywordBusinessIds;
@@ -1698,25 +1685,7 @@ exports.searchPublicListings = async (req, res) => {
       : {};
 
     if (Array.isArray(allowedBusinessIds) && !allowedBusinessIds.length) {
-      return res.json({
-        success: true,
-        filters: {
-          keyword: trimmedKeyword,
-          location: trimmedLocation,
-          minorityType: trimmedMinorityType,
-        },
-        totals: {
-          all: 0,
-          products: 0,
-          services: 0,
-          foods: 0,
-        },
-        data: {
-          products: [],
-          services: [],
-          foods: [],
-        },
-      });
+      return res.json(emptyPayload);
     }
 
     const productFilter = {
@@ -1724,105 +1693,156 @@ exports.searchPublicListings = async (req, res) => {
       isPublished: true,
       ...baseBusinessFilter,
     };
-
     const serviceFilter = {
       isPublished: true,
       ...baseBusinessFilter,
     };
-
     const foodFilter = {
       isPublished: true,
       ...baseBusinessFilter,
     };
 
-    if (keywordRegex) {
-      const productKeywordOr = [
-        { title: keywordRegex },
-        { description: keywordRegex },
-        { brand: keywordRegex },
-      ];
+    const resolvedCategoryId = await resolveCategoryIdForListingType(parsed.listingType === 'all' ? 'product' : parsed.listingType, parsed)
+      || (parsed.categoryId || null);
 
-      const serviceKeywordOr = [
-        { title: keywordRegex },
-        { description: keywordRegex },
-        { 'services.name': keywordRegex },
-        { 'services.description': keywordRegex },
-      ];
-
-      const foodKeywordOr = [
-        { title: keywordRegex },
-        { description: keywordRegex },
-        { businessName: keywordRegex },
-        { foodType: keywordRegex },
-        { brand: keywordRegex },
-      ];
-
-      if (!useBusinessKeywordOnly) {
-        productFilter.$or = productKeywordOr;
-        serviceFilter.$or = serviceKeywordOr;
-        foodFilter.$or = foodKeywordOr;
+    if (parsed.categoryId || parsed.categorySlug) {
+      if (shouldIncludeListingType(parsed.listingType, 'product')) {
+        const productCategoryId = parsed.categoryId || await resolveCategoryIdForListingType('product', parsed);
+        if (productCategoryId) {
+          productFilter.categoryId = productCategoryId;
+        } else if (parsed.categorySlug) {
+          return res.json(emptyPayload);
+        }
+      }
+      if (shouldIncludeListingType(parsed.listingType, 'service')) {
+        const serviceCategoryId = parsed.categoryId || await resolveCategoryIdForListingType('service', parsed);
+        if (serviceCategoryId) {
+          serviceFilter.categoryId = serviceCategoryId;
+        } else if (parsed.categorySlug) {
+          return res.json(emptyPayload);
+        }
+      }
+      if (shouldIncludeListingType(parsed.listingType, 'food')) {
+        const foodCategoryId = parsed.categoryId || await resolveCategoryIdForListingType('food', parsed);
+        if (foodCategoryId) {
+          foodFilter.categoryId = foodCategoryId;
+        } else if (parsed.categorySlug) {
+          return res.json(emptyPayload);
+        }
       }
     }
 
-    const [products, services, foods] = await Promise.all([
-      Product.find(productFilter)
-        .select('title description coverImage slug brand price businessId')
-        .populate({
-          path: 'businessId',
-          select: 'businessName logo badge address minorityType',
-          populate: {
-            path: 'minorityType',
-            select: 'name',
-          },
-        })
-        .sort({ createdAt: -1 })
-        .limit(parsedLimit)
-        .lean(),
-      Service.find(serviceFilter)
-        .select('title description services coverImage slug price location contact businessId averageRating totalReviews')
-        .populate({
-          path: 'businessId',
-          select: 'businessName logo badge address minorityType',
-          populate: {
-            path: 'minorityType',
-            select: 'name',
-          },
-        })
-        .sort({ createdAt: -1 })
-        .limit(parsedLimit)
-        .lean(),
-      Food.find(foodFilter)
-        .select('title description coverImage slug price businessId foodType brand')
-        .populate({
-          path: 'businessId',
-          select: 'businessName logo badge address minorityType',
-          populate: {
-            path: 'minorityType',
-            select: 'name',
-          },
-        })
-        .sort({ createdAt: -1 })
-        .limit(parsedLimit)
-        .lean(),
-    ]);
+    if (keywordRegex && !useBusinessKeywordOnly) {
+      if (shouldIncludeListingType(parsed.listingType, 'product')) {
+        productFilter.$or = [
+          { title: keywordRegex },
+          { description: keywordRegex },
+          { brand: keywordRegex },
+        ];
+      }
+      if (shouldIncludeListingType(parsed.listingType, 'service')) {
+        serviceFilter.$or = [
+          { title: keywordRegex },
+          { description: keywordRegex },
+          { 'services.name': keywordRegex },
+          { 'services.description': keywordRegex },
+        ];
+      }
+      if (shouldIncludeListingType(parsed.listingType, 'food')) {
+        foodFilter.$or = [
+          { title: keywordRegex },
+          { description: keywordRegex },
+          { businessName: keywordRegex },
+          { foodType: keywordRegex },
+          { brand: keywordRegex },
+        ];
+      }
+    }
+
+    const skip = (parsed.page - 1) * parsed.limit;
+    const businessPopulate = {
+      path: 'businessId',
+      select: 'businessName logo badge address minorityType tags',
+      populate: { path: 'minorityType', select: 'name' },
+    };
+
+    const queryJobs = [];
+    if (shouldIncludeListingType(parsed.listingType, 'product')) {
+      queryJobs.push(
+        Product.find(productFilter)
+          .select('title description coverImage slug brand price businessId categoryId')
+          .populate(businessPopulate)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(parsed.limit)
+          .lean()
+      );
+    } else {
+      queryJobs.push(Promise.resolve([]));
+    }
+
+    if (shouldIncludeListingType(parsed.listingType, 'service')) {
+      queryJobs.push(
+        Service.find(serviceFilter)
+          .select('title description services coverImage slug price location contact businessId averageRating totalReviews categoryId')
+          .populate(businessPopulate)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(parsed.limit)
+          .lean()
+      );
+    } else {
+      queryJobs.push(Promise.resolve([]));
+    }
+
+    if (shouldIncludeListingType(parsed.listingType, 'food')) {
+      queryJobs.push(
+        Food.find(foodFilter)
+          .select('title description coverImage slug price businessId foodType brand categoryId')
+          .populate(businessPopulate)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(parsed.limit)
+          .lean()
+      );
+    } else {
+      queryJobs.push(Promise.resolve([]));
+    }
+
+    const [products, services, foods] = await Promise.all(queryJobs);
+
+    const allBusinessIds = [...products, ...services, ...foods]
+      .map((item) => item.businessId?._id || item.businessId)
+      .filter(Boolean)
+      .map(String);
+    const verifiedMap = await loadVerifiedByBusinessIds(allBusinessIds);
+
+    const mapCards = (items, listingType) => items.map((item) => {
+      const businessKey = item.businessId?._id
+        ? String(item.businessId._id)
+        : String(item.businessId || '');
+      const options = { listingType };
+      if (verifiedMap.has(businessKey)) options.verified = verifiedMap.get(businessKey);
+      return toPublicListingCard(item, options);
+    });
+
+    const productCards = mapCards(products, 'product');
+    const serviceCards = mapCards(services, 'service');
+    const foodCards = mapCards(foods, 'food');
 
     return res.json({
       success: true,
-      filters: {
-        keyword: trimmedKeyword,
-        location: trimmedLocation,
-        minorityType: trimmedMinorityType,
-      },
+      filters: emptyPayload.filters,
       totals: {
-        all: products.length + services.length + foods.length,
-        products: products.length,
-        services: services.length,
-        foods: foods.length,
+        all: productCards.length + serviceCards.length + foodCards.length,
+        products: productCards.length,
+        services: serviceCards.length,
+        foods: foodCards.length,
       },
       data: {
-        products: products.map((item) => toPublicListingCard(item, { listingType: 'product' })),
-        services: services.map((item) => toPublicListingCard(item, { listingType: 'service' })),
-        foods: foods.map((item) => toPublicListingCard(item, { listingType: 'food' })),
+        products: productCards,
+        services: serviceCards,
+        foods: foodCards,
       },
     });
   } catch (err) {

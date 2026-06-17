@@ -2,7 +2,7 @@
 
 Maps backend features to automated tests (`npm test`), manual smoke checks, and proof-pack evidence.
 
-**Runner:** `npm test` → `node --test tests/**/*.test.js` (77 tests, Node built-in runner)
+**Runner:** `npm test` → `node --test tests/**/*.test.js` (92 tests, Node built-in runner)
 
 **Test style:** Unit/integration-style tests with mocked Mongoose models and module hooks. They prove **handler logic and wiring** — not full end-to-end flows against live MongoDB, Stripe, or AWS in CI.
 
@@ -14,7 +14,7 @@ Maps backend features to automated tests (`npm test`), manual smoke checks, and 
 
 | Layer | Count | What it validates |
 |-------|-------|-------------------|
-| Automated (`tests/`) | **77** | DTOs, middleware, controller logic, webhook wiring (mocked) |
+| Automated (`tests/`) | **92** | DTOs, middleware, controller logic, webhook wiring, search filters (mocked) |
 | Manual smoke script | 1 | Live API + DB auth/check per role |
 | Production smoke tiers | P0–P6 | Post-deploy on `https://api.mosaicbizhub.com` |
 | Proof pack | Per release | Redacted evidence matrix |
@@ -206,6 +206,17 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 
 ---
 
+## Search/filter tests (issue #29)
+
+| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
+| --- | --- | --- | --- | --- |
+| Public search filters | [`tests/marketplace/public-search-filters.test.js`](../tests/marketplace/public-search-filters.test.js) | Query parsing, tag/ZIP resolution, verified DTO fix, empty-result safety, unsupported geo echo, listingType scoping | Live MongoDB queries; radius search | Yes — P6.1–P6.2 after merge |
+| Shared filter module | same | `resolveBusinessIdsByTags`, `resolveBusinessIdsByZip`, intersection logic | VendorOnboarding + Business join against prod DB | Partial |
+
+**Readiness doc:** [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md)
+
+---
+
 ## Launch-critical area → coverage map
 
 | Launch-critical area | Automated | Manual smoke | Gap / honest limit |
@@ -219,6 +230,7 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 | Webhook wiring | Yes (9 tests) | P4.x | Event DB side-effects manual |
 | Business sync | Yes (5 tests) | Post-verify | Subscription dependency manual |
 | Marketplace card/detail DTO | Yes (20 tests) | P6.x | Live browse/detail E2E manual |
+| Public search/filter helpers | Yes (15 tests) | P6.1–P6.2 | No live ZIP/tag prod smoke |
 | Subscriptions (API) | **No** | P4.3 | Billing E2E manual |
 | CI/CD regression | **No** | `npm test` local pre-merge | No GitHub Actions |
 
@@ -227,7 +239,7 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 ## How to run
 
 ```bash
-# All automated tests (77)
+# All automated tests (92)
 npm test
 
 # Manual auth smoke (live API + DB)
@@ -243,7 +255,7 @@ node scripts/verify-auth-check-smoke.js
 
 | Evidence type | Source | Automated equivalent |
 | --- | --- | --- |
-| `npm test` 77/77 pass | Pre-merge local/CI | Yes — full suite |
+| `npm test` 92/92 pass | Pre-merge local/CI | Yes — full suite |
 | Auth smoke script output | `scripts/verify-auth-check-smoke.js` | Partial — live auth/check only |
 | Smoke matrix P0–P6 | [production-smoke-checklist.md](production-smoke-checklist.md) | No — human execution |
 | Webhook unsigned 400 | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) curl | Partial — 9 tests cover handler logic |
@@ -272,4 +284,5 @@ node scripts/verify-auth-check-smoke.js
 | `tests/stripe/stripe-webhook-routing-signature.test.js` | 9 | Webhook routing + signatures |
 | `tests/marketplace/public-listing-dto.test.js` | 18 | Marketplace DTO normalization |
 | `tests/marketplace/featured-products-response.test.js` | 2 | Featured products wiring |
-| **Total** | **77** | |
+| `tests/marketplace/public-search-filters.test.js` | 15 | Search/filter helpers + handler |
+| **Total** | **92** | |
