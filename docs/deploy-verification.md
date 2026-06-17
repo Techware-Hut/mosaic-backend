@@ -313,31 +313,34 @@ Full matrix: [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_S
 
 ---
 
-## Issue #32 — Stripe Connect runtime verification (audit branch)
+## Issue #32 — Stripe Connect runtime verification
 
-**Branch:** `sprint/backend-stripe-connect-runtime-verification`  
-**Scope:** Audit + docs + mocked tests only — **no deploy**, **no live charges**
+**Merged:** [PR #47](https://github.com/Techware-Hut/mosaic-backend/pull/47) → `main` `7f7e293`  
+**Scope:** Audit + docs + mocked tests only — no payment runtime code changes
 
-### Audit record
+### Deploy record
 
 | Field | Value |
 |-------|-------|
-| Base commit | `76713f2` (docs-only `main` after #31 deploy) |
-| EB production runtime | `2134231` (unchanged) |
+| Merge commit | `7f7e2930f931968da6985519cc3fc948aab778ae` |
+| GHA deploy run | [27726955386](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27726955386) — **success** |
+| EB version label | `mosaic-7f7e2930f931968da6985519cc3fc948aab778ae` |
+| EB application / environment | `mosaic-biz-hub-backend` / `mosaic-backend-env` |
+| API base | `https://api.mosaicbizhub.com` |
 | Connect pattern | Express + destination charges + `application_fee_amount` |
-| Automated tests | **138/138** pass (`123` → `138`, +15 Connect/webhook handler tests) |
-| Evidence doc | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) |
+| Automated tests | **138/138** |
+
+Workflow post-deploy probes: root **200**, unauth auth/check **401**.
 
 ### Smoke summary
 
 | Area | Result |
 |------|--------|
-| Static code audit (Connect checkout, webhooks, guards) | **PASS** |
-| Mocked unit tests (initiateOrder, webhook handlers) | **PASS** — 138/138 |
-| Tier A prod smoke (unsigned webhook, health) | **Not run** — optional read-only |
-| Tier B test-mode E2E checkout + split payout | **BLOCKED** — requires `sk_test_*` env + smoke accounts |
-| Tier C prod live charge | **BLOCKED** — requires written approval + `SMOKE_TEST_*` accounts |
+| Static code audit + mocked tests | **PASS** |
+| GHA deploy + health/auth probes | **PASS** |
+| Tier B test-mode E2E checkout + split payout | **PENDING** — `SMOKE_TEST_*` accounts |
+| Tier C prod live charge | **BLOCKED** — written approval required |
 
 ### Conclusion
 
-**Audit Go** for issue #32 on branch `sprint/backend-stripe-connect-runtime-verification`. Connect destination-charge implementation verified in code and tests. Production runtime checkout proof **PENDING** until `SMOKE_TEST_*` accounts exist and Tier B/C gates are cleared. No deployment in this issue.
+**Deploy Go** for issue #32 on `7f7e293`. Audit and test coverage merged; payment runtime unchanged (docs/tests only in deploy package). Live checkout proof **PENDING** smoke accounts. Follow-ups: #41, #42, #43, expanded #27.

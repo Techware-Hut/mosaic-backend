@@ -1,6 +1,6 @@
 # MVP Backend Program Status
 
-**Last updated:** 2026-06-17  
+**Last updated:** 2026-06-17 (post-#32 deploy)  
 **Canonical hub** for backend MVP sprint (#26–#35): where Mosaic is today, what is live in production, what is in flight, and what comes next.
 
 For deep technical detail, follow links to issue-specific docs — do not duplicate them here.
@@ -13,11 +13,11 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | --- | --- |
 | **Product** | Mosaic Biz Hub backend — minority-owned business marketplace REST API |
 | **Production API** | `https://api.mosaicbizhub.com` |
-| **Production deploy SHA** | `2134231` — issue #31 vendor self-service + program docs ([PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40)) |
-| **EB version label** | `mosaic-213423163964db9f32505ecb500d034b40fc583e` |
-| **`main` HEAD** | `6aa71ee` — post-#31 verification docs; **app runtime on EB matches `2134231`** |
-| **Open PR** | None for #31 — merged and deployed |
-| **Automated tests** | **138/138** on audit branch (`123` baseline on prod runtime `2134231`) |
+| **Production deploy SHA** | `7f7e293` — issue #32 Stripe Connect audit docs/tests ([PR #47](https://github.com/Techware-Hut/mosaic-backend/pull/47)); payment runtime unchanged since `2134231` |
+| **EB version label** | `mosaic-7f7e2930f931968da6985519cc3fc948aab778ae` |
+| **`main` HEAD** | `7f7e293` |
+| **Open PR** | None |
+| **Automated tests** | **138/138** on `main` |
 | **Release model** | Controlled issue-by-issue merge → manual GHA EB deploy → tiered prod smoke → evidence in [deploy-verification.md](deploy-verification.md) |
 
 ---
@@ -32,7 +32,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | [#29](https://github.com/Techware-Hut/mosaic-backend/issues/29) | Search/filter readiness | **Merged** (PR #38) | **Live** (`9f66c07`+) | [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md) |
 | [#30](https://github.com/Techware-Hut/mosaic-backend/issues/30) | Vendor onboarding + email | **Merged** (PR #39) | **Live** (`6cdf587`) | [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) |
 | [#31](https://github.com/Techware-Hut/mosaic-backend/issues/31) | Vendor self-service APIs | **Merged** (PR #40) | **Live** (`2134231`) | [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) |
-| [#32](https://github.com/Techware-Hut/mosaic-backend/issues/32) | Stripe Connect runtime | **In progress** (audit branch) | N/A (not deployed) | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) |
+| [#32](https://github.com/Techware-Hut/mosaic-backend/issues/32) | Stripe Connect runtime | **Merged** (PR #47) | **Live** (`7f7e293` docs/tests) | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) |
 | [#33](https://github.com/Techware-Hut/mosaic-backend/issues/33) | Email notifications | **Not started** | N/A | Audit §10 |
 | [#34](https://github.com/Techware-Hut/mosaic-backend/issues/34) | Admin APIs | **Not started** | N/A | Audit §10 |
 | [#35](https://github.com/Techware-Hut/mosaic-backend/issues/35) | Reviews | **Not started** | N/A | Audit §10 |
@@ -45,11 +45,13 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 
 ### Immediate gate
 
-Issue #31 complete (merged, deployed, partial smoke). Tier-limit and vendor-order prod proof **PENDING** `SMOKE_TEST_*` accounts.
+Issue #32 complete (merged, deployed). Checkout live smoke **PENDING** `SMOKE_TEST_*` accounts — tracked in #27 and follow-ups #41–#43.
 
 ### Next scheduled work
 
-- **#32 Stripe Connect runtime** — audit complete on branch `sprint/backend-stripe-connect-runtime-verification` (docs + 15 tests); prod checkout smoke **PENDING** smoke accounts + live-charge gate. See [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md).
+- **#33** Email notifications — order/onboarding/review templates
+- **#41** Payment route hardening (P0 security follow-up from #32 audit)
+- **#42** Checkout approval gate + safe `retrieveIntent` response
 
 ### Parallel / later
 
