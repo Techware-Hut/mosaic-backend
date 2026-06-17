@@ -200,3 +200,88 @@ Copy [production-proof-pack-template.md](production-proof-pack-template.md) for 
 - [ ] Link to automated pre-merge gate: `npm test` **77/77 pass** on merge commit
 
 **Do not overclaim:** Passing this pack proves production browse/auth/CORS health for the deployed SHA. It does not prove Stripe payouts, email delivery, or full launch sign-off. See [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md).
+
+---
+
+## Production smoke results — 2026-06-17
+
+Post-merge deploy of PR #37 (`7201f97`) via manual GitHub Actions workflow. Evidence for issue [#27](https://github.com/Techware-Hut/mosaic-backend/issues/27).
+
+### Deploy metadata
+
+| Field | Value |
+|-------|-------|
+| GitHub Actions run | [27717414160](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27717414160) |
+| Deployed commit SHA | `7201f97dd59db953f7d469f2de4f686fb7f39217` |
+| EB version label | `mosaic-7201f97dd59db953f7d469f2de4f686fb7f39217` |
+| EB application | `mosaic-biz-hub-backend` |
+| EB environment | `mosaic-backend-env` |
+| Production API base | `https://api.mosaicbizhub.com` |
+| Pre-merge gate | `npm test` **77/77 pass** on merge commit |
+
+### Endpoint smoke (Tiers A–C)
+
+| Endpoint | Command | Expected | Actual | Pass/Fail | Notes |
+|----------|---------|----------|--------|-----------|-------|
+| `GET /` | `curl.exe -s -o NUL -w "%{http_code}" https://api.mosaicbizhub.com/` | 200 | 200 | **PASS** | Health JSON returned |
+| `GET /api/users/auth/check` | `curl.exe ... /api/users/auth/check` | 401 | 401 | **PASS** | Unauthenticated probe |
+| `GET /api/featured-products` | `curl.exe ... /api/featured-products` | 200 | 200 | **PASS** | Wrapper `{ products, pagination }`; **0 featured items** in prod DB |
+| `GET /api/products/list?limit=5` | `curl.exe ... /api/products/list?limit=5` | 200 | 200 | **PASS** | 1 product returned |
+| `GET /api/products/filters?limit=5` | `curl.exe ... /api/products/filters?limit=5` | 200 | 200 | **PASS** | |
+| `GET /api/public/search?keyword=test&limit=5` | `curl.exe ... /api/public/search?keyword=test&limit=5` | 200 | 200 | **PASS** | |
+| `GET /api/services/list?limit=5` | `curl.exe ... /api/services/list?limit=5` | 200 | 200 | **PASS** | 5 services returned |
+| `GET /api/food/list?limit=5` | `curl.exe ... /api/food/list?limit=5` | 200 | 200 | **PASS** | 5 food items returned |
+| `GET /api/public/product/{id}` | Detail probe (id from products list) | 200 | 200 | **PASS** | DTO fields validated |
+| `GET /api/public/services/{id}` | Detail probe (id from services list) | 200 | 200 | **PASS** | |
+| `GET /api/public/foods/{id}` | Detail probe (id from food list) | 200 | 200 | **PASS** | |
+| `GET /api/public/product/vendor-profile/{businessId}` | Detail probe (id from listing card) | 200 | 200 | **PASS** | |
+
+### CORS (Tier D)
+
+| Check | Expected | Actual | Pass/Fail |
+|-------|----------|--------|-----------|
+| `OPTIONS /api/featured-products` + launch origin | 204/200 + Allow-Origin | **204**; `Access-Control-Allow-Origin: https://mosaic-biz-frontend-launch.vercel.app` | **PASS** |
+| `GET /api/featured-products` + launch origin | 200 JSON + Allow-Origin | **200**; `Content-Type: application/json`; same Allow-Origin | **PASS** |
+
+Command:
+
+```bash
+curl.exe -s -D - -o NUL -X OPTIONS \
+  -H "Origin: https://mosaic-biz-frontend-launch.vercel.app" \
+  -H "Access-Control-Request-Method: GET" \
+  https://api.mosaicbizhub.com/api/featured-products
+```
+
+### Marketplace contract fields (Tier E)
+
+Validated first card / detail response (keys present, not `undefined`; null/empty allowed):
+
+| Source | `_id` | title/name | coverImage | images | displayPrice | vendor* | vendorLogo | location/city/state | status/avail | Result |
+|--------|-------|------------|------------|--------|--------------|---------|------------|---------------------|--------------|--------|
+| `featured[0]` | — | — | — | — | — | — | — | — | — | **SKIP** (empty featured feed) |
+| `products/list[0]` | PASS | PASS | PASS | PASS | PASS (`$50.00`) | PASS | PASS | PASS | PASS | **PASS** |
+| `services/list[0]` | PASS | PASS | PASS | PASS | PASS (`$10.00`) | PASS | PASS | PASS | PASS | **PASS** |
+| `food/list[0]` | PASS | PASS | PASS | PASS | PASS (`$0.00`) | PASS | PASS | PASS | PASS | **PASS** |
+| `product/detail` | PASS | PASS | PASS | PASS | PASS (`$50.00`) | PASS | PASS | PASS | PASS | **PASS** |
+
+Featured wrapper: `products` array + `pagination` object — **PASS** (empty array is valid).
+
+### Pass/fail summary
+
+| Tier | Result | Blocker? |
+|------|--------|----------|
+| A — Health | **PASS** | — |
+| B — Auth 401 | **PASS** | — |
+| C — Marketplace GETs | **PASS** (all routes) | — |
+| D — CORS | **PASS** | — |
+| E — Field shape | **PASS** on products/services/food/detail; **SKIP** featured card (no items) | Soft gap only |
+
+### Known gaps (non-blocking)
+
+- **Empty featured products feed** in production MongoDB — route and wrapper healthy; frontend must handle empty `products[]`.
+- ZIP/geolocation (#29), Stripe/checkout (P4/P5), unauthenticated `/stripe/*` — unchanged; out of scope.
+
+### Conclusion
+
+**Deploy Go** for MVP browse/auth/CORS on commit `7201f97`. Backend is **safe for frontend production testing** against list/detail/browse flows. Recommend **start issue #29** next; optionally seed featured products in prod for full featured-card validation.
+

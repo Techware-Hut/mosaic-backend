@@ -166,3 +166,37 @@ Probed `2026-06-14T21:42:14Z`:
 **Provisional safe probes recorded** — see [production-proof-pack-template.md](production-proof-pack-template.md) § Provisional Production Smoke — Commit Unconfirmed (`2026-06-14T21:56:27Z`). Does not prove deployed commit.
 
 Infra confirmation request: see [integration-gate-asana-evidence.md](integration-gate-asana-evidence.md) § Infra owner request (post-merge).
+
+---
+
+## Verification — 2026-06-17 (PR #37 / issue #27 smoke proof)
+
+Post-merge controlled deploy and MVP smoke proof pack after [PR #37](https://github.com/Techware-Hut/mosaic-backend/pull/37) (marketplace DTO, closes #28).
+
+### Deploy record
+
+| Field | Value |
+|-------|-------|
+| Merge commit | `7201f97dd59db953f7d469f2de4f686fb7f39217` |
+| GHA deploy run | [27717414160](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27717414160) — **success** |
+| EB version label | `mosaic-7201f97dd59db953f7d469f2de4f686fb7f39217` |
+| EB application / environment | `mosaic-biz-hub-backend` / `mosaic-backend-env` |
+| API base | `https://api.mosaicbizhub.com` |
+
+Workflow post-deploy probes in GHA: health **200**, unauth auth/check **401**.
+
+### Smoke summary
+
+Full matrix: [MVP_BACKEND_SMOKE_PROOF_PACK.md](MVP_BACKEND_SMOKE_PROOF_PACK.md) § Production smoke results — 2026-06-17.
+
+| Area | Result |
+|------|--------|
+| Health + auth probe | **PASS** |
+| Marketplace list + detail routes (12 endpoints) | **PASS** |
+| CORS (launch Vercel origin) | **PASS** |
+| Marketplace DTO fields (`displayPrice`, etc.) | **PASS** on products/services/food/detail |
+| Featured card fields | **SKIP** — empty featured feed in prod DB |
+
+### Conclusion
+
+**Deploy Go** for MVP public browse/auth/CORS on `7201f97`. Safe for frontend production integration testing. Issue #27 evidence complete. Next: issue #29 (search/filter) per sprint plan.
