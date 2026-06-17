@@ -15,7 +15,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | **Production API** | `https://api.mosaicbizhub.com` |
 | **Production deploy SHA** | `2134231` — issue #31 vendor self-service + program docs ([PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40)) |
 | **EB version label** | `mosaic-213423163964db9f32505ecb500d034b40fc583e` |
-| **`main` HEAD** | `2134231` — **matches production EB** |
+| **`main` HEAD** | `6aa71ee` — post-#31 verification docs; **app runtime on EB matches `2134231`** |
 | **Open PR** | None for #31 — merged and deployed |
 | **Automated tests** | **123/123** on `main` / production |
 | **Release model** | Controlled issue-by-issue merge → manual GHA EB deploy → tiered prod smoke → evidence in [deploy-verification.md](deploy-verification.md) |
