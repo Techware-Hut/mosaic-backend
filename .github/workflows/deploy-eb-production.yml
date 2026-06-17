@@ -89,7 +89,7 @@ jobs:
           region: ${{ env.AWS_REGION }}
           version_label: mosaic-${{ github.sha }}
           deployment_package: deploy.zip
-          use_existing_version_if_available: false
+          use_existing_version_if_available: true
           wait_for_deployment: true
           wait_for_environment_recovery: true
 
