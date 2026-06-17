@@ -2,80 +2,151 @@
 
 ## Purpose
 
-This document defines the backend deployment flow, rollback approach, and release responsibilities for Mosaic Biz Hub.
+This document defines the backend deployment flow, rollback approach, and production smoke testing for Mosaic Biz Hub.
 
-## Current production environment
+---
 
-The backend is currently deployed on AWS Elastic Beanstalk at:
+## Branch policy
 
-- `mosaic-backend.us-east-1.elasticbeanstalk.com`
+| Branch | Role |
+|--------|------|
+| `feature/*` | Individual work; local dev only |
+| `staging` | Integration; PR review gate ([STAGING.md](STAGING.md)) |
+| `main` | **Production release branch** — deploy to AWS EB only |
 
-This is the live hosted backend environment referenced by the deployment steps below.
+**Rules:** No direct commits to `main`. All production releases merge `staging` → `main` via PR with required reviewers.
+
+---
+
+## Production environment
+
+| Resource | Value |
+|----------|-------|
+| Platform | AWS Elastic Beanstalk |
+| EB hostname | `mosaic-backend.us-east-1.elasticbeanstalk.com` |
+| Canonical HTTPS API | `https://api.mosaicbizhub.com` |
+| Frontend (typical) | `https://app.mosaicbizhub.com` |
+
+Use **`https://api.mosaicbizhub.com`** for smoke tests and Stripe webhook URLs. Avoid HTTPS on the raw EB hostname (TLS cert CN mismatch).
+
+---
 
 ## Release roles
 
 | Role | Responsibility |
 | --- | --- |
-| Backend engineer | Prepare code changes, update docs, validate locally, and identify required environment changes |
-| Reviewer or tech lead | Review security-sensitive behavior and approve release readiness |
-| Release owner | Coordinate the production deployment window and confirm smoke-test completion |
-| Infrastructure or AWS owner | Manage deployment platform settings, secrets, networking, and rollback access |
+| Backend engineer | Prepare changes, update docs, validate locally, identify env changes |
+| Reviewer or tech lead | Review security-sensitive behavior; approve PR to `main` |
+| Release owner | Coordinate deploy window; confirm smoke completion |
+| Infrastructure or AWS owner | EB deploy, secrets, networking, rollback execution |
+
+---
 
 ## Pre-deployment checklist
 
-Before deployment:
+**Before every production deploy:**
 
-1. Merge intended changes into `staging`.
-2. Complete the checks listed in [STAGING.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/STAGING.md:1).
-3. Confirm environment variables are set correctly in the target deployment environment.
-4. Confirm Stripe webhook endpoints and webhook secrets match the active routes.
-5. Confirm database, AWS, mail, and auth credentials belong to the correct environment.
-6. Confirm any security documentation changes are reflected in [docs/security-remediation-notes.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/docs/security-remediation-notes.md:1).
+1. Merge intended changes into `staging`; complete [STAGING.md](STAGING.md) integration checklist.
+2. Open PR `staging` → `main`; obtain reviewer + release owner approval.
+3. **Rollback readiness (mandatory):**
+   - Record last known good `main` commit SHA currently on EB
+   - Confirm EB can redeploy previous application version
+   - Confirm production env restore path ([production-env-checklist.md](docs/production-env-checklist.md))
+4. Confirm all production env vars set on EB (README names, not legacy `.env.example` Stripe names).
+5. Confirm all 5 Stripe webhooks registered — [stripe-webhook-registration.md](docs/stripe-webhook-registration.md).
+6. Confirm MongoDB, AWS, mail, and auth credentials are production (not dev).
+7. Update [docs/security-remediation-notes.md](docs/security-remediation-notes.md) if security behavior changed.
+
+---
 
 ## Deployment steps
 
-1. Identify the exact commit to release.
-2. Get reviewer or release-owner approval.
-3. Promote the reviewed code from `staging` to the production release branch or target used by the hosting platform.
-4. Deploy to the AWS Elastic Beanstalk production environment `mosaic-backend.us-east-1.elasticbeanstalk.com` using the platform-specific process owned by the infrastructure or AWS owner.
-5. Verify the application boot log:
-   - database connection succeeds
-   - server starts on the expected port
-   - no missing-secret or webhook-signature errors appear during startup
-6. Run smoke tests against production-safe endpoints:
-   - `GET https://mosaic-backend.us-east-1.elasticbeanstalk.com/`
-   - auth login/logout
-   - one non-destructive protected route
-   - Stripe webhook delivery health, if applicable
+### Automated (GitHub Actions — preferred)
+
+Workflow: [`.github/workflows/deploy-eb-production.yml`](.github/workflows/deploy-eb-production.yml)
+
+**Triggers:**
+
+- Push to `main` (after merge from `staging`)
+- Manual **Run workflow** (`workflow_dispatch`) on `main` — use for first deploy and rollbacks
+
+**Flow:** `npm ci` → `npm test` → source-only ZIP → Elastic Beanstalk → health probe on `https://api.mosaicbizhub.com/`
+
+**One-time setup:** [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md) — AWS IAM OIDC role, GitHub variables (`AWS_REGION`, `EB_APPLICATION_NAME`, `EB_ENVIRONMENT_NAME`, `AWS_ROLE_TO_ASSUME`), and `production` environment reviewers. No long-lived AWS access keys in GitHub.
+
+**Per release:**
+
+1. Merge approved PR `staging` → `main`; note commit SHA.
+2. CI runs on push; deploy workflow runs tests then deploys to EB environment **`mosaic-backend-env`** (application **`mosaic-biz-hub-backend`**, region **`us-east-1`**).
+3. Confirm workflow summary shows deployed SHA and health probe PASS.
+4. Verify EB boot logs (Mongo connected, no missing-env crash).
+5. Run [production-smoke-checklist.md](docs/production-smoke-checklist.md) with **test accounts only**.
+6. Fill [production-proof-pack-template.md](docs/production-proof-pack-template.md); retain for release record.
+
+**Rollback via GitHub Actions:** Run **Deploy to Elastic Beanstalk** workflow manually and select a previous known-good commit on `main`.
+
+### Manual ZIP (legacy fallback)
+
+If GitHub Actions is unavailable:
+
+1. Identify exact commit on `main` to release (post-merge SHA).
+2. Infrastructure owner uploads ZIP to AWS Elastic Beanstalk (exclude `node_modules`, `.env`, `.git` — see [`.ebignore`](.ebignore)).
+3. Follow verification steps below.
+
+**Minimum post-deploy smoke:**
+
+- `GET https://api.mosaicbizhub.com/` → 200
+- `GET https://api.mosaicbizhub.com/api/users/auth/check` (unauthenticated) → 401
+- Auth login/logout with test user
+- One Stripe webhook delivery check in Dashboard
+- One non-destructive protected route
+
+---
 
 ## Rollback steps
 
-If the deployment fails or a critical regression is found:
+### Before deploy (mandatory)
 
-1. Stop further traffic changes or release promotion.
-2. Re-deploy the last known good production commit.
-3. Re-verify Elastic Beanstalk application health, startup logs, and smoke-test the restored version.
-4. If the issue is configuration-related, restore the previous environment variables or secrets.
-5. Record the failed release commit, observed impact, and rollback time in the release notes or incident log.
+- [ ] Last good SHA recorded
+- [ ] EB rollback path confirmed
+- [ ] Release owner and infra owner identified
 
-## Rollback ownership
+### If rollback required
 
-- The release owner decides whether rollback is required.
-- The infrastructure or AWS owner performs the rollback on the hosting platform.
-- The backend engineer validates the restored application behavior.
+1. Stop further promotions to `main`.
+2. Re-deploy last known good commit on EB.
+3. Re-verify EB health and `GET https://api.mosaicbizhub.com/`.
+4. Re-run minimal smoke (P0.1, P1.4, one webhook check).
+5. Restore env vars if config-related.
+6. Log incident: failed commit, impact, rollback time, approvers.
 
-## Evidence to retain after each deployment
+---
 
-Keep the following release evidence:
+## Evidence to retain
 
-- deployed commit hash
-- deployment timestamp
-- person who approved the release
-- person who executed the deployment
-- smoke-test result summary
-- rollback reference, if rollback was needed
+- Deployed commit hash
+- Previous known-good commit
+- Deployment timestamp
+- PR link (`staging` → `main`)
+- Approvers and executor
+- Smoke matrix ([production-proof-pack-template.md](docs/production-proof-pack-template.md))
+- Rollback reference if used
 
-## Notes
+---
 
-- Secret rotation verification and AWS-side credential hygiene are tracked separately from this repository-level deployment process.
-- If a dedicated hosted staging environment is created later, update this document and [STAGING.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/STAGING.md:1) together.
+## Known launch blockers
+
+Deployment and smoke tests **do not fix** open P0 code issues. See [launch-readiness-report.md](docs/launch-readiness-report.md) section 9. Sign-off must distinguish **deploy healthy** vs **launch-ready for unrestricted public traffic**.
+
+---
+
+## Related docs
+
+- [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md) — GitHub Actions + AWS one-time setup
+- [docs/DECISION_REGISTER.md](docs/DECISION_REGISTER.md) — MVP decisions and deferrals
+- [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) — **release owner runbook** (smoke, rollback, Go/No-Go)
+- [STAGING.md](STAGING.md)
+- [SETUP.md](SETUP.md)
+- [README.md](README.md)
+- [docs/production-env-checklist.md](docs/production-env-checklist.md)
+- [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md)

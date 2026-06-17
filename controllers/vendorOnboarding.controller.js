@@ -7,6 +7,12 @@ const {
 } = require("../utils/WellcomeMailer");
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const {
+  stripProtectedVendorFields,
+  applyVendorBusinessProfileFields,
+  applyVendorDraftField,
+} = require('../utils/vendorOnboardingProfileFields');
+const { syncBusinessFromOnboarding } = require('../utils/syncBusinessFromOnboarding');
 
 /* =====================================================
    COMMON VALIDATION HELPERS
@@ -142,46 +148,45 @@ exports.saveDraft = async (req, res) => {
       });
     }
 
-    // 4️⃣ Remove forbidden fields
-    const forbiddenFields = ["verificationPayment", "status", "applicationId"];
-    forbiddenFields.forEach((field) => delete payload[field]);
+    // 4️⃣ Remove protected admin/system fields
+    const sanitizedPayload = stripProtectedVendorFields(payload);
 
     // 5️⃣ Map frontend fields
-    if (payload.businessOwnershipType !== undefined) {
-      payload.ownershipType = payload.businessOwnershipType;
-      delete payload.businessOwnershipType;
+    if (sanitizedPayload.businessOwnershipType !== undefined) {
+      sanitizedPayload.ownershipType = sanitizedPayload.businessOwnershipType;
+      delete sanitizedPayload.businessOwnershipType;
     }
 
-    if (payload.numberOfEmployees !== undefined) {
-      payload.employeesCount = payload.numberOfEmployees;
-      delete payload.numberOfEmployees;
+    if (sanitizedPayload.numberOfEmployees !== undefined) {
+      sanitizedPayload.employeesCount = sanitizedPayload.numberOfEmployees;
+      delete sanitizedPayload.numberOfEmployees;
     }
 
-    if (payload.contactPhone !== undefined) {
-      payload.primaryContactPhone = payload.contactPhone;
-      payload.primaryPhone = payload.contactPhone;
-      delete payload.contactPhone;
+    if (sanitizedPayload.contactPhone !== undefined) {
+      sanitizedPayload.primaryContactPhone = sanitizedPayload.contactPhone;
+      sanitizedPayload.primaryPhone = sanitizedPayload.contactPhone;
+      delete sanitizedPayload.contactPhone;
     }
 
-    if (payload.contactEmail !== undefined) {
-      payload.secondaryBusinessEmail = payload.contactEmail;
-      delete payload.contactEmail;
+    if (sanitizedPayload.contactEmail !== undefined) {
+      sanitizedPayload.secondaryBusinessEmail = sanitizedPayload.contactEmail;
+      delete sanitizedPayload.contactEmail;
     }
 
     // Social links mapping
     const urlFields = ["websiteUrl", "facebookUrl", "instagramUrl", "linkedinUrl", "tiktokUrl"];
     urlFields.forEach((field) => {
-      if (payload[field] !== undefined) {
+      if (sanitizedPayload[field] !== undefined) {
         const key = field.replace("Url", "");
-        payload[key] = payload[field];
-        delete payload[field];
+        sanitizedPayload[key] = sanitizedPayload[field];
+        delete sanitizedPayload[field];
       }
     });
 
     // 6️⃣ Apply payload
-    Object.keys(payload).forEach((key) => {
-      if (payload[key] !== undefined) {
-        onboarding[key] = payload[key];
+    Object.keys(sanitizedPayload).forEach((key) => {
+      if (sanitizedPayload[key] !== undefined) {
+        applyVendorDraftField(onboarding, key, sanitizedPayload[key]);
       }
     });
 
@@ -222,13 +227,12 @@ exports.saveDraft = async (req, res) => {
       }
     });
 
-    // 8️⃣ Smart status handling
-if (onboarding.status === "rejected") {
-  // 🔥 Auto resubmit when user edits after rejection
-  onboarding.status = "submitted";
-} else if (!onboarding.status) {
-  onboarding.status = "draft";
-}
+    // 8️⃣ Status handling — draft save never auto-resubmits for admin review
+    if (onboarding.status === 'rejected') {
+      onboarding.status = 'draft';
+    } else if (!onboarding.status) {
+      onboarding.status = 'draft';
+    }
     // 8️⃣ Save
     await onboarding.save();
 
@@ -569,9 +573,6 @@ exports.updateBusinessProfile = async (req, res) => {
     const userId = req.user._id;
     const payload = req.body;
 
-    // Load models
-    const Business = require('../models/Business');
-    const Subscription = require('../models/Subscription');
     const VendorOnboarding = require('../models/VendorOnboardingStage1');
 
     // 1️⃣ Check existing onboarding
@@ -584,96 +585,29 @@ exports.updateBusinessProfile = async (req, res) => {
       });
     }
 
-    // 2️⃣ Update onboarding with payload
-    Object.keys(payload).forEach(key => {
-      if (payload[key] !== undefined) {
-        onboarding[key] = payload[key];
-      }
-    });
+    // 2️⃣ Update onboarding with allowlisted profile fields only
+    applyVendorBusinessProfileFields(onboarding, payload);
 
     const readyForTrustBadgeVerification =
       isVendorProfileReadyForTrustBadgeVerification(onboarding);
     await onboarding.save();
 
-    // ========== SIMPLE BUSINESS SYNC ==========
+    // ========== REQUIRED BUSINESS SYNC ==========
     try {
-      // Get active subscription
-      const subscription = await Subscription.findOne({ 
-        userId, 
-        status: 'active' 
-      }).sort({ createdAt: -1 });
-
-      // Find or create business
-      let business = await Business.findOne({ owner: userId });
-
-      // ONLY THESE FIELDS - SIMPLE & CLEAN
-      const businessData = {
-        businessName: onboarding.businessName,
-        description: onboarding.businessBio,
-        logo: onboarding.businessProfileImage?.url,
-        coverImage: onboarding.featureBanner?.url,
-        email: onboarding.businessEmail || onboarding.secondaryBusinessEmail,
-        phone: onboarding.businessPhone || onboarding.primaryPhone,
-        listingType: onboarding.businessType || 'product',
-        points: onboarding.totalVerificationPoints || 0,
-        badge: onboarding.badge || null,
-        
-        // Subscription reference (important for limits)
-        subscriptionId: subscription?._id || null,
-        subscriptionPlanId: subscription?.subscriptionPlanId || null,
-        subscriptionStatus: subscription?.status || 'inactive',
-      };
-
-      if (!business) {
-        // Create new business
-        business = new Business({
-          owner: userId,
-          ...businessData,
-          isApproved: false,
-          isActive: true,
-          usage: {
-            totalProducts: 0,
-            totalServices: 0,
-            totalFoods: 0,
-            totalImages: 0,
-          },
-          products: [],
-          services: [],
-          foods: [],
-        });
-      } else {
-        // Update existing business
-        business.businessName = businessData.businessName;
-        business.description = businessData.description;
-        business.logo = businessData.logo;
-        business.coverImage = businessData.coverImage;
-        business.email = businessData.email;
-        business.phone = businessData.phone;
-        business.listingType = businessData.listingType;
-        business.points = businessData.points;
-        business.badge = businessData.badge;
-        business.subscriptionId = businessData.subscriptionId;
-        business.subscriptionPlanId = businessData.subscriptionPlanId;
-        business.subscriptionStatus = businessData.subscriptionStatus;
-        
-        // CRITICAL: Remove location field to prevent geo index error
-        if (business.location) {
-          business.location = undefined;
-        }
-      }
-
-      await business.save();
-
-      // Link onboarding <-> business for direct lookups in admin flows
-      if (!onboarding.businessId || onboarding.businessId.toString() !== business._id.toString()) {
-        onboarding.businessId = business._id;
-        await onboarding.save();
-      }
-
-      console.log(`✅ Business data saved for user ${userId}`);
-
+      const Business = require('../models/Business');
+      const Subscription = require('../models/Subscription');
+      await syncBusinessFromOnboarding({
+        userId,
+        onboarding,
+        Business,
+        Subscription,
+      });
     } catch (businessError) {
-      console.log('⚠️ Business sync issue:', businessError.message);
+      console.error('Business sync failed:', businessError.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to sync business profile data',
+      });
     }
 
     // Non-blocking: notify admin once when vendor completes profile + docs
@@ -812,21 +746,8 @@ exports.patchBusinessProfile = async (req, res) => {
 
     // ✅ NO STATUS CHECKS - Always allow updates
 
-    // 3️⃣ Allowed fields for PATCH update
-    const allowedFields = [
-      'firstName', 'lastName', 'primaryEmail', 'primaryPhone', 'language',
-      'licenseNumber', 'businessBio', 'characterLimit', 'businessProfileImage',
-      'businessEmail', 'businessPhone', 'alternatePhone',
-      'website', 'facebook', 'instagram', 'twitter', 'linkedin', 'tiktok',
-      'refundPolicyDocument', 'termsDocument', 'googleReviewLink', 'communityServiceLink'
-    ];
-
-    // 4️⃣ Only update allowed fields that exist in payload
-    allowedFields.forEach(field => {
-      if (payload[field] !== undefined) {
-        onboarding[field] = payload[field];
-      }
-    });
+    // 3️⃣ Only update allowlisted profile fields
+    applyVendorBusinessProfileFields(onboarding, payload);
 
     // 5️⃣ Keep EXISTING status - DON'T change it
     // onboarding.status = "draft"; // ❌ REMOVED
@@ -1090,10 +1011,11 @@ if (onboarding.status === "submitted") {
   });
 }
 
-// ❌ Only block invalid states
+// ❌ Only block invalid states (explicit submit handles resubmission)
 if (
-  onboarding.status !== "draft" &&
-  onboarding.status !== "payment_pending"
+  onboarding.status !== 'draft' &&
+  onboarding.status !== 'payment_pending' &&
+  onboarding.status !== 'rejected'
 ) {
   return res.status(400).json({
     success: false,

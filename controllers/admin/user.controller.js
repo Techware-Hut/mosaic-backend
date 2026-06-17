@@ -1,6 +1,7 @@
 const User = require("../../models/User");
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator");
+const toAdminUser = require("../../utils/toAdminUser");
 
 // POST /admin/users/admins
 exports.createAdminUser = async (req, res) => {
@@ -58,7 +59,7 @@ exports.getAllUsers = async (req, res) => {
   try {
     const [users, totalVendor, totalCustomer, otpVerified, otpUnverified] =
       await Promise.all([
-        User.find({ isDeleted: false }).select("-passwordHash"),
+        User.find({ isDeleted: false }),
         User.countDocuments({ isDeleted: false, role: "business_owner" }),
         User.countDocuments({ isDeleted: false, role: "customer" }),
         User.countDocuments({ isDeleted: false, isOtpVerified: true }),
@@ -68,7 +69,7 @@ exports.getAllUsers = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Users fetched successfully",
-      data: users,
+      data: users.map(toAdminUser),
       totalVendor,
       totalCustomer,
       otpVerified,
@@ -86,7 +87,7 @@ exports.getUserById = async (req, res) => {
     const user = await User.findOne({
       _id: req.params.id,
       isDeleted: false,
-    }).select("-passwordHash");
+    });
     if (!user) {
       return res
         .status(404)
@@ -96,7 +97,7 @@ exports.getUserById = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "User details fetched",
-      data: user,
+      data: toAdminUser(user),
     });
   } catch (error) {
     console.error("getUserById error:", error.message);
@@ -111,7 +112,7 @@ exports.updateUserByAdmin = async (req, res) => {
       { _id: req.params.id, isDeleted: false },
       req.body,
       { new: true, runValidators: true }
-    ).select("-passwordHash");
+    );
 
     if (!updatedUser) {
       return res
@@ -122,7 +123,7 @@ exports.updateUserByAdmin = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "User updated successfully",
-      data: updatedUser,
+      data: toAdminUser(updatedUser),
     });
   } catch (error) {
     console.error("updateUserByAdmin error:", error.message);

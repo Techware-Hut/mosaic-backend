@@ -272,10 +272,13 @@ All session tokens across every auth flow share the following canonical structur
 {
   "sub": "<MongoDB ObjectId as string>",
   "role": "customer | business_owner | admin",
+  "sessionVersion": 0,
   "iat": "<issued-at — auto-added by jsonwebtoken>",
   "exp": "<expiry — auto-added by jsonwebtoken>"
 }
 ```
+
+`sessionVersion` increments on password reset so older session JWTs are rejected by `authenticate.js` before the user re-logs in.
 
 ### Token Lifetimes
 
@@ -298,7 +301,7 @@ All session tokens across every auth flow share the following canonical structur
 const userId = decoded.userId || decoded.sub;
 ```
 
-The middleware accepts both `decoded.userId` (standard login / OTP verify) and `decoded.sub` (Google OAuth) and resolves them to the same MongoDB `_id` used to fetch `req.user`. Both fields map to the same value — the user's `_id` as a string.
+The middleware accepts `decoded.sub` (canonical) and still accepts legacy `decoded.userId` tokens issued before the Wave 2 migration. Both resolve to the same MongoDB `_id` used to fetch `req.user`.
 
 ---
 
@@ -445,8 +448,8 @@ This is the strictest vendor guard — it ensures only fully email-verified vend
 | GET    | `/api/vendor-onboarding/draft`              | ✅ `authenticate` | `requireVerifiedVendor`    |
 | POST   | `/api/vendor-onboarding/submit`             | ✅ `authenticate` | `requireVerifiedVendor`    |
 | GET    | `/api/vendor-onboarding/onboarding-data`    | ✅ `authenticate` | `requireVerifiedVendor`    |
-| PUT    | `/api/vendor-onboarding/business-profile`   | ✅ `authenticate` | `requireVerifiedVendor`    |
-| PATCH  | `/api/vendor-onboarding/business-profile`   | ✅ `authenticate` | `requireVerifiedVendor`    |
+| PUT    | `/api/vendor-onboarding/business-profile`   | ✅ `authenticate` | `requireStage1Verified` (via `requireVerifiedVendor.create`) |
+| PATCH  | `/api/vendor-onboarding/business-profile`   | ✅ `authenticate` | `requireStage1Verified` (via `requireVerifiedVendor.create`) |
 | GET    | `/api/vendor-onboarding/stage1/upload-url`  | ✅ `authenticate` | `requireVerifiedVendor`    |
 | POST   | `/api/vendor-onboarding/stage1/create-payment` | ✅ `authenticate` | `requireVerifiedVendor` |
 
@@ -510,14 +513,14 @@ This is the strictest vendor guard — it ensures only fully email-verified vend
 
 Use this checklist to confirm Wave 2 is complete after code changes are applied.
 
-- [ ] **One canonical payload shape** — all `jwt.sign()` calls in the codebase use `{ sub: user._id.toString(), role: user.role }`.
-- [ ] **`authenticate.js` reads only `decoded.sub`** — the `|| decoded.userId` fallback is removed.
-- [ ] **Standard login still works** — POST `/api/users/login` returns a valid token, sets cookies, and all subsequent protected routes recognise the user.
-- [ ] **OTP verify still works** — POST `/api/users/verify-otp` returns a valid token after registration.
-- [ ] **Google OAuth login still works** — redirect flow completes and the session cookie is accepted by `authenticate.js`.
-- [ ] **Profile completion still works** — `mbh_tmp` cookie is verified and user is updated.
-- [ ] **Vendor-protected routes still work** — `requireVerifiedVendor` allows verified `business_owner` users; rejects others.
-- [ ] **Admin-protected routes still work** — `isAdmin` allows `admin` users; rejects others.
-- [ ] **Invalid tokens fail safely** — a tampered or expired token returns `401`, not `500`.
-- [ ] **No route depends on a stale or conflicting token identifier field.**
-- [ ] **All session tokens expire at 7 days** — both local and Google OAuth use the same TTL.
+- [x] **One canonical JWT payload shape** — session tokens use `{ sub, role, sessionVersion }` in both `buildSessionToken` and `mintSessionJWT`.
+- [x] **`authenticate.js` accepts `sub`** — legacy `decoded.userId` fallback retained for older tokens until they expire.
+- [x] **Safe public user JSON** — [`utils/toPublicAuthUser.js`](../utils/toPublicAuthUser.js) used by login, OTP verify, auth/check, and Google profile completion.
+- [x] **Standard login still works** — POST `/api/users/login` returns a valid token, sets cookies, and protected routes recognise the user.
+- [x] **OTP verify still works** — POST `/api/users/verify-otp` returns a valid token after registration.
+- [x] **Google OAuth login still works** — redirect flow completes and the session cookie is accepted by `authenticate.js`.
+- [x] **Profile completion still works** — `mbh_tmp` cookie is verified and user is updated.
+- [x] **Invalid tokens fail safely** — tampered, expired, or stale `sessionVersion` tokens return `401`, not `500`.
+- [x] **All session tokens expire at 7 days** — both local and Google OAuth use the same TTL.
+- [ ] **Remove legacy `userId` JWT fallback** — delete `|| decoded.userId` in `authenticate.js` after all outstanding tokens expire (post-migration cleanup).
+- [ ] **Admin user list field redaction** — `GET /admin/users` still returns hashed OTP/reset metadata (admin-only hardening).

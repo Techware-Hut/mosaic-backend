@@ -1,67 +1,65 @@
-# Staging Environment
+# Staging Integration Branch
+
+## Purpose
+
+The `staging` branch is the **pre-production integration branch**. It is not a hosted environment.
+
+**MVP release strategy:** feature branch → PR → `staging` → PR → `main` → AWS Elastic Beanstalk production → [production soft-launch smoke](docs/production-smoke-checklist.md) with test accounts.
+
+Hosted staging backend is **deferred** — see [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md).
+
+---
 
 ## Current state
 
-As of 2026-05-27, this repository uses the `staging` branch as the pre-production integration branch.
+| Layer | Role | Deploy target |
+| --- | --- | --- |
+| Feature work | Short-lived branch from `staging` | Local dev only |
+| Integration branch | `staging` | **None** (branch-level only) |
+| Production release | `main` | AWS EB + `https://api.mosaicbizhub.com` |
 
-There is not currently a separate always-on hosted staging backend environment for this project. In practice, "staging" means:
+Production EB hostname: `mosaic-backend.us-east-1.elasticbeanstalk.com` (use custom domain for HTTPS smoke).
 
-- code is merged into `staging` first
-- validation is performed from the `staging` branch
-- production promotion happens only after staging-branch review and smoke testing against the live deployment workflow
+---
 
-The current live hosted production backend is:
+## Integration checklist (before PR to `main`)
 
-- `mosaic-backend.us-east-1.elasticbeanstalk.com`
+Complete on the `staging` branch **before** opening a PR to `main`:
 
-## Branch and environment model
+1. PR reviewed; security-sensitive diffs called out.
+2. App boots locally with `.env` (see [SETUP.md](SETUP.md)) — not `.env.local`.
+3. No secrets committed; `.env.example` updated if new vars added.
+4. Docs updated: README, SETUP, DEPLOYMENT, security notes as applicable.
+5. Known P0 blockers tracked in [docs/launch-readiness-report.md](docs/launch-readiness-report.md) — deployment does not close them.
+6. `npm test` pass recorded (local) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md).
 
-| Layer | Current state |
-| --- | --- |
-| Feature work | Short-lived feature branch opened from `staging` or the current integration branch |
-| Integration branch | `staging` |
-| Hosted staging backend | Not currently provisioned |
-| Hosted production backend | AWS Elastic Beanstalk at `mosaic-backend.us-east-1.elasticbeanstalk.com` |
-| Production release source | Reviewed code promoted after `staging` validation |
+**Do not** require runtime webhook/auth smoke on `staging` itself — there is no staging host. Those checks run post-deploy on production per [DEPLOYMENT.md](DEPLOYMENT.md) and [docs/production-smoke-checklist.md](docs/production-smoke-checklist.md).
 
-## Expected staging configuration
-
-If a hosted staging backend is introduced, it should use:
-
-- a separate MongoDB database or isolated collections from production
-- Stripe test keys and test webhook secrets only
-- non-production AWS/S3 credentials and buckets
-- non-production email credentials or a safe mail sandbox
-- the same required environment variables as production, with test-safe values
-
-## Validation required on `staging`
-
-Before anything moves toward production, validate at least the following from the `staging` branch:
-
-1. App boot succeeds with the target environment variables.
-2. Auth flows work:
-   - register
-   - login
-   - OTP verify
-   - OTP resend
-   - logout
-3. Public registration cannot create admin users.
-4. Google OAuth cannot elevate a user role from client input.
-5. Vendor onboarding cannot bypass verification payment state.
-6. Payment intent amount is derived from server-side order data.
-7. Canonical Stripe webhook endpoints are configured and accept signed test events.
-8. No OTP values or secrets appear in logs.
-9. README, setup, staging, deployment, and remediation tracking docs match the current codebase.
+---
 
 ## Promotion rule
 
-Do not promote from `staging` to production until:
+Do not merge `staging` → `main` until:
 
-- the staging checklist above is complete
-- security-impacting changes are reviewed
-- required secrets are present in the deployment environment
-- rollback instructions are confirmed in [DEPLOYMENT.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/DEPLOYMENT.md:1)
+- Integration checklist above is complete
+- Reviewer or release owner approves the PR
+- Rollback readiness confirmed in [DEPLOYMENT.md](DEPLOYMENT.md)
+- Required production env vars documented in [docs/production-env-checklist.md](docs/production-env-checklist.md)
 
-## Gap to close later
+**No direct commits to `main`.**
 
-This project would benefit from a real hosted staging backend so webhook delivery, cookies, auth, and deployment behavior can be validated before production with environment parity.
+---
+
+## Future hosted staging
+
+If a separate staging EB environment is approved later, provision isolated MongoDB, S3, mail, and Stripe test mode per [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md), then update this file and [DEPLOYMENT.md](DEPLOYMENT.md).
+
+---
+
+## Related docs
+
+- [docs/README.md](docs/README.md) — documentation index
+- [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) — release owner runbook
+- [DEPLOYMENT.md](DEPLOYMENT.md)
+- [SETUP.md](SETUP.md)
+- [docs/launch-readiness-report.md](docs/launch-readiness-report.md)

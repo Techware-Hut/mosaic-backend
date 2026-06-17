@@ -24,7 +24,7 @@ Node.js/Express backend for Mosaic Biz Hub. This service exposes marketplace, on
 | `middlewares/` | Authentication, authorization, and request middleware |
 | `utils/` | Mailers, uploads, payments, PDF helpers, and shared utilities |
 | `helpers/` | Focused helper modules such as Stripe plan helpers |
-| `docs/` | Security remediation and Stripe ownership documentation |
+| `docs/` | Operational and architecture documentation — start at [docs/README.md](docs/README.md) |
 | `jobs/` | Background job entrypoints |
 | `services/`, `validators/`, `lib/` | Supporting service code, validation, and library logic |
 
@@ -33,7 +33,7 @@ Node.js/Express backend for Mosaic Biz Hub. This service exposes marketplace, on
 The application follows a conventional Express layered structure:
 
 1. `index.js` loads environment variables, connects to MongoDB, and starts the server.
-2. `app.js` configures security and transport middleware such as CORS, cookies, JSON parsing, Mongo sanitization, and XSS cleanup.
+2. `app.js` configures transport middleware (CORS, cookies, JSON parsing). `express-mongo-sanitize` and `xss-clean` are imported but not currently mounted — see [launch-readiness-report.md](docs/launch-readiness-report.md) §8.
 3. Route modules in `routes/` map URL namespaces to controller functions.
 4. Controllers orchestrate validation, Stripe/AWS/mail integrations, and persistence through Mongoose models.
 5. Models in `models/` define the MongoDB document structure for users, businesses, orders, subscriptions, onboarding, and related entities.
@@ -83,14 +83,31 @@ npm run dev
 | `npm install` | Install project dependencies |
 | `npm run dev` | Start the API with `nodemon` |
 | `npm start` | Start the API with `node index.js` |
-| `npm test` | Placeholder script, currently exits with an error |
+| `npm test` | Run automated tests (`node --test tests/**/*.test.js`, 57 cases) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) |
+| CI | GitHub Actions [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs tests on PR/push to `staging`/`main` |
 
 ## Operational docs
 
-- [SETUP.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/SETUP.md:1)
-- [STAGING.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/STAGING.md:1)
-- [DEPLOYMENT.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/DEPLOYMENT.md:1)
-- [docs/security-remediation-notes.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/docs/security-remediation-notes.md:1)
+**Documentation home:** [docs/README.md](docs/README.md) — full index, read-first guides, and maintenance rules.
+
+Key entry points:
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — backend map for contributors and LLMs
+- [docs/API_SURFACE.md](docs/API_SURFACE.md) — HTTP route map, auth boundaries, smoke notes
+- [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) — production deploy, smoke, rollback, sign-off
+- [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) — automated tests vs manual smoke mapping
+- [docs/DECISION_REGISTER.md](docs/DECISION_REGISTER.md) — MVP decisions, deferrals, and launch assumptions
+- [SETUP.md](SETUP.md) · [STAGING.md](STAGING.md) · [DEPLOYMENT.md](DEPLOYMENT.md)
+
+## Release workflow (MVP)
+
+1. Work on a feature branch; open PR to `staging`.
+2. Complete integration checklist in [STAGING.md](STAGING.md) (code review, local boot — no hosted staging).
+3. Open PR `staging` → `main`; required reviewers approve.
+4. Deploy `main` to AWS Elastic Beanstalk via GitHub Actions ([`.github/workflows/deploy-eb-production.yml`](.github/workflows/deploy-eb-production.yml)); follow [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) for smoke and sign-off. One-time setup: [docs/github-actions-eb-setup.md](docs/github-actions-eb-setup.md).
+5. Record proof in [docs/production-proof-pack-template.md](docs/production-proof-pack-template.md).
+
+Hosted staging is deferred — see [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md).
 
 ## Environment variables
 
@@ -126,7 +143,7 @@ Add only the values needed for the features you plan to run locally. Some flows 
 | `CONNECT_RETURN_URL` | Optional | Absolute return URL override for Stripe Connect |
 | `CONNECT_REFRESH_URL` | Optional | Absolute refresh URL override for Stripe Connect |
 
-See [docs/security-remediation-notes.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/docs/security-remediation-notes.md:1) for current remediation status, including Stripe route, handler, and secret ownership.
+See [docs/security-remediation-notes.md](docs/security-remediation-notes.md) for current remediation status, including Stripe route, handler, and secret ownership.
 
 ### AWS S3
 
@@ -148,10 +165,13 @@ See [docs/security-remediation-notes.md](C:/Users/Asus/OneDrive/Desktop/TWH-proj
 | `APP_NAME` | Optional | Branding label used in some email content |
 | `APP_URL` | Optional | Base URL used in order-related email links |
 
-### Google integrations
+### Google OAuth (required at boot)
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
+| `GOOGLE_CLIENT_ID` | Yes | OAuth; `authController.js` throws if missing at module load |
+| `GOOGLE_CLIENT_SECRET` | Yes | OAuth client secret |
+| `API_BASE_URL` | Yes | Public API base for OAuth callback (e.g. `http://localhost:3001` locally) |
 | `GOOGLE_GEOCODING_API_KEY` | Optional | Geocoding and Google place-related lookups |
 
 ### PayPal
@@ -178,7 +198,8 @@ See [docs/security-remediation-notes.md](C:/Users/Asus/OneDrive/Desktop/TWH-proj
 - `express.json()` is mounted after raw Stripe webhook endpoints in `app.js`. Keep that ordering intact so Stripe signature verification continues to work.
 - The root health-style route is `GET /` and returns a simple JSON message.
 - The codebase uses a flat JavaScript Express structure, not TypeScript and not a formal service container.
-- `npm test` is not implemented yet, so validation is currently done through targeted runtime checks and manual flow testing.
+- Create a `.env` file in the project root (the app loads `.env` only — not `.env.local`).
+- `npm test` runs 57 mocked unit/integration-style tests locally; passing does **not** replace post-deploy smoke on [production-smoke-checklist.md](docs/production-smoke-checklist.md).
 
 ## Key route groups
 
@@ -201,7 +222,7 @@ See [docs/security-remediation-notes.md](C:/Users/Asus/OneDrive/Desktop/TWH-proj
 
 ## Related documentation
 
-- [docs/security-remediation-notes.md](C:/Users/Asus/OneDrive/Desktop/TWH-projects/mosiac-backend/docs/security-remediation-notes.md:1)
+- [docs/security-remediation-notes.md](docs/security-remediation-notes.md)
 
 ## Deployment notes
 

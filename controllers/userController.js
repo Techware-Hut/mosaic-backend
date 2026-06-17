@@ -13,6 +13,7 @@ const {
     setAuthCookies,
     clearAuthCookies,
 } = require('../utils/cookieHelper');
+const toPublicAuthUser = require('../utils/toPublicAuthUser');
 
 function getSafePublicRole(role) {
     return role === 'business_owner' ? 'business_owner' : 'customer';
@@ -21,7 +22,7 @@ function getSafePublicRole(role) {
 function buildSessionToken(user) {
     return jwt.sign(
         {
-            userId: user._id,
+            sub: user._id.toString(),
             role: user.role,
             sessionVersion: user.sessionVersion || 0,
         },
@@ -142,14 +143,7 @@ exports.verifyOtp = async (req, res) => {
             success: true,
             message: 'OTP verified and login successful',
             token,
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                mobile: user.mobile,
-                role: user.role,
-                gender: user.gender,
-            },
+            user: toPublicAuthUser(user),
         });
     } catch (err) {
         console.error('OTP verify error:', err);
@@ -367,13 +361,7 @@ exports.loginUser = async (req, res) => {
             success: true,
             message: 'Login successful',
             token,
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                gender: user.gender,
-            },
+            user: toPublicAuthUser(user),
         });
     } catch (err) {
         console.error('Login error:', err);

@@ -3,6 +3,9 @@ const router = express.Router();
 
 const authMiddleware = require("../middlewares/authenticate");
 const requireVerifiedVendor = require("../middlewares/requireVerifiedVendor");
+const requireStage1VerifiedVendor = requireVerifiedVendor.create({
+  requireStage1Verified: true,
+});
 const authenticate = require('../middlewares/authenticate');
 const isAdmin = require('../middlewares/isAdmin');
 
@@ -36,8 +39,8 @@ router.get("/draft", authMiddleware, requireVerifiedVendor, getDraft);
 router.post("/submit", authMiddleware, requireVerifiedVendor, submitForReview);
 router.get("/onboarding-data", authMiddleware, requireVerifiedVendor, getOnboardingData);
 
-router.put("/business-profile", authMiddleware, requireVerifiedVendor, updateBusinessProfile);
-router.patch("/business-profile", authMiddleware, requireVerifiedVendor, patchBusinessProfile);
+router.put("/business-profile", authMiddleware, requireStage1VerifiedVendor, updateBusinessProfile);
+router.patch("/business-profile", authMiddleware, requireStage1VerifiedVendor, patchBusinessProfile);
 
 // In routes/vendorOnboarding.routes.js, add:
 router.get('/status/:applicationId', getStatusByApplicationId);

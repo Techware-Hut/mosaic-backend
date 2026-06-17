@@ -3,6 +3,7 @@ const { body } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const userController = require('../controllers/userController');
 const authenticate = require('../middlewares/authenticate')
+const toPublicAuthUser = require('../utils/toPublicAuthUser');
 
 const router = express.Router();
 
@@ -49,6 +50,10 @@ const resetPasswordLimiter = buildAuthLimiter(
   10,
   'Too many password reset attempts. Please try again later.'
 );
+
+function toAuthCheckUser(user) {
+  return toPublicAuthUser(user);
+}
 
 // Register route
 router.post(
@@ -113,7 +118,7 @@ router.post(
 );
 
 router.get('/auth/check', authenticate, (req, res) => {
-  res.json({ loggedIn: true, user: req.user });
+  res.json({ loggedIn: true, user: toAuthCheckUser(req.user) });
 });
 
 module.exports = router;

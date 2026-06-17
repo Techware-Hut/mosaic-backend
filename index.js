@@ -1,3 +1,11 @@
+const dns = require('dns');
+
+// Windows + some ISP resolvers refuse SRV queries from Node (querySrv ECONNREFUSED)
+// while nslookup still works. mongodb+srv:// requires SRV resolution at connect time.
+if (process.platform === 'win32') {
+  dns.setServers(['8.8.8.8', '1.1.1.1']);
+}
+
 require('dotenv').config();
 const app = require('./app');
 const connectDB = require('./config/Db');

@@ -12,6 +12,8 @@ const {
 // the queue by transitioning back to `submitted` in vendorOnboarding.controller.
 const PENDING_REVIEW_STATUSES = Object.freeze(['submitted']);
 
+exports.PENDING_REVIEW_STATUSES = PENDING_REVIEW_STATUSES;
+
 const syncBusinessPoints = async (application, badge) => {
   const ownerId = application.userId?._id || application.userId;
   const update = {

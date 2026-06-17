@@ -7,6 +7,7 @@ const controllerPath = path.resolve(
   __dirname,
   '../../controllers/admin/vendorOnboardVerifyStage1.js'
 );
+const isAdminPath = path.resolve(__dirname, '../../middlewares/isAdmin.js');
 
 const buildApplication = (status, overrides = {}) => ({
   applicationId: `${status}-app`,
@@ -161,4 +162,46 @@ test('getPendingApplications includes resubmitted applications once they return 
       },
     ]
   );
+});
+
+test('getPendingApplications excludes payment_pending applications with failed verification payment', async () => {
+  const applications = [
+    buildApplication('payment_pending', {
+      applicationId: 'failed-payment-app',
+      verificationPayment: { status: 'failed' },
+    }),
+    buildApplication('submitted', { applicationId: 'ready-app' }),
+  ];
+  const { controller } = loadControllerWithMocks(applications);
+  const res = createResponse();
+
+  await controller.getPendingApplications({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(
+    res.body.data.map((application) => application.applicationId),
+    ['ready-app']
+  );
+});
+
+test('getPendingApplications uses submitted-only allowlist constant', () => {
+  const { PENDING_REVIEW_STATUSES } = require(controllerPath);
+  assert.deepEqual(PENDING_REVIEW_STATUSES, ['submitted']);
+});
+
+test('vendor onboarding pending route blocks non-admin users', () => {
+  const isAdmin = require(isAdminPath);
+
+  for (const role of ['customer', 'business_owner']) {
+    const res = createResponse();
+    let calledNext = false;
+
+    isAdmin({ user: { role } }, res, () => {
+      calledNext = true;
+    });
+
+    assert.equal(calledNext, false, `role ${role} should be blocked`);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.message, 'Access denied: Admin only');
+  }
 });

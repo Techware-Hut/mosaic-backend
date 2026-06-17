@@ -7,6 +7,7 @@ const {
     setAuthCookies: setSharedAuthCookies,
     clearAuthCookies,
 } = require('../utils/cookieHelper');
+const toPublicAuthUser = require('../utils/toPublicAuthUser');
 
 const {
     GOOGLE_CLIENT_ID,
@@ -195,16 +196,7 @@ exports.completeGoogleProfile = async (req, res) => {
 
         res.json({
             success: true,
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                gender: user.gender,
-                profileImage: user.profileImage,
-                mobile: user.mobile,
-                minorityType: user.minorityType,
-            },
+            user: toPublicAuthUser(user),
         });
     } catch (err) {
         console.error('Complete profile error:', err);

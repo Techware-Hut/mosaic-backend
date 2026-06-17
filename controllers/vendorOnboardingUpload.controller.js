@@ -1,5 +1,10 @@
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const {
+  ALLOWED_VENDOR_ONBOARDING_MIME_TYPES,
+  isAllowedVendorOnboardingMime,
+  normalizeMimeType,
+} = require("../utils/vendorOnboardingUploadMimeAllowlist");
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -43,6 +48,13 @@ exports.getStage1UploadUrl = async (req, res) => {
       });
     }
 
+    if (!isAllowedVendorOnboardingMime(fileType)) {
+      return res.status(400).json({
+        message: `Invalid file type. Allowed types: ${ALLOWED_VENDOR_ONBOARDING_MIME_TYPES.join(", ")}`,
+      });
+    }
+
+    const normalizedFileType = normalizeMimeType(fileType);
     const bucketName = process.env.AWS_S3_BUCKET;
 
     // ✅ ORGANIZED FOLDER STRUCTURE
@@ -84,7 +96,7 @@ exports.getStage1UploadUrl = async (req, res) => {
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: key,
-      ContentType: fileType,
+      ContentType: normalizedFileType,
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
