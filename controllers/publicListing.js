@@ -10,6 +10,11 @@ const {
   getTaxRateForCategory,
   buildTaxAwareAmounts,
 } = require('../utils/vendorTax');
+const {
+  toPublicListingCard,
+  toPublicListingDetail,
+  toPublicBusinessCard,
+} = require('../lib/listing/publicListingDto');
 
 const getVisibleBusinessIds = async () => {
   const businesses = await Business.find({
@@ -198,31 +203,34 @@ exports.getAllServices = async (req, res) => {
       const businessId = service.businessId?.toString();
       const businessInfo = businessDetailsMap.get(businessId);
       const vendorInfo = vendorDetailsMap.get(businessId);
-      
-      return {
-        ...service,
-        businessDetails: {
-          businessName: businessInfo?.businessName || null,
-          description: businessInfo?.description || null,
-          bio: vendorInfo?.businessBio || null,
-          logo: businessInfo?.logo || null,
-          email: businessInfo?.email || vendorInfo?.businessEmail || null,
-          phone: businessInfo?.phone || vendorInfo?.businessPhone || null,
-          address: businessInfo?.address || null,
-          socialLinks: {
-            website: vendorInfo?.website || businessInfo?.socialLinks?.website || null,
-            facebook: vendorInfo?.facebook || businessInfo?.socialLinks?.facebook || null,
-            instagram: vendorInfo?.instagram || businessInfo?.socialLinks?.instagram || null,
-            linkedin: vendorInfo?.linkedin || businessInfo?.socialLinks?.linkedin || null,
-            twitter: vendorInfo?.twitter || businessInfo?.socialLinks?.twitter || null
+
+      return toPublicListingCard(
+        {
+          ...service,
+          businessDetails: {
+            businessName: businessInfo?.businessName || null,
+            description: businessInfo?.description || null,
+            bio: vendorInfo?.businessBio || null,
+            logo: businessInfo?.logo || null,
+            email: businessInfo?.email || vendorInfo?.businessEmail || null,
+            phone: businessInfo?.phone || vendorInfo?.businessPhone || null,
+            address: businessInfo?.address || null,
+            socialLinks: {
+              website: vendorInfo?.website || businessInfo?.socialLinks?.website || null,
+              facebook: vendorInfo?.facebook || businessInfo?.socialLinks?.facebook || null,
+              instagram: vendorInfo?.instagram || businessInfo?.socialLinks?.instagram || null,
+              linkedin: vendorInfo?.linkedin || businessInfo?.socialLinks?.linkedin || null,
+              twitter: vendorInfo?.twitter || businessInfo?.socialLinks?.twitter || null,
+            },
+            contactPerson: {
+              name: vendorInfo?.primaryContactName || null,
+              designation: vendorInfo?.primaryContactDesignation || null,
+            },
+            badge: businessInfo?.badge || null,
           },
-          contactPerson: {
-            name: vendorInfo?.primaryContactName || null,
-            designation: vendorInfo?.primaryContactDesignation || null
-          },
-          badge: businessInfo?.badge || null
-        }
-      };
+        },
+        { listingType: 'service' }
+      );
     });
 
     const total = await Service.countDocuments(filters);
@@ -351,8 +359,8 @@ exports.getServiceById = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        service: serviceData,
-        business: business, // ✅ now includes badge
+        service: toPublicListingDetail(serviceData, { listingType: 'service' }),
+        business: business ? toPublicBusinessCard(business) : null,
       },
     });
 
@@ -548,7 +556,7 @@ const foodItems = await Food.find(filters)
       total,
       page: parseInt(page),
       totalPages: Math.ceil(total / limit),
-      data: foodItems,
+      data: foodItems.map((food) => toPublicListingCard(food, { listingType: 'food' })),
     });
 
   } catch (err) {
@@ -634,8 +642,8 @@ exports.getFoodById = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        food: foodData,
-        business: business, // includes badge
+        food: toPublicListingDetail(foodData, { listingType: 'food' }),
+        business: business ? toPublicBusinessCard(business) : null,
       },
     });
 
@@ -1154,18 +1162,15 @@ if (price) {
       businesses.map((business) => [business._id.toString(), business.badge || null])
     );
 
-    products = products.map((product) => ({
-      _id: product._id,
-      title: product.title,
-      description: product.description,
-      coverImage: product.coverImage,
-      slug: product.slug,
-      brand: product.brand,
-      categoryId: product.categoryId,
-      subcategoryId: product.subcategoryId,
-      price: product.price,
-      badge: badgeByBusinessId.get(product.businessId?.toString()) || null,
-    }));
+    products = products.map((product) =>
+      toPublicListingCard(
+        {
+          ...product,
+          badge: badgeByBusinessId.get(product.businessId?.toString()) || null,
+        },
+        { listingType: 'product' }
+      )
+    );
 
     const total = await Product.countDocuments(filters);
     const totalPages = Math.ceil(total / limit);
@@ -1324,7 +1329,7 @@ exports.getProductsByFilters = async (req, res) => {
       total: products.length,
       page: parseInt(page),
       totalPages: Math.ceil(total / limit),
-      data: products,
+      data: products.map((product) => toPublicListingCard(product, { listingType: 'product' })),
     });
 
   } catch (err) {
@@ -1385,67 +1390,73 @@ exports.getProductById = async (req, res) => {
       taxRate,
     });
 
-    res.json({
-      success: true,
-      data: {
-        ...product,
-        businessId: product.businessId?._id,
+    const mappedVariants = variants.map(({ _id, ...rest }) => {
+      const variantPrice = rest.price ? Number(rest.price) : 0;
+      const variantSalePrice = rest.salePrice ? Number(rest.salePrice) : null;
+      const variantTaxPricing = buildTaxAwareAmounts({
+        priceExclTax: variantPrice,
+        salePriceExclTax: variantSalePrice,
+        taxRate,
+      });
+
+      return {
+        variantId: _id,
+        ...rest,
+        price: variantPrice,
+        salePrice: variantSalePrice,
         taxCategory: productTaxCategory,
         taxRate,
         taxIncluded: true,
+        ...variantTaxPricing,
+        sizes: Array.isArray(rest.sizes)
+          ? rest.sizes.map((size) => {
+              const sizePrice = size?.price ? Number(size.price) : 0;
+              const sizeSalePrice = size?.salePrice ? Number(size.salePrice) : null;
+              const sizeTaxPricing = buildTaxAwareAmounts({
+                priceExclTax: sizePrice,
+                salePriceExclTax: sizeSalePrice,
+                taxRate,
+              });
 
-        // Convert product price (Decimal128 → Number)
-        price: product.price ? Number(product.price) : null,
-        ...productTaxPricing,
+              return {
+                ...size,
+                price: sizePrice,
+                salePrice: sizeSalePrice,
+                taxCategory: productTaxCategory,
+                taxRate,
+                taxIncluded: true,
+                ...sizeTaxPricing,
+              };
+            })
+          : [],
+      };
+    });
 
-        // Clean business object (id + name)
-        business: {
+    const normalizedPrice = product.price ? Number(product.price) : null;
+
+    res.json({
+      success: true,
+      data: toPublicListingDetail(
+        {
+          ...product,
           businessId: product.businessId?._id,
-          businessName: product.businessId?.businessName
+          business: {
+            businessId: product.businessId?._id,
+            businessName: product.businessId?.businessName,
+          },
         },
-
-        variants: variants.map(({ _id, ...rest }) => {
-          const variantPrice = rest.price ? Number(rest.price) : 0;
-          const variantSalePrice = rest.salePrice ? Number(rest.salePrice) : null;
-          const variantTaxPricing = buildTaxAwareAmounts({
-            priceExclTax: variantPrice,
-            salePriceExclTax: variantSalePrice,
-            taxRate,
-          });
-
-          return {
-            variantId: _id,
-            ...rest,
-            price: variantPrice,
-            salePrice: variantSalePrice,
+        {
+          listingType: 'product',
+          extras: {
             taxCategory: productTaxCategory,
             taxRate,
             taxIncluded: true,
-            ...variantTaxPricing,
-            sizes: Array.isArray(rest.sizes)
-              ? rest.sizes.map((size) => {
-                  const sizePrice = size?.price ? Number(size.price) : 0;
-                  const sizeSalePrice = size?.salePrice ? Number(size.salePrice) : null;
-                  const sizeTaxPricing = buildTaxAwareAmounts({
-                    priceExclTax: sizePrice,
-                    salePriceExclTax: sizeSalePrice,
-                    taxRate,
-                  });
-
-                  return {
-                    ...size,
-                    price: sizePrice,
-                    salePrice: sizeSalePrice,
-                    taxCategory: productTaxCategory,
-                    taxRate,
-                    taxIncluded: true,
-                    ...sizeTaxPricing,
-                  };
-                })
-              : [],
-          };
-        })
-      }
+            price: normalizedPrice,
+            ...productTaxPricing,
+            variants: mappedVariants,
+          },
+        }
+      ),
     });
 
   } catch (err) {
@@ -1546,9 +1557,9 @@ exports.getVendorProfile = async (req, res) => {
     res.json({
       success: true,
       data: {
-        business,
-        vendorDetails: vendorOnboarding || null
-      }
+        business: toPublicBusinessCard(business),
+        vendorDetails: vendorOnboarding || null,
+      },
     });
 
   } catch (err) {
@@ -1607,7 +1618,7 @@ exports.getProductsByBusinessId = async (req, res) => {
       total,
       page: parseInt(page),
       totalPages: Math.ceil(total / limit),
-      data: products
+      data: products.map((product) => toPublicListingCard(product, { listingType: 'product' })),
     });
 
   } catch (err) {
@@ -1809,9 +1820,9 @@ exports.searchPublicListings = async (req, res) => {
         foods: foods.length,
       },
       data: {
-        products,
-        services,
-        foods,
+        products: products.map((item) => toPublicListingCard(item, { listingType: 'product' })),
+        services: services.map((item) => toPublicListingCard(item, { listingType: 'service' })),
+        foods: foods.map((item) => toPublicListingCard(item, { listingType: 'food' })),
       },
     });
   } catch (err) {

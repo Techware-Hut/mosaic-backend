@@ -2,7 +2,7 @@
 
 Maps backend features to automated tests (`npm test`), manual smoke checks, and proof-pack evidence.
 
-**Runner:** `npm test` → `node --test tests/**/*.test.js` (57 tests, Node built-in runner)
+**Runner:** `npm test` → `node --test tests/**/*.test.js` (77 tests, Node built-in runner)
 
 **Test style:** Unit/integration-style tests with mocked Mongoose models and module hooks. They prove **handler logic and wiring** — not full end-to-end flows against live MongoDB, Stripe, or AWS in CI.
 
@@ -14,7 +14,7 @@ Maps backend features to automated tests (`npm test`), manual smoke checks, and 
 
 | Layer | Count | What it validates |
 |-------|-------|-------------------|
-| Automated (`tests/`) | **57** | DTOs, middleware, controller logic, webhook wiring (mocked) |
+| Automated (`tests/`) | **77** | DTOs, middleware, controller logic, webhook wiring (mocked) |
 | Manual smoke script | 1 | Live API + DB auth/check per role |
 | Production smoke tiers | P0–P6 | Post-deploy on `https://api.mosaicbizhub.com` |
 | Proof pack | Per release | Redacted evidence matrix |
@@ -195,6 +195,17 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 
 ---
 
+## Marketplace tests (issue #28)
+
+| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
+| --- | --- | --- | --- | --- |
+| Public listing DTO | [`tests/marketplace/public-listing-dto.test.js`](../tests/marketplace/public-listing-dto.test.js) | Null-safe card/detail fields; legacy key preservation; price/image/vendor normalization | Live MongoDB list/detail responses | Yes — P6.1 featured-products |
+| Featured products wiring | [`tests/marketplace/featured-products-response.test.js`](../tests/marketplace/featured-products-response.test.js) | `getFeaturedProducts` maps through `toPublicListingCard`; preserves `{ products, pagination }` wrapper | Full featured feed against prod DB | Yes — deploy smoke `GET /api/featured-products` |
+
+**Contract doc:** [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md)
+
+---
+
 ## Launch-critical area → coverage map
 
 | Launch-critical area | Automated | Manual smoke | Gap / honest limit |
@@ -207,7 +218,7 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 | Upload MIME | Yes (5 tests) | P2.6 | No real S3 |
 | Webhook wiring | Yes (9 tests) | P4.x | Event DB side-effects manual |
 | Business sync | Yes (5 tests) | Post-verify | Subscription dependency manual |
-| Marketplace orders | **No** | P5.x | Largest automation gap |
+| Marketplace card/detail DTO | Yes (20 tests) | P6.x | Live browse/detail E2E manual |
 | Subscriptions (API) | **No** | P4.3 | Billing E2E manual |
 | CI/CD regression | **No** | `npm test` local pre-merge | No GitHub Actions |
 
@@ -216,7 +227,7 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 ## How to run
 
 ```bash
-# All automated tests (57)
+# All automated tests (77)
 npm test
 
 # Manual auth smoke (live API + DB)
@@ -232,7 +243,7 @@ node scripts/verify-auth-check-smoke.js
 
 | Evidence type | Source | Automated equivalent |
 | --- | --- | --- |
-| `npm test` 57/57 pass | Pre-merge local/CI | Yes — full suite |
+| `npm test` 77/77 pass | Pre-merge local/CI | Yes — full suite |
 | Auth smoke script output | `scripts/verify-auth-check-smoke.js` | Partial — live auth/check only |
 | Smoke matrix P0–P6 | [production-smoke-checklist.md](production-smoke-checklist.md) | No — human execution |
 | Webhook unsigned 400 | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) curl | Partial — 9 tests cover handler logic |
@@ -259,4 +270,6 @@ node scripts/verify-auth-check-smoke.js
 | `tests/vendor/vendor-onboarding-business-sync.test.js` | 5 | Business sync |
 | `tests/vendor/vendor-profile-field-allowlist.test.js` | 6 | Field allowlists |
 | `tests/stripe/stripe-webhook-routing-signature.test.js` | 9 | Webhook routing + signatures |
-| **Total** | **57** | |
+| `tests/marketplace/public-listing-dto.test.js` | 18 | Marketplace DTO normalization |
+| `tests/marketplace/featured-products-response.test.js` | 2 | Featured products wiring |
+| **Total** | **77** | |

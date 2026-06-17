@@ -13,6 +13,7 @@ const {
   normalizeTaxSettingsInput,
   serializeTaxSettings,
 } = require("../utils/vendorTax");
+const { toPublicBusinessCard } = require("../lib/listing/publicListingDto");
 
 exports.createBusiness = async (req, res) => {
   try {
@@ -798,7 +799,9 @@ exports.getProductBusinesses = async (req, res) => {
       total,
       page: parseInt(page),
       totalPages: Math.ceil(total / limit),
-      data: businesses,
+      data: businesses.map((business) =>
+        toPublicBusinessCard(business.toObject ? business.toObject() : business)
+      ),
     });
   } catch (err) {
     console.error("Error fetching businesses:", err);
@@ -878,7 +881,7 @@ exports.getBusinessBySlugPublic = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: business,
+      data: toPublicBusinessCard(business),
     });
   } catch (err) {
     console.error("Error fetching public business by slug:", err);

@@ -7,6 +7,7 @@ const ProductCategory = require('../models/ProductCategory');
 const ProductSubcategory = require('../models/ProductSubcategory');
 const Product = require('../models/Product');
 const Business = require('../models/Business');
+const { toPublicListingCard } = require('../lib/listing/publicListingDto');
 
 // tiny helper: clip a number into a safe range (with default)
 const clip = (n, lo, hi, d) => {
@@ -60,7 +61,11 @@ async function listProductsRanked(req, res) {
       });
 
       return res.json({
-        items: products,
+        items: products.map((product) =>
+          toPublicListingCard(product.toObject ? product.toObject() : product, {
+            listingType: 'product',
+          })
+        ),
         total,
         page: pageNum,
         pageSize: pageSizeN,
@@ -185,7 +190,17 @@ async function listProductsRanked(req, res) {
     const products = await Product.aggregate(pipeline);
 
     return res.json({
-      items: products,
+      items: products.map((item) =>
+        toPublicListingCard(
+          {
+            ...item,
+            businessId:
+              item.businessId ??
+              (item.businessName ? { businessName: item.businessName } : null),
+          },
+          { listingType: 'product' }
+        )
+      ),
       total,
       page: pageNum,
       pageSize: pageSizeN,
