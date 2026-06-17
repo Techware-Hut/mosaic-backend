@@ -34,6 +34,17 @@ function buildOnboarding(overrides = {}) {
     userId,
     applicationId: 'MBH-APP-TEST-001',
     businessName: 'Test Business',
+    businessType: 'product',
+    primaryContactName: 'Jane Vendor',
+    address: {
+      city: 'Atlanta',
+      state: 'GA',
+      country: 'USA',
+      zipCode: '30301',
+    },
+    acceptedTerms: true,
+    declarationAccepted: true,
+    isMinorityOwned: false,
     status: 'draft',
     badge: null,
     totalVerificationPoints: 0,
@@ -86,6 +97,15 @@ function loadController(onboarding) {
     }
     if (request === '../utils/WellcomeMailer') {
       return mailerMock;
+    }
+    if (request === '../utils/vendorOnboardingEmailDelivery') {
+      return {
+        deliverVendorOnboardingEmails: async () => ({
+          emailSent: true,
+          emailSkipped: false,
+          results: [],
+        }),
+      };
     }
     if (request === '../utils/vendorOnboardingProfileFields') {
       return require(profileFieldsPath);

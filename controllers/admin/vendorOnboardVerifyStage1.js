@@ -6,6 +6,7 @@ const {
   sendVendorRejectionEmail,
   sendVendorTrustBadgeAssignedEmail
 } = require('../../utils/WellcomeMailer');
+const { deliverVendorOnboardingEmails } = require('../../utils/vendorOnboardingEmailDelivery');
 
 // Admin pending queue contains only applications that have completed vendor
 // submission and are waiting for stage-1 review. Rejected resubmissions re-enter
@@ -436,6 +437,14 @@ exports.finalizeVerification = async (req, res) => {
       });
     }
 
+    if (application.status !== 'submitted') {
+      return res.status(400).json({
+        success: false,
+        message: 'Application must be in submitted status to finalize',
+        data: { currentStatus: application.status },
+      });
+    }
+
     await autoVerifyMinorityDocsIfMissing(application);
 
     // ✅ Required docs check
@@ -489,27 +498,34 @@ exports.finalizeVerification = async (req, res) => {
     // ✅ Sync business
     await syncBusinessPoints(application, badge);
 
-    let emailSent = false;
+    const vendorEmail = application.userId?.email;
+    const vendorName = application.userId?.name;
 
     // ✅ APPROVED
     if (application.status === 'verified') {
-      await sendVendorApprovedEmail({
-        to: application.userId.email,
-        vendorName: application.userId.name,
-        applicationId: application.applicationId
-      });
+      const emailJobs = [
+        {
+          label: 'vendor_approved',
+          send: () => sendVendorApprovedEmail({
+            to: vendorEmail,
+            vendorName,
+            applicationId: application.applicationId,
+          }),
+        },
+      ];
 
-      emailSent = true;
-
-      // Optional badge email
       if (badge) {
-        await sendVendorTrustBadgeAssignedEmail({
-          to: application.userId.email,
-          vendorName: application.userId.name,
-          badgeName: badge
+        emailJobs.push({
+          label: 'vendor_trust_badge',
+          send: () => sendVendorTrustBadgeAssignedEmail({
+            to: vendorEmail,
+            vendorName,
+            badgeName: badge,
+          }),
         });
-        emailSent = true;
       }
+
+      const emailDelivery = await deliverVendorOnboardingEmails(emailJobs);
 
       return res.status(200).json({
         success: true,
@@ -517,21 +533,25 @@ exports.finalizeVerification = async (req, res) => {
         data: {
           status: 'approved',
           badge,
-          emailSent
+          emailSent: emailDelivery.emailSent,
+          emailSkipped: emailDelivery.emailSkipped,
         }
       });
     }
 
     // ❌ REJECTED
     if (application.status === 'rejected') {
-      await sendVendorRejectionEmail({
-        to: application.userId.email,
-        vendorName: application.userId.name,
-        applicationId: application.applicationId,
-        rejectionReason
-      });
-
-      emailSent = true;
+      const emailDelivery = await deliverVendorOnboardingEmails([
+        {
+          label: 'vendor_rejection',
+          send: () => sendVendorRejectionEmail({
+            to: vendorEmail,
+            vendorName,
+            applicationId: application.applicationId,
+            rejectionReason: missingRequiredDocuments.join(', '),
+          }),
+        },
+      ]);
 
       return res.status(200).json({
         success: true,
@@ -539,9 +559,10 @@ exports.finalizeVerification = async (req, res) => {
         data: {
           status: 'rejected',
           badge,
-          emailSent,
+          emailSent: emailDelivery.emailSent,
+          emailSkipped: emailDelivery.emailSkipped,
           missingRequiredDocuments,
-          rejectionReason
+          rejectionReason: rejectionReason.trim(),
         }
       });
     }
