@@ -1,4 +1,4 @@
-# MVP Backend Vendor Profile, Listings, Orders, and Stock (Issue #31)
+# MVP Backend Vendor Self-Service APIs (Issue #31)
 
 **Branch:** `sprint/backend-vendor-profile-listings-orders-stock`  
 **Status:** Implemented on branch — **not merged or deployed to production**

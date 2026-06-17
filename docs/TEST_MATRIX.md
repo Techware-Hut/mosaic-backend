@@ -128,7 +128,7 @@ See [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) for route ownership and curl smoke 
 | Variant stock PATCH | [`tests/vendor/vendor-variant-stock.test.js`](../tests/vendor/vendor-variant-stock.test.js) | set/increment/decrement; negative + unknown op rejected | Order accept stock decrement | Yes — stock update on test variant |
 | Vendor order inbox | [`tests/vendor/vendor-orders.test.js`](../tests/vendor/vendor-orders.test.js) | `getVendorOrders` vendorId filter; accept 404/400 guards | Live paid order E2E | Yes — P5.5 |
 
-See [MVP_BACKEND_VENDOR_PROFILE_LISTINGS_ORDERS_STOCK.md](MVP_BACKEND_VENDOR_PROFILE_LISTINGS_ORDERS_STOCK.md).
+See [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md).
 
 ---
 
