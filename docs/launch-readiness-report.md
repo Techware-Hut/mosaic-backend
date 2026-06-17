@@ -8,6 +8,7 @@
 **Production context:** API live at `https://api.mosaicbizhub.com`; EB hostname `mosaic-backend.us-east-1.elasticbeanstalk.com`; no hosted staging environment; no CI workflows in either repo.
 
 **Related operational docs:**
+- [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) — current MVP sprint state (supersedes this report for live deploy/issue status)
 - [production-env-checklist.md](production-env-checklist.md)
 - [stripe-webhook-registration.md](stripe-webhook-registration.md)
 - [production-smoke-checklist.md](production-smoke-checklist.md)

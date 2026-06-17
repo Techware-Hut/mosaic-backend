@@ -1,7 +1,8 @@
 # MVP Backend Vendor Self-Service APIs (Issue #31)
 
-**Branch:** `sprint/backend-vendor-profile-listings-orders-stock`  
-**Status:** Implemented on branch — **not merged or deployed to production**
+> **Status:** [PR #40](https://github.com/Techware-Hut/mosaic-backend/pull/40) **OPEN** — not merged, **not on production**. Program snapshot: [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md).
+
+**Branch:** `sprint/backend-vendor-profile-listings-orders-stock`
 
 **Related:** [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md), [tier-listing-limit-implementation.md](tier-listing-limit-implementation.md), [business-sync.md](business-sync.md)
 

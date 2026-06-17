@@ -83,12 +83,14 @@ npm run dev
 | `npm install` | Install project dependencies |
 | `npm run dev` | Start the API with `nodemon` |
 | `npm start` | Start the API with `node index.js` |
-| `npm test` | Run automated tests (`node --test tests/**/*.test.js`, 57 cases) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) |
+| `npm test` | Run automated tests (`node --test tests/**/*.test.js`) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) and [docs/MVP_BACKEND_PROGRAM_STATUS.md](docs/MVP_BACKEND_PROGRAM_STATUS.md) for current count |
 | CI | GitHub Actions [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs tests on PR/push to `staging`/`main` |
 
 ## Operational docs
 
 **Documentation home:** [docs/README.md](docs/README.md) — full index, read-first guides, and maintenance rules.
+
+**MVP sprint status:** [docs/MVP_BACKEND_PROGRAM_STATUS.md](docs/MVP_BACKEND_PROGRAM_STATUS.md) — production deploy, open PRs, issue #26–#35 roadmap.
 
 Key entry points:
 
