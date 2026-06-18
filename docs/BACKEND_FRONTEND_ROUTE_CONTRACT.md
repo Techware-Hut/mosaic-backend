@@ -3,8 +3,23 @@
 **Purpose:** Launch-readiness route contract for frontend cleanup. Maps frontend-suspect paths to actual Express registrations.  
 **Issue:** [#55 Backend OpenAPI and API contract documentation](https://github.com/Techware-Hut/mosaic-backend/issues/55)  
 **Branch:** `audit/backend-frontend-route-contract`  
-**Audited against `main` commit:** `5f98461` (2026-06-18)  
+**Audited against `main` commit:** `4c77bf6` (2026-06-18)  
 **Production base URL:** `https://api.mosaicbizhub.com`
+
+---
+
+## Quick reference — featured and ranked (Batch D)
+
+Frontend must use these canonical routes. **Do not add backend aliases.**
+
+| Frontend need | Use (canonical) | Do NOT use | Prod verified |
+|---------------|-----------------|------------|---------------|
+| Featured products carousel | `GET /api/featured-products` | `/api/products/featured` (404) | **200** |
+| Ranked products browse | `GET /api/ranked` | `/api/products/ranked` (404) | **200** |
+
+CORS preflight for featured: `OPTIONS /api/featured-products` (all four launch origins — see [`CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md)).
+
+**Registry:** Featured → [`routes/featuredProductRoutes.js`](../routes/featuredProductRoutes.js). Ranked → [`routes/publicListing.js`](../routes/publicListing.js) (`listProductsRanked`).
 
 **Related (full backend maps):** [API_SURFACE.md](API_SURFACE.md) · [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md) · [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md)
 
@@ -60,7 +75,8 @@ Mount: `/api` via [`routes/publicListing.js`](../routes/publicListing.js), [`rou
 | `/api/public/foods/:id` | GET | No | Public | Food detail | **valid** | Canonical public food detail |
 | `/api/business/` | GET | No | Public | Business directory browse | **valid** | `getProductBusinesses` |
 | `/api/business/public/:slug` | GET | No | Public | Public business page | **valid** | Slug-based public profile |
-| `/api/ranked` | GET | No | Public | Ranked products | **valid** | Optional browse enhancement |
+| `/api/ranked` | GET | No | Public | Ranked products | **valid** | **Canonical ranked route.** Registered in `publicListing.js`. |
+| `/api/products/ranked` | GET | — | — | — | **missing/stale** | **Not registered.** Returns 404. Use `/api/ranked`. |
 | `/api/:id/similar` | GET | No | Public | Similar products | **valid** | Detail page related items |
 
 **Alternate public detail paths (also valid, prefer canonical above):**
