@@ -118,6 +118,40 @@ jobs:
             exit 1
           fi
 
+      - name: Post-deploy readiness probe
+        run: |
+          for path in /api/health /api/ready; do
+            status=$(curl -s -o /dev/null -w "%{http_code}" "${PRODUCTION_API_URL}${path}")
+            echo "${path}: HTTP $status"
+            if [ "$status" != "200" ]; then
+              echo "Expected 200 for ${path}"
+              exit 1
+            fi
+          done
+
+      - name: Post-deploy CORS probe
+        env:
+          LAUNCH_ORIGIN: https://mosaic-biz-frontend-launch.vercel.app
+          APP_ORIGIN: https://app.mosaicbizhub.com
+        run: |
+          for origin in "$LAUNCH_ORIGIN" "$APP_ORIGIN"; do
+            echo "CORS OPTIONS for Origin: $origin"
+            headers=$(curl -s -D - -o /dev/null -X OPTIONS \
+              -H "Origin: $origin" \
+              -H "Access-Control-Request-Method: GET" \
+              "${PRODUCTION_API_URL}/api/featured-products")
+            echo "$headers" | grep -i "access-control-allow-origin: $origin" || {
+              echo "Missing Access-Control-Allow-Origin for $origin"
+              exit 1
+            }
+          done
+          status=$(curl -s -o /dev/null -w "%{http_code}" "${PRODUCTION_API_URL}/api/featured-products")
+          echo "GET /api/featured-products: HTTP $status"
+          if [ "$status" != "200" ]; then
+            echo "Expected 200 for featured-products GET"
+            exit 1
+          fi
+
       - name: Deployment summary
         run: |
           {

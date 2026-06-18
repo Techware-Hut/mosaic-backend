@@ -1,7 +1,7 @@
 # MVP Backend Email Notifications (Issue #33)
 
-**Branch:** `sprint/backend-email-notifications`  
-**Status:** Audit + tests + docs (pre-merge)  
+**Branch:** `sprint/backend-deploy-smoke-sentry-18-27` (Batch 3 sync)  
+**Status:** Audit + tests + docs — **#43 closed on `main` (PR #78)**  
 **Program hub:** [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md)
 
 **Related:** [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) (issue #30 onboarding emails)
@@ -21,8 +21,8 @@ Audit and document launch-safe backend email notification behavior for vendor on
 | Topic | Owner issue | #33 action |
 | --- | --- | --- |
 | Vendor onboarding emails (#30) | #30 | Preserve + test submit path |
-| Order confirmation **timing** (pre-payment vs post-payment) | #43 | Document only — do not move emails |
-| Webhook email dedup on retry | #43 | Document only |
+| Order confirmation **timing** (pre-payment vs post-payment) | #43 | **Resolved on `main`** — paid confirmation webhook-only via `paidConfirmationEmailSentAt` |
+| Webhook email dedup on retry | #43 | **Resolved on `main`** — dedup flag prevents resend on Stripe retry |
 | Post-purchase review follow-up | #35 | Document gap — not implemented |
 | Stripe/payment/webhook architecture | #32 / #43 | No changes |
 
@@ -94,8 +94,9 @@ Application ID and support contact are included. Approve/reject/badge templates 
 | Type | Status | Tracked in |
 | --- | --- | --- |
 | Post-purchase review follow-up | **Not implemented** — Review CRUD exists (`reviewController.js`) but no mailer, scheduler, or post-order hook | #35 |
-| Move order confirmation to post-payment only | **Deferred** — emails still fire at `initiateOrder` (P0-6) | #43 |
-| Webhook email dedup on retry | **Deferred** | #43 |
+| Move **paid** confirmation to post-payment only | **Done (#43)** — `sendOrderPaidEmails` webhook-only; dedup via `paidConfirmationEmailSentAt` | Closed |
+| Pre-payment "order placed" emails at `initiateOrder` | **Still active** — `sendCustomerOrderPlacedEmail` / `sendVendorNewOrderEmail` at order create | Documented P0-6 risk |
+| Webhook email dedup on retry | **Done (#43)** — skip when `paidConfirmationEmailSentAt` set | Closed |
 | Food booking emails | **Not implemented** | — |
 | Unified mail service / retry queue | **Not implemented** | — |
 
@@ -132,7 +133,7 @@ Application ID and support contact are included. Approve/reject/badge templates 
 | [`tests/email/email-notification-safety.test.js`](../tests/email/email-notification-safety.test.js) | 4 | Review gap audit, OTP/logging source checks |
 | [`tests/stripe/order-email-safety.test.js`](../tests/stripe/order-email-safety.test.js) | 3 | Post-payment email call + safe failure |
 
-**Suite total after #33:** **155/155** (`npm test`)
+**Suite total (Batch 3):** **190/190** (`npm test`) — includes #43 order-email-safety tests
 
 **Not proven by automation:** Live SMTP inbox delivery, template rendering in real clients, PDF invoice attachment in production.
 
@@ -158,8 +159,8 @@ Live SMTP inbox proof requires **disposable dedicated smoke accounts** — not a
 
 | Risk | Detail |
 | --- | --- |
-| Pre-payment order emails | Customer may receive "order placed" before payment succeeds — #43 |
-| No webhook email dedup | Retry may resend paid confirmation — #43 |
+| Pre-payment order emails | Customer may receive "order placed" before payment succeeds — **not changed by #43** |
+| Paid confirmation dedup | **Mitigated (#43)** — `paidConfirmationEmailSentAt` on webhook |
 | No review follow-up | Post-purchase review prompt not implemented — #35 |
 | Fragmented mailers | 8+ files each create own Nodemailer transport |
 | Live SMTP unverified | Production inbox proof not captured |
@@ -172,3 +173,16 @@ Live SMTP inbox proof requires **disposable dedicated smoke accounts** — not a
 - [TEST_MATRIX.md](TEST_MATRIX.md)
 - [deploy-verification.md](deploy-verification.md)
 - [MVP_BACKEND_API_AUDIT.md](MVP_BACKEND_API_AUDIT.md) §5 gaps
+
+---
+
+## Batch 3 — Issue #67 resolution (2026-06-18)
+
+| AC | Status | Evidence |
+| --- | --- | --- |
+| Template + trigger inventory | **Complete** | Tables above + mail utility file list |
+| #43 payment timing alignment | **Synced** | Paid emails webhook-only; dedup documented |
+| No payment timing regression | **Verified** | No changes to webhook or initiateOrder paths in Batch 3 |
+| Test coverage | **190/190** | Includes `tests/stripe/order-email-safety.test.js`, vendor email tests |
+
+Close #67 with this doc as the canonical email inventory. Remaining quality work (unified mailer, review follow-up #35) stays post-launch.

@@ -13,7 +13,7 @@ Application map: [ARCHITECTURE.md](ARCHITECTURE.md).
 | --- | --- |
 | **LLM / AI agent** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [LLM_CONTEXT.md](LLM_CONTEXT.md) → [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md) → [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) → [BACKEND_STABILITY_AGENT_PROMPT.md](BACKEND_STABILITY_AGENT_PROMPT.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **New backend developer** | [ARCHITECTURE.md](ARCHITECTURE.md) → [SETUP.md](../SETUP.md) → [AUTH_FLOW.md](AUTH_FLOW.md) → [API_SURFACE.md](API_SURFACE.md) |
-| **QA / smoke tester** | [production-smoke-checklist.md](production-smoke-checklist.md) → [TEST_MATRIX.md](TEST_MATRIX.md) → [API_SURFACE.md](API_SURFACE.md) |
+| **QA / smoke tester** | [BACKEND_FULL_SMOKE_PROOF_PACK.md](BACKEND_FULL_SMOKE_PROOF_PACK.md) → [production-smoke-checklist.md](production-smoke-checklist.md) → [TEST_MATRIX.md](TEST_MATRIX.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **Release / deploy owner** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) → [DEPLOYMENT.md](../DEPLOYMENT.md) → [production-proof-pack-template.md](production-proof-pack-template.md) |
 | **Product / launch reviewer** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [DECISION_REGISTER.md](DECISION_REGISTER.md) → [launch-readiness-report.md](launch-readiness-report.md) |
 
@@ -53,6 +53,15 @@ Canonical deep-dives. Prefer these over duplicating detail in chat or new docs.
 | [BACKEND_ROADMAP_ISSUES.md](BACKEND_ROADMAP_ISSUES.md) | Prioritized GitHub-ready issue backlog by lane |
 | [BACKEND_LAUNCH_BLOCKERS_BATCH_2_AUDIT.md](BACKEND_LAUNCH_BLOCKERS_BATCH_2_AUDIT.md) | Batch 2 audit — payment auth, email timing, health (#41/#43/#69) |
 | [BACKEND_LAUNCH_BLOCKERS_BATCH_2_PROOF.md](BACKEND_LAUNCH_BLOCKERS_BATCH_2_PROOF.md) | Batch 2 test and smoke proof |
+| [BACKEND_BATCH_3_DEPLOY_SMOKE_AUDIT.md](BACKEND_BATCH_3_DEPLOY_SMOKE_AUDIT.md) | Batch 3 deploy/smoke/Sentry audit snapshot |
+| [BACKEND_FULL_SMOKE_PROOF_PACK.md](BACKEND_FULL_SMOKE_PROOF_PACK.md) | P0–P6 smoke matrix (#27) |
+| [SENTRY_EB_DEPLOY_VERIFICATION.md](SENTRY_EB_DEPLOY_VERIFICATION.md) | Sentry EB verification (#18) |
+| [EB_DEPLOYMENT_READINESS_CHECKLIST.md](EB_DEPLOYMENT_READINESS_CHECKLIST.md) | Pre/post EB deploy checklist |
+| [BACKEND_REMAINING_BLOCKERS_AFTER_BATCH_3.md](BACKEND_REMAINING_BLOCKERS_AFTER_BATCH_3.md) | Post-Batch 3 blocker classification |
+| [GITHUB_ISSUE_TRIAGE_2026-06-18.md](GITHUB_ISSUE_TRIAGE_2026-06-18.md) | GitHub issue close/comment/reopen log |
+| [ENV_VAR_INVENTORY.md](ENV_VAR_INVENTORY.md) | Env var names by environment (#64) |
+| [PUSH_TO_MAIN_DEPLOY_CRITERIA.md](PUSH_TO_MAIN_DEPLOY_CRITERIA.md) | Criteria to re-enable push-to-main deploy (#23) |
+| [BACKUP_ROLLBACK_RUNBOOK.md](BACKUP_ROLLBACK_RUNBOOK.md) | Code rollback + Atlas backup assumptions (#75) |
 | [API_SURFACE.md](API_SURFACE.md) | Full HTTP route map, middleware, auth/role boundaries, smoke and risk notes |
 | [AUTH_FLOW.md](AUTH_FLOW.md) | Login, register, OTP, password reset, JWT, Google OAuth, rate limits |
 | [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) | Vendor onboarding states, admin review, payments, uploads, resubmit |
@@ -90,6 +99,7 @@ Canonical deep-dives. Prefer these over duplicating detail in chat or new docs.
 | --- | --- |
 | [TEST_MATRIX.md](TEST_MATRIX.md) | Automated tests (`npm test`) mapped to manual smoke and gaps |
 | [production-smoke-checklist.md](production-smoke-checklist.md) | Tiered post-deploy smoke (P0–P6) on production API |
+| [BACKEND_FULL_SMOKE_PROOF_PACK.md](BACKEND_FULL_SMOKE_PROOF_PACK.md) | Full P0–P6 evidence matrix with pass/fail/blocked status |
 | [launch-readiness-report.md](launch-readiness-report.md) | Route audit, blockers, and launch-risk inventory |
 
 ---

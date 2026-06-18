@@ -1,7 +1,7 @@
 # Backend Roadmap Issues Plan
 
-**Branch:** `sprint/backend-stability-roadmap-cleanup`  
-**Date:** 2026-06-18  
+**Branch:** `main` @ `fbe3aac` (PR #78 merged)  
+**Date:** 2026-06-18 (Batch 3 audit update)  
 **Purpose:** GitHub-ready issue backlog grouped by priority lane. Maps to existing open issues where possible — do not duplicate filing without review.
 
 **Status labels used:** Defect / Bug Fix Needed · Revision Needed · Pending Developer Response · Deferred / Future Phase · Change Request Required
@@ -15,7 +15,7 @@
 | Field | Detail |
 | --- | --- |
 | **GitHub** | [#41](https://github.com/Techware-Hut/mosaic-backend/issues/41) |
-| **Status** | Defect / Bug Fix Needed |
+| **Status** | **Code complete** (PR #78) — prod verify pending EB deploy |
 | **Problem** | Legacy `/stripe/*` and unauthenticated payment intent routes expose pre-checkout attack surface |
 | **Impact** | Unauthorized payment API access; launch security gate |
 | **Scope** | Auth middleware on legacy routes; remove or guard `POST /api/payments/create-payment-intent` |
@@ -29,7 +29,7 @@
 | Field | Detail |
 | --- | --- |
 | **GitHub** | [#43](https://github.com/Techware-Hut/mosaic-backend/issues/43) |
-| **Status** | Defect / Bug Fix Needed |
+| **Status** | **Code complete** (PR #78) — prod verify pending EB deploy |
 | **Problem** | Order confirmation emails may fire before payment confirmation |
 | **Impact** | Customer confusion; false "order paid" emails |
 | **Scope** | Move customer/vendor order emails to post-webhook success path; idempotent webhook handlers |
@@ -43,10 +43,10 @@
 | Field | Detail |
 | --- | --- |
 | **GitHub** | [#27](https://github.com/Techware-Hut/mosaic-backend/issues/27) |
-| **Status** | Pending Developer Response |
+| **Status** | **In progress** — matrix in [BACKEND_FULL_SMOKE_PROOF_PACK.md](BACKEND_FULL_SMOKE_PROOF_PACK.md); P0 health blocked until EB deploy |
 | **Problem** | Browse/auth smoke PASS; checkout/email/vendor tiers incomplete |
 | **Impact** | Cannot sign off launch without tiered evidence |
-| **Scope** | Execute [production-smoke-checklist.md](production-smoke-checklist.md) with `SMOKE_TEST_*` accounts |
+| **Scope** | Execute [BACKEND_FULL_SMOKE_PROOF_PACK.md](BACKEND_FULL_SMOKE_PROOF_PACK.md) and [scripts/smoke-backend.ps1](../scripts/smoke-backend.ps1) with `SMOKE_TEST_*` accounts |
 | **Out of scope** | New feature development |
 | **Acceptance criteria** | Proof pack filled per [production-proof-pack-template.md](production-proof-pack-template.md) |
 | **Testing** | Manual prod smoke; document SKIP reasons |
@@ -57,7 +57,7 @@
 | Field | Detail |
 | --- | --- |
 | **GitHub** | [#69](https://github.com/Techware-Hut/mosaic-backend/issues/69) |
-| **Status** | Revision Needed |
+| **Status** | **Code complete** (PR #78) — prod verify pending EB deploy (`/api/health` 404 on prod 2026-06-18) |
 | **Problem** | Only `GET /` exists; no structured readiness probe |
 | **Impact** | EB/GHA cannot distinguish "up" vs "ready" (DB connected) |
 | **Scope** | Add `/api/health` or `/api/ready` with Mongo ping; keep `GET /` backward compatible |
@@ -247,8 +247,8 @@
 | Field | Detail |
 | --- | --- |
 | **GitHub** | [#18](https://github.com/Techware-Hut/mosaic-backend/issues/18) |
-| **Status** | Pending Developer Response |
-| **Problem** | Sentry merged to `main` (`a03305a`); not deployed to EB |
+| **Status** | **Launch blocker** — code on `main`; EB DSN + event capture not verified |
+| **Problem** | Sentry merged to `main`; not deployed/verified on EB |
 | **Impact** | No prod error capture |
 | **Scope** | EB deploy + verify DSN; optional debug route disabled in prod |
 | **Out of scope** | Session replay |

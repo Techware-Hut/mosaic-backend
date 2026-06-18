@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test tests/**/*.test.js",
+    "smoke:backend": "node scripts/run-smoke-backend.js",
     "dev": "nodemon index.js",
     "start": "node index.js"
   },

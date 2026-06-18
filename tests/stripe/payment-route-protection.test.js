@@ -128,10 +128,11 @@ test('assertConnectAccountOwnedByUser returns 403 for foreign Connect account', 
 
 test('app.js keeps Stripe webhook raw-body mounts before express.json', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../../app.js'), 'utf8');
-  const jsonIndex = source.indexOf('app.use(express.json())');
+  const jsonIndex = source.indexOf('app.use(express.json');
   const vendorWebhookIndex = source.indexOf("app.use('/api/vendor-onboarding/webhook/payment'");
   const stripeWebhookIndex = source.indexOf("app.use('/api/stripe'");
 
+  assert.ok(jsonIndex > -1, 'express.json middleware must exist in app.js');
   assert.ok(vendorWebhookIndex > -1 && vendorWebhookIndex < jsonIndex);
   assert.ok(stripeWebhookIndex > -1 && stripeWebhookIndex < jsonIndex);
 });

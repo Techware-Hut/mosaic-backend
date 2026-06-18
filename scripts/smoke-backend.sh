@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Lightweight backend smoke tests — public endpoints first, optional auth if tokens set.
+# Usage: API_BASE_URL=https://api.mosaicbizhub.com ./scripts/smoke-backend.sh
+
+set -euo pipefail
+
+BASE="${API_BASE_URL:-http://localhost:3001}"
+BASE="${BASE%/}"
+
+PASS=0
+FAIL=0
+SKIP=0
+BLOCKED=0
+
+pass() { echo "PASS  $1"; PASS=$((PASS + 1)); }
+fail() { echo "FAIL  $1"; FAIL=$((FAIL + 1)); }
+skip() { echo "SKIP  $1 — $2"; SKIP=$((SKIP + 1)); }
+blocked() { echo "BLOCKED  $1 — $2"; BLOCKED=$((BLOCKED + 1)); }
+
+http_code() {
+  curl -s -o /dev/null -w "%{http_code}" "$1"
+}
+
+get_json() {
+  curl -s -w "\n%{http_code}" "$1"
+}
+
+echo "=== Mosaic Backend Smoke ==="
+echo "API_BASE_URL=$BASE"
+echo ""
+
+# P0.1 Root
+code=$(http_code "$BASE/")
+if [ "$code" = "200" ]; then pass "P0.1 GET / ($code)"; else fail "P0.1 GET / ($code, expected 200)"; fi
+
+# P0.2 Health
+code=$(http_code "$BASE/api/health")
+if [ "$code" = "200" ]; then pass "P0.2 GET /api/health ($code)"; else fail "P0.2 GET /api/health ($code, expected 200)"; fi
+
+# P0.3 Ready
+code=$(http_code "$BASE/api/ready")
+if [ "$code" = "200" ]; then pass "P0.3 GET /api/ready ($code)"; else fail "P0.3 GET /api/ready ($code, expected 200)"; fi
+
+# P2.1 Unauthenticated auth check
+code=$(http_code "$BASE/api/users/auth/check")
+if [ "$code" = "401" ]; then pass "P2.1 GET /api/users/auth/check unauth ($code)"; else fail "P2.1 GET /api/users/auth/check ($code, expected 401)"; fi
+
+# P1 public marketplace
+for path in \
+  "/api/featured-products" \
+  "/api/products/list?limit=5" \
+  "/api/public/search?keyword=test&limit=5" \
+  "/api/services/list?limit=5" \
+  "/api/food/list?limit=5"
+do
+  code=$(http_code "$BASE$path")
+  if [ "$code" = "200" ]; then pass "P1 GET $path ($code)"; else fail "P1 GET $path ($code, expected 200)"; fi
+done
+
+CORS_ORIGIN="${FRONTEND_ORIGIN:-https://mosaic-biz-frontend-launch.vercel.app}"
+cors_headers=$(curl -s -D - -o /dev/null -X OPTIONS \
+  -H "Origin: $CORS_ORIGIN" \
+  -H "Access-Control-Request-Method: GET" \
+  "$BASE/api/featured-products")
+if echo "$cors_headers" | grep -qi "access-control-allow-origin: $CORS_ORIGIN"; then
+  pass "P0.4 CORS preflight (Origin=$CORS_ORIGIN)"
+else
+  fail "P0.4 CORS preflight (Origin=$CORS_ORIGIN)"
+fi
+
+# Optional auth probes
+auth_header() {
+  local token="$1"
+  if [ -z "$token" ]; then return 1; fi
+  if [[ "$token" == Bearer* ]]; then echo "$token"; else echo "Bearer $token"; fi
+}
+
+# P4.2 unauthenticated order initiate
+code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" "$BASE/api/orders/initiate")
+if [ "$code" = "401" ]; then pass "P4.2 POST /api/orders/initiate unauth ($code)"; else fail "P4.2 POST /api/orders/initiate ($code, expected 401)"; fi
+
+if [ -n "${SMOKE_TEST_CUSTOMER_TOKEN:-}" ]; then
+  hdr=$(auth_header "$SMOKE_TEST_CUSTOMER_TOKEN")
+  code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $hdr" "$BASE/api/users/auth/check")
+  if [ "$code" = "200" ]; then pass "P2.2 customer auth/check ($code)"; else fail "P2.2 customer auth/check ($code)"; fi
+else
+  blocked "P2.2 customer auth" "SMOKE_TEST_CUSTOMER_TOKEN not set"
+fi
+
+if [ -n "${SMOKE_TEST_VENDOR_TOKEN:-}" ]; then
+  hdr=$(auth_header "$SMOKE_TEST_VENDOR_TOKEN")
+  code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $hdr" "$BASE/api/users/auth/check")
+  if [ "$code" = "200" ]; then pass "P2.3 vendor auth/check ($code)"; else fail "P2.3 vendor auth/check ($code)"; fi
+else
+  blocked "P2.3 vendor auth" "SMOKE_TEST_VENDOR_TOKEN not set"
+fi
+
+if [ -n "${SMOKE_TEST_ADMIN_TOKEN:-}" ]; then
+  hdr=$(auth_header "$SMOKE_TEST_ADMIN_TOKEN")
+  code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $hdr" "$BASE/api/users/auth/check")
+  if [ "$code" = "200" ]; then pass "P2.4 admin auth/check ($code)"; else fail "P2.4 admin auth/check ($code)"; fi
+else
+  blocked "P2.4 admin auth" "SMOKE_TEST_ADMIN_TOKEN not set"
+fi
+
+if [ -n "${SMOKE_TEST_PRODUCT_ID:-}" ]; then
+  code=$(http_code "$BASE/api/public/product/$SMOKE_TEST_PRODUCT_ID")
+  if [ "$code" = "200" ]; then pass "P1 product detail ($code)"; else fail "P1 product detail ($code)"; fi
+else
+  skip "P1 product detail" "SMOKE_TEST_PRODUCT_ID not set"
+fi
+
+echo ""
+echo "=== Summary: PASS=$PASS FAIL=$FAIL SKIP=$SKIP BLOCKED=$BLOCKED ==="
+
+if [ "$FAIL" -gt 0 ]; then
+  exit 1
+fi
+exit 0
