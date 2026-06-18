@@ -1,6 +1,6 @@
 # MVP Backend Program Status
 
-**Last updated:** 2026-06-18 (post-#50 merge)  
+**Last updated:** 2026-06-18 (post #62 merge + closeout audit sync)  
 **Canonical hub** for backend MVP sprint (#26–#35): where Mosaic is today, what is live in production, what is in flight, and what comes next.
 
 For deep technical detail, follow links to issue-specific docs — do not duplicate them here.
@@ -15,9 +15,9 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | **Production API** | `https://api.mosaicbizhub.com` |
 | **Production deploy SHA** | `7d01011` — issues #33 + #42 ([PR #48](https://github.com/Techware-Hut/mosaic-backend/pull/48), [PR #49](https://github.com/Techware-Hut/mosaic-backend/pull/49)) |
 | **EB version label** | `mosaic-7d01011c55cb3ea367ff928b4b5fe2c30897d65e` |
-| **`main` HEAD** | `21b6595` — issue #50 agent docs ([PR #61](https://github.com/Techware-Hut/mosaic-backend/pull/61)) |
+| **`main` HEAD** | `a03305a` — #18 Sentry merged ([PR #62](https://github.com/Techware-Hut/mosaic-backend/pull/62)) |
 | **Open PR** | None |
-| **Automated tests** | **168/168** on `main` |
+| **Automated tests** | **173/173** on `main` |
 | **Release model** | Controlled issue-by-issue merge → manual GHA EB deploy → tiered prod smoke → evidence in [deploy-verification.md](deploy-verification.md) |
 
 ---
@@ -57,20 +57,33 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 
 Issues #33 and #42 merged and deployed to production (`7d01011`). GHA health/auth probes pass. Tiered checkout/email smoke **PENDING** `SMOKE_TEST_*` accounts — tracked in #27 and follow-ups #41–#43.
 
+### Active sprint item
+
+- **#41** Payment route hardening (P0 security follow-up from #32 audit) — **active next** per 2026-06-18 GitHub closeout audit
+
 ### Next scheduled work
 
-- **#55** OpenAPI / API contract docs (next Phase 2 item)
-- **#41** Payment route hardening (P0 security follow-up from #32 audit)
 - **#43** Order email timing and webhook retry idempotency
+- **#55** OpenAPI / API contract docs (docs-only Phase 2 item)
 
 ### Parallel / later
 
 - **#27** — full P0–P6 smoke proof pack ([production-proof-pack-template.md](production-proof-pack-template.md))
 - **#34–#35** — admin aggregation, reviews tests/DTO audit
-- **#18–#23** — post-deploy ops hardening (Sentry, CORS GHA smoke, staging workflow)
+- **#19–#21, #23** — post-deploy ops hardening (IAM tighten, rollback doc, CORS GHA smoke, push-to-main criteria); **#18 merged to `main` (PR #62), EB deploy pending**; **#22 closed as not planned** ([hosted-staging-decision.md](hosted-staging-decision.md))
 - **Security hardening** — auth on exposed admin/stripe routes (tracked in audit and [DECISION_REGISTER.md](DECISION_REGISTER.md))
 
 Issue dependency diagram: [MVP_BACKEND_API_AUDIT.md](MVP_BACKEND_API_AUDIT.md) §10 (Recommended backend fix order).
+
+### GitHub closeout audit (2026-06-18)
+
+Audited open issues #18–#23, #34–#35, #41, #43–#46, #51–#60 against `main` @ `3205731`. Post-audit: #18 code merged via [PR #62](https://github.com/Techware-Hut/mosaic-backend/pull/62) (`a03305a`); issue remains open until EB deploy + Sentry verification.
+
+| Outcome | Count | Notes |
+| --- | --- | --- |
+| Closed as completed | 0 | No issue met full acceptance criteria |
+| Closed as not planned | 1 | [#22](https://github.com/Techware-Hut/mosaic-backend/issues/22) — hosted staging deferred |
+| Left open | 20 | Checklist comments posted on each open issue |
 
 ---
 
