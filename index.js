@@ -7,6 +7,8 @@ if (process.platform === 'win32') {
 }
 
 require('dotenv').config();
+require('./instrument');
+
 const app = require('./app');
 const connectDB = require('./config/Db');
 
@@ -20,6 +22,12 @@ const startServer = async () => {
     });
   } catch (err) {
     console.error('Server startup aborted because MongoDB is unavailable.');
+    const { isSentryEnabled } = require('./instrument');
+    if (isSentryEnabled()) {
+      const Sentry = require('./instrument');
+      Sentry.captureException(err);
+      await Sentry.flush(2000);
+    }
     process.exit(1);
   }
 };

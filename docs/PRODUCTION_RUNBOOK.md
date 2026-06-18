@@ -18,6 +18,7 @@ Operational guide for release owners: deployment verification, rollback confirma
 | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) | Webhook smoke curl commands |
 | [hosted-staging-decision.md](hosted-staging-decision.md) | Why there is no staging host |
 | [launch-readiness-report.md](launch-readiness-report.md) | Open P0 blockers |
+| [production-env-checklist.md](production-env-checklist.md) § Observability | Sentry env var names |
 
 ---
 
@@ -210,6 +211,45 @@ Full tier detail: [production-smoke-checklist.md](production-smoke-checklist.md)
 ### Post-rollback sign-off
 
 Treat rollback deploy like a new release: deployment owner confirms SHA, release owner runs minimum smoke, proof pack updated.
+
+---
+
+## Observability — Sentry error monitoring
+
+Production error monitoring is **optional** until `SENTRY_DSN` is set on Elastic Beanstalk. Initialization is env-gated — local dev and CI run without Sentry when the DSN is unset.
+
+### Setup (infrastructure owner)
+
+1. Create a Sentry project for the backend (Node/Express).
+2. On EB, set env vars from [production-env-checklist.md](production-env-checklist.md) § Observability:
+   - `SENTRY_DSN` — from Sentry project settings (**never commit to git**)
+   - `SENTRY_ENVIRONMENT=production`
+   - `SENTRY_RELEASE=mosaic-<git-sha>` — align with EB version label from deploy workflow
+   - `SENTRY_TRACES_SAMPLE_RATE=0` (recommended for MVP — errors only)
+   - `SENTRY_ENABLED=true`
+3. Deploy the release that includes `instrument.js` and Sentry middleware.
+4. Restart or redeploy EB so env vars take effect.
+
+### What is captured
+
+| Signal | Mechanism |
+|--------|-----------|
+| Unhandled exceptions | Sentry Express error handler |
+| HTTP 5xx responses | Response `finish` hook (includes controller try/catch paths) |
+| Startup failures | Mongo connect failure in `index.js` |
+
+Sensitive fields (passwords, tokens, OTPs, Stripe secrets, cookies) are scrubbed in `beforeSend`. Request bodies are not logged by default.
+
+### Post-deploy verification
+
+1. Temporarily set `ENABLE_SENTRY_DEBUG_ROUTE=true` on EB.
+2. `GET https://api.mosaicbizhub.com/internal/sentry-debug` — expect HTTP 500.
+3. Confirm a new error event in the Sentry dashboard (environment `production`, release matches deploy SHA).
+4. Set `ENABLE_SENTRY_DEBUG_ROUTE=false` before launch sign-off.
+
+### Rollback notes
+
+If Sentry causes boot issues, set `SENTRY_ENABLED=false` or remove `SENTRY_DSN` on EB and restart — the app runs without monitoring.
 
 ---
 
