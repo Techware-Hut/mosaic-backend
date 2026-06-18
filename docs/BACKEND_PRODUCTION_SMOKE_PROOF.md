@@ -90,8 +90,45 @@ Unauth body example: `{"success":false,"message":"Authentication required"}` —
 | `SMOKE_TEST_VENDOR_TOKEN` | Not set |
 | `SMOKE_TEST_ADMIN_TOKEN` | Not set |
 | Customer/vendor/admin auth/check | **BLOCKED** |
+| Vendor `GET /api/business/my` (P2.5) | **BLOCKED** — needs vendor token |
+| Vendor `GET /api/vendor-onboarding/onboarding-data` (P2.6) | **BLOCKED** — needs vendor token |
+| Credentialed vendor login + cookie chain (P2.7) | **PASS** — see [`docs/VENDOR_LOGIN_SESSION_AUDIT.md`](VENDOR_LOGIN_SESSION_AUDIT.md) |
 | Role protection (403 probes) | **BLOCKED** |
 | Checkout initiation | **BLOCKED** — no tokens; no live payment tests per policy |
+
+---
+
+## Vendor login session proof (issue #81)
+
+**Audit doc:** [`docs/VENDOR_LOGIN_SESSION_AUDIT.md`](VENDOR_LOGIN_SESSION_AUDIT.md)  
+**Script:** [`scripts/vendor-login-session-proof.ps1`](../scripts/vendor-login-session-proof.ps1)
+
+### Public probes (2026-06-18, no credentials)
+
+| Probe | HTTP | Result |
+|-------|------|--------|
+| CORS preflight `OPTIONS /api/users/login` (`Origin: https://app.mosaicbizhub.com`) | 204 | **PASS** |
+| `GET /api/users/auth/check` unauth | 401 | **PASS** |
+
+### Credentialed vendor login (release owner)
+
+Set `SMOKE_TEST_VENDOR_EMAIL` + `SMOKE_TEST_VENDOR_PASSWORD` (or `SMOKE_TEST_VENDOR_TOKEN`) locally — never commit.
+
+| Step | Expected |
+|------|----------|
+| `POST /api/users/login` | **200**; body includes `user.role: business_owner`, `isOtpVerified: true`; token value redacted in logs |
+| `Set-Cookie` | `token` (HttpOnly, Secure, SameSite=None, Domain=.mosaicbizhub.com, Path=/), `user_session`, `user_gender` |
+| Cookie `GET /api/users/auth/check` | **200** `loggedIn: true` |
+| `GET /api/business/my` | **200** (empty businesses OK) |
+| `GET /api/vendor-onboarding/onboarding-data` | **404** for fresh vendor — authenticated missing-data response, **not 401** |
+
+**Recorded 2026-06-18 (redacted):** All credentialed steps **PASS** via [`scripts/vendor-login-session-proof.ps1`](../scripts/vendor-login-session-proof.ps1). Hand off to frontend [#142](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/142).
+
+**Root cause (code audit):** Backend login/cookies are role-agnostic. Credentialed prod proof confirms backend chain works; separate-login kick-out from `app.mosaicbizhub.com` is **not explained by backend vendor login branching** — investigate frontend credentialed fetch, role string (`business_owner` vs `vendor`), and 404 handling on onboarding-data.
+
+**Backend hardening (this branch):** `cookieHelper.js` omits empty `COOKIE_DOMAIN` and normalizes `COOKIE_SAMESITE` casing.
+
+**Unit tests:** `vendor-login-session.test.js`, `cookie-helper-prod-options.test.js` — `npm test` **212/212 PASS**.
 
 ---
 
@@ -118,13 +155,14 @@ Unauth body example: `{"success":false,"message":"Authentication required"}` —
 | No pre-payment email regression | **PASS** (unit tests) |
 | No duplicate paid email risk | **PASS** (unit tests + code) |
 | Authenticated checkout on prod | **BLOCKED** |
+| Vendor login session audit (#81) | **PASS** — public probes, unit tests (212/212), credentialed prod cookie chain |
 
 ---
 
 ## Remaining blockers
 
 1. ~~CORS 4/4 on production~~ — **RESOLVED** (2026-06-18)
-2. Provide approved smoke test tokens for auth/checkout tier — see [`docs/BACKEND_NEXT_LAUNCH_HARDENING_BATCH.md`](BACKEND_NEXT_LAUNCH_HARDENING_BATCH.md) Batch A
+2. Provide approved smoke test tokens for auth/checkout tier — see [`docs/BACKEND_NEXT_LAUNCH_HARDENING_BATCH.md`](BACKEND_NEXT_LAUNCH_HARDENING_BATCH.md) Batch A; vendor credentialed login proof via [`scripts/vendor-login-session-proof.ps1`](../scripts/vendor-login-session-proof.ps1)
 3. Sentry dashboard proof — **BLOCKED** until release owner verifies — Batch B
 
 ---
@@ -134,4 +172,5 @@ Unauth body example: `{"success":false,"message":"Authentication required"}` —
 - [`scripts/smoke-backend.ps1`](../scripts/smoke-backend.ps1)
 - [`docs/BACKEND_DEPLOYMENT_PROOF.md`](BACKEND_DEPLOYMENT_PROOF.md)
 - [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md)
-- [`docs/SENTRY_EB_DEPLOY_VERIFICATION.md`](SENTRY_EB_DEPLOY_VERIFICATION.md)
+- [`docs/VENDOR_LOGIN_SESSION_AUDIT.md`](VENDOR_LOGIN_SESSION_AUDIT.md)
+- [`scripts/vendor-login-session-proof.ps1`](../scripts/vendor-login-session-proof.ps1)

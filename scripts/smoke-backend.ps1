@@ -116,8 +116,22 @@ if ($env:SMOKE_TEST_VENDOR_TOKEN) {
     $hdr = @{ Authorization = (Get-AuthHeader $env:SMOKE_TEST_VENDOR_TOKEN) }
     $code = Get-StatusCode -Uri "$Base/api/users/auth/check" -Headers $hdr
     if ($code -eq 200) { Write-SmokePass "P2.3 vendor auth/check ($code)" } else { Write-SmokeFail "P2.3 vendor auth/check ($code)" }
+
+    $code = Get-StatusCode -Uri "$Base/api/business/my" -Headers $hdr
+    if ($code -eq 200) { Write-SmokePass "P2.5 vendor GET /api/business/my ($code)" } else { Write-SmokeFail "P2.5 vendor GET /api/business/my ($code, expected 200)" }
+
+    $code = Get-StatusCode -Uri "$Base/api/vendor-onboarding/onboarding-data" -Headers $hdr
+    if ($code -in 200, 404) {
+        Write-SmokePass "P2.6 vendor GET /api/vendor-onboarding/onboarding-data ($code, 404 OK for fresh vendor)"
+    } elseif ($code -eq 401) {
+        Write-SmokeFail "P2.6 vendor onboarding-data ($code, expected 200 or 404 — not 401)"
+    } else {
+        Write-SmokeFail "P2.6 vendor onboarding-data ($code, expected 200 or 404)"
+    }
 } else {
     Write-SmokeBlocked 'P2.3 vendor auth' 'SMOKE_TEST_VENDOR_TOKEN not set'
+    Write-SmokeBlocked 'P2.5 vendor business/my' 'SMOKE_TEST_VENDOR_TOKEN not set'
+    Write-SmokeBlocked 'P2.6 vendor onboarding-data' 'SMOKE_TEST_VENDOR_TOKEN not set'
 }
 
 if ($env:SMOKE_TEST_ADMIN_TOKEN) {

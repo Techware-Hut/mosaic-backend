@@ -12,7 +12,7 @@ No secret values belong in this document or the repository.
 | Variable | Role | Smoke check |
 |----------|------|-------------|
 | `SMOKE_TEST_CUSTOMER_TOKEN` | Customer session JWT | P2.2 `GET /api/users/auth/check` → 200 |
-| `SMOKE_TEST_VENDOR_TOKEN` | Vendor (`business_owner`) JWT | P2.3 auth/check → 200 |
+| `SMOKE_TEST_VENDOR_TOKEN` | Vendor (`business_owner`) JWT | P2.3 auth/check → 200; P2.5 `/api/business/my`; P2.6 onboarding-data |
 | `SMOKE_TEST_ADMIN_TOKEN` | Admin JWT | P2.4 auth/check → 200 |
 
 ## Optional variables
@@ -56,7 +56,9 @@ Parameters override env vars when both are set.
 
 ## Acceptance
 
-When all three tokens are supplied, smoke summary should show P2.2–P2.4 as **PASS** instead of **BLOCKED**.
+When all three tokens are supplied, smoke summary should show P2.2–P2.4 as **PASS** instead of **BLOCKED**. With a vendor token, P2.5–P2.6 should also pass (onboarding-data may return **404** for fresh vendors).
+
+For credentialed **cookie** login proof (not Bearer-only), use [`scripts/vendor-login-session-proof.ps1`](../scripts/vendor-login-session-proof.ps1) with `SMOKE_TEST_VENDOR_EMAIL` and `SMOKE_TEST_VENDOR_PASSWORD` — see [`docs/VENDOR_LOGIN_SESSION_AUDIT.md`](VENDOR_LOGIN_SESSION_AUDIT.md).
 
 When tokens are absent, script continues to report **BLOCKED** (expected for CI without secrets).
 

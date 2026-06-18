@@ -5,20 +5,45 @@ function parseBooleanEnv(value, fallback) {
   return String(value).toLowerCase() === 'true';
 }
 
+function normalizeSameSite(value) {
+  if (value === undefined || value === null) return undefined;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'none' || normalized === 'lax' || normalized === 'strict') {
+    return normalized;
+  }
+  return normalized;
+}
+
+function resolveCookieDomain() {
+  if (process.env.COOKIE_DOMAIN === undefined) {
+    return isProd ? '.mosaicbizhub.com' : undefined;
+  }
+
+  const trimmed = String(process.env.COOKIE_DOMAIN).trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 const cookieSecure = parseBooleanEnv(process.env.COOKIE_SECURE, isProd);
-const cookieSameSite = process.env.COOKIE_SAMESITE || (cookieSecure ? 'none' : 'lax');
-const cookieDomain = process.env.COOKIE_DOMAIN || (isProd ? '.mosaicbizhub.com' : undefined);
+const cookieSameSite = normalizeSameSite(
+  process.env.COOKIE_SAMESITE || (cookieSecure ? 'none' : 'lax')
+);
+const cookieDomain = resolveCookieDomain();
 
 function getCookieOptions(maxAge, { httpOnly = true, ...overrides } = {}) {
-  return {
+  const options = {
     httpOnly,
     secure: cookieSecure,
     sameSite: cookieSameSite,
-    domain: cookieDomain,
     path: '/',
     maxAge,
     ...overrides,
   };
+
+  if (cookieDomain) {
+    options.domain = cookieDomain;
+  }
+
+  return options;
 }
 
 function setCookie(res, name, value, options = {}) {
