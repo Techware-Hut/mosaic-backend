@@ -107,22 +107,17 @@ exports.sendVendorSubmissionConfirmationEmail = async ({
   const mailOptions = {
     from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
     to,
-    subject: "Your Business Verification Is Under Review",
+    subject: "Your Mosaic Biz Hub Application Is Under Review",
     html: `
       <div style="font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;">
         <h2 style="color:#333;">Hi ${vendorName},</h2>
 
         <p>
-          Thank you for submitting your business details to Mosaic Biz Hub.
-          Your application is currently under review.
+          Thank you for applying to Mosaic Biz Hub. Your information is under review.
+          We’ll email next steps within <strong>3–5 business days</strong>.
         </p>
 
         <p><strong>Application ID:</strong> ${applicationId}</p>
-
-        <p>
-          Our team typically completes verification within <strong>48 hours</strong>.
-          You’ll receive an email once the review is complete.
-        </p>
 
         <p style="margin-top:20px;">
           If you have questions, contact us at

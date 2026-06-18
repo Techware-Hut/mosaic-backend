@@ -31,6 +31,7 @@ Application map: [ARCHITECTURE.md](ARCHITECTURE.md).
 | [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md) | Issue #28 public listing/featured/detail DTO contract |
 | [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md) | Issue #29 search/filter API readiness |
 | [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) | Issue #30 vendor onboarding validation + email flow |
+| [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md) | Issue #33 email notification audit + tests |
 | [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) | Issue #31 vendor profile, listings, orders, stock |
 | [deploy-verification.md](deploy-verification.md) | Chronological MVP deploy verification log |
 

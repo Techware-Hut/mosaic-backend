@@ -344,3 +344,28 @@ Workflow post-deploy probes: root **200**, unauth auth/check **401**.
 ### Conclusion
 
 **Deploy Go** for issue #32 on `7f7e293`. Audit and test coverage merged; payment runtime unchanged (docs/tests only in deploy package). Live checkout proof **PENDING** smoke accounts. Follow-ups: #41, #42, #43, expanded #27.
+
+---
+
+## Planned — Issue #33 email notification audit (pre-deploy)
+
+**Branch:** `sprint/backend-email-notifications` (not yet merged/deployed)
+
+| Field | Value |
+|-------|-------|
+| Scope | Email audit, vendor submission receipt copy, logging hardening, tests, docs |
+| Runtime changes | Vendor submission email copy; order email failure logs message-only |
+| Stripe/payment | **No changes** |
+| Automated tests | **155/155** (138 baseline + 17 new) |
+| Evidence doc | [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md) |
+
+### Planned smoke (post-merge deploy)
+
+| Area | Expected | Status |
+|------|----------|--------|
+| Vendor submit receipt email | `SMOKE_TEST_VENDOR_*` inbox | **PENDING** |
+| Admin finalize approve/reject emails | `SMOKE_TEST_ADMIN_*` + pending app | **PENDING** |
+| Order paid confirmation email | `SMOKE_TEST_CUSTOMER_*` checkout | **PENDING** |
+| Live SMTP inbox proof | Disposable smoke accounts only | **PENDING** |
+
+**Conclusion:** Pre-merge only. No deploy claim until PR merged and EB deploy completed.
