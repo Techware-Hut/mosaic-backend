@@ -2,6 +2,8 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { createPaymentIntent } = require('../controllers/paymentController');
 const { body } = require('express-validator');
+const authenticate = require('../middlewares/authenticate');
+const isCustomer = require('../middlewares/isCustomer');
 
 
 const paymentRouter = express.Router();
@@ -15,6 +17,8 @@ const paymentLimiter = rateLimit({
 
 paymentRouter.post(
   '/create-payment-intent',
+  authenticate,
+  isCustomer,
   paymentLimiter,
   [
     body('orderId').isMongoId().withMessage('Invalid Order ID format'),

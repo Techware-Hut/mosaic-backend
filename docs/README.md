@@ -51,6 +51,8 @@ Canonical deep-dives. Prefer these over duplicating detail in chat or new docs.
 | [BACKEND_STABILITY_ROADMAP_AUDIT.md](BACKEND_STABILITY_ROADMAP_AUDIT.md) | Stability audit snapshot (working / fragile / deferred) |
 | [BACKEND_STABILITY_PROOF.md](BACKEND_STABILITY_PROOF.md) | Test and manual verification evidence for stability sprint |
 | [BACKEND_ROADMAP_ISSUES.md](BACKEND_ROADMAP_ISSUES.md) | Prioritized GitHub-ready issue backlog by lane |
+| [BACKEND_LAUNCH_BLOCKERS_BATCH_2_AUDIT.md](BACKEND_LAUNCH_BLOCKERS_BATCH_2_AUDIT.md) | Batch 2 audit — payment auth, email timing, health (#41/#43/#69) |
+| [BACKEND_LAUNCH_BLOCKERS_BATCH_2_PROOF.md](BACKEND_LAUNCH_BLOCKERS_BATCH_2_PROOF.md) | Batch 2 test and smoke proof |
 | [API_SURFACE.md](API_SURFACE.md) | Full HTTP route map, middleware, auth/role boundaries, smoke and risk notes |
 | [AUTH_FLOW.md](AUTH_FLOW.md) | Login, register, OTP, password reset, JWT, Google OAuth, rate limits |
 | [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) | Vendor onboarding states, admin review, payments, uploads, resubmit |
@@ -185,4 +187,5 @@ Follow these when changing code **or** docs.
 - [Proof-pack template](production-proof-pack-template.md)
 - [Backend stability audit](BACKEND_STABILITY_ROADMAP_AUDIT.md)
 - [Backend roadmap issues](BACKEND_ROADMAP_ISSUES.md)
+- [Launch blockers batch 2 audit](BACKEND_LAUNCH_BLOCKERS_BATCH_2_AUDIT.md)
 - [Deployment docs](../DEPLOYMENT.md) · [Staging](../STAGING.md) · [Setup](../SETUP.md)

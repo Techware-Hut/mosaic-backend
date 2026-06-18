@@ -30,6 +30,15 @@ const createPaymentIntent = async (req, res) => {
       return res.status(404).json({ message: 'Order not found.' });
     }
 
+    const requestUserId = String(req.user?.id || req.user?._id || '');
+    if (!requestUserId || order.userId.toString() !== requestUserId) {
+      return res.status(403).json({ message: 'Not allowed to pay for this order.' });
+    }
+
+    if (order.paymentStatus === 'paid') {
+      return res.status(400).json({ message: 'Order is already paid.' });
+    }
+
     const derivedAmount = toStripeAmount(order.totalAmount);
     if (!derivedAmount) {
       return res.status(400).json({ message: 'Order total is invalid.' });
