@@ -67,6 +67,8 @@ function buildBusiness(overrides = {}) {
   return {
     _id: businessId,
     email: 'vendor@example.com',
+    isApproved: overrides.isApproved ?? true,
+    isActive: overrides.isActive ?? true,
     stripeConnectAccountId: overrides.stripeConnectAccountId ?? connectAccountId,
     taxSettings: {},
     shippingSettings: { method: 'flat_rate', flatRate: { standard: 5 } },
@@ -429,4 +431,75 @@ test('initiateOrder returns generic 500 on unexpected Stripe errors', async () =
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.message, 'Server error');
   assert.doesNotMatch(JSON.stringify(res.body), /Internal stripe failure/);
+});
+
+test('initiateOrder allows checkout for approved active business with Connect account', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const { initiateOrder, getPiCreateCalls } = loadInitiateOrder({
+    business: buildBusiness({ isApproved: true, isActive: true }),
+  });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.success, true);
+  assert.ok(res.body.clientSecret);
+  assert.equal(getPiCreateCalls().length, 1);
+});
+
+test('initiateOrder blocks checkout when business is not approved', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const { initiateOrder, getPiCreateCalls } = loadInitiateOrder({
+    business: buildBusiness({ isApproved: false }),
+  });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.message, /not approved/i);
+  assert.equal(getPiCreateCalls().length, 0);
+});
+
+test('initiateOrder blocks checkout when business is deactivated', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const { initiateOrder, getPiCreateCalls } = loadInitiateOrder({
+    business: buildBusiness({ isActive: false }),
+  });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.message, /unavailable/i);
+  assert.equal(getPiCreateCalls().length, 0);
+});
+
+test('initiateOrder blocks checkout when business is missing', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const { initiateOrder, getPiCreateCalls } = loadInitiateOrder({
+    business: null,
+  });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 404);
+  assert.match(res.body.message, /not found/i);
+  assert.equal(getPiCreateCalls().length, 0);
+});
+
+test('initiateOrder blocks checkout when product variant is missing', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const { initiateOrder, getPiCreateCalls } = loadInitiateOrder({
+    variants: [],
+  });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 404);
+  assert.match(res.body.message, /not found/i);
+  assert.equal(getPiCreateCalls().length, 0);
 });

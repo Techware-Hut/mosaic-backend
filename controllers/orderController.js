@@ -96,6 +96,7 @@ const Order = require("../models/Order");
 const User = require("../models/User");
 const ProductVariant = require("../models/ProductVariant")  ;
 const Business = require("../models/Business");
+const { getBusinessCheckoutBlock } = require("../utils/checkoutGuards");
 const { sendOrderStatusEmail, sendOrderUpdateEmail, sendVendorNewOrderEmail, sendCustomerOrderPlacedEmail } = require("../utils/orderPhase");
 const {
   calculateShippingForVendor,
@@ -573,10 +574,11 @@ exports.initiateOrder = async (req, res) => {
     const business = await Business.findById(businessId);
     const user = await User.findById(userId).select("email");
 
-    if (!business || !business.stripeConnectAccountId) {
-      return res.status(400).json({
+    const checkoutBlock = getBusinessCheckoutBlock(business);
+    if (checkoutBlock) {
+      return res.status(checkoutBlock.status).json({
         success: false,
-        message: "Vendor is not connected to Stripe.",
+        message: checkoutBlock.message,
       });
     }
 

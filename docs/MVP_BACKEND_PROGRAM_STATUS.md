@@ -1,6 +1,6 @@
 # MVP Backend Program Status
 
-**Last updated:** 2026-06-17 (issue #33 branch)  
+**Last updated:** 2026-06-17 (issues #33 + #42 merge prep)  
 **Canonical hub** for backend MVP sprint (#26–#35): where Mosaic is today, what is live in production, what is in flight, and what comes next.
 
 For deep technical detail, follow links to issue-specific docs — do not duplicate them here.
@@ -17,7 +17,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | **EB version label** | `mosaic-7f7e2930f931968da6985519cc3fc948aab778ae` |
 | **`main` HEAD** | `7f7e293` |
 | **Open PR** | None |
-| **Automated tests** | **155/155** on `sprint/backend-email-notifications` branch (138 on prod `main`) |
+| **Automated tests** | **168/168** on combined #33 + #42 branch (155 on prod `main` after #48) |
 | **Release model** | Controlled issue-by-issue merge → manual GHA EB deploy → tiered prod smoke → evidence in [deploy-verification.md](deploy-verification.md) |
 
 ---
@@ -33,9 +33,10 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | [#30](https://github.com/Techware-Hut/mosaic-backend/issues/30) | Vendor onboarding + email | **Merged** (PR #39) | **Live** (`6cdf587`) | [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) |
 | [#31](https://github.com/Techware-Hut/mosaic-backend/issues/31) | Vendor self-service APIs | **Merged** (PR #40) | **Live** (`2134231`) | [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) |
 | [#32](https://github.com/Techware-Hut/mosaic-backend/issues/32) | Stripe Connect runtime | **Merged** (PR #47) | **Live** (`7f7e293` docs/tests) | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) |
-| [#33](https://github.com/Techware-Hut/mosaic-backend/issues/33) | Email notifications | **In progress** (branch) | N/A | [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md) |
+| [#33](https://github.com/Techware-Hut/mosaic-backend/issues/33) | Email notifications | **Merged** (PR #48) | Pending deploy | [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md) |
 | [#34](https://github.com/Techware-Hut/mosaic-backend/issues/34) | Admin APIs | **Not started** | N/A | Audit §10 |
 | [#35](https://github.com/Techware-Hut/mosaic-backend/issues/35) | Reviews | **Not started** | N/A | Audit §10 |
+| [#42](https://github.com/Techware-Hut/mosaic-backend/issues/42) | Checkout approval + safe PI | **In progress** (PR #49) | Pending deploy | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) §#42 |
 
 **Deploy log:** chronological merge/deploy/smoke records → [deploy-verification.md](deploy-verification.md)
 
@@ -51,7 +52,7 @@ Issue #32 complete (merged, deployed). Checkout live smoke **PENDING** `SMOKE_TE
 
 - **#33** Email notifications — audit + tests + docs (**in progress** on `sprint/backend-email-notifications`)
 - **#41** Payment route hardening (P0 security follow-up from #32 audit)
-- **#42** Checkout approval gate + safe `retrieveIntent` response
+- **#42** Checkout approval gate + safe `retrieveIntent` — **in progress** on `sprint/backend-checkout-approval-paymentintent-safety`
 
 ### Parallel / later
 

@@ -152,25 +152,82 @@ sequenceDiagram
 1. Valid cart items, shipping address, single vendor
 2. Server-derived prices (±$0.01 tolerance vs client `price`)
 3. Stock available (unless backorder allowed)
-4. `Business.stripeConnectAccountId` present
-5. Live Stripe account: `charges_enabled` + active `transfers` capability
+4. **`Business.isApproved === true`** (#42)
+5. **`Business.isActive === true`** (#42)
+6. `Business.stripeConnectAccountId` present
+7. Live Stripe account: `charges_enabled` + active `transfers` capability
 
 ### Not enforced at checkout (documented gaps)
 
-- `Business.isApproved` / admin approval gate
-- Vendor onboarding `verified` status
+- Vendor onboarding `verified` status (separate from `Business.isApproved`)
 - Active subscription tier (listing gate only)
 
 ---
 
-## Runtime safety review
+## Checkout approval gate (#42)
+
+**Helper:** [`utils/checkoutGuards.js`](../utils/checkoutGuards.js) — `getBusinessCheckoutBlock(business)`
+
+| Business state | HTTP | Message |
+| --- | --- | --- |
+| Missing | 404 | Vendor business not found. |
+| `isApproved === false` | 403 | This vendor is not approved for checkout. |
+| `isActive === false` | 403 | This vendor is temporarily unavailable for checkout. |
+| No `stripeConnectAccountId` | 400 | Vendor is not connected to Stripe. |
+| Approved + active + Connect ready | — | Proceeds to PI creation |
+
+Admin block flow sets `isApproved: false` and `isActive: false` together ([`business.Controller.js`](../controllers/admin/business.Controller.js)).
+
+---
+
+## Sanitized PaymentIntent response (#42)
+
+**Endpoint:** `GET /api/orders/retrieve-intent/:id` (customer JWT required)
+
+**Helper:** [`utils/paymentIntentResponse.js`](../utils/paymentIntentResponse.js)
+
+### Ownership
+
+- Loads orders by `paymentId` first
+- Returns **403** if any order `userId` does not match authenticated customer
+
+### `paymentIntent` safe fields
+
+| Field | Included |
+| --- | --- |
+| `id` | Yes |
+| `status` | Yes |
+| `amount` | Yes |
+| `currency` | Yes |
+| `created` | Yes |
+| `metadata.orderId` / `metadata.groupOrderId` | Yes (when present) |
+| `client_secret` | **No** |
+| `charges` | **No** |
+| `payment_method` | **No** |
+| `transfer_data` | **No** |
+| `customer` | **No** |
+| `last_payment_error` | **No** |
+
+### `orders` poll shape
+
+Returns per-order: `id`, `groupOrderId`, `status`, `paymentStatus`, `totalAmount`, `currency`, and item `title`/`quantity`/`price`/`size` only. Omits `userId`, vendor references, and internal Stripe IDs.
+
+### Error mapping
+
+- Stripe retrieve failures → **500** with generic message only (no `error.message` in body)
+- Missing orders → **404**
+- Wrong customer → **403**
+
+---
+
+## Runtime safety review (updated #42)
 
 | Check | Result |
 |-------|--------|
 | Test vs live mode | Driven by `STRIPE_SECRET_KEY` prefix only |
 | Secret keys logged | **No** — logs use IDs, not keys |
 | Webhook secrets exposed | **No** — signature verification required |
-| Client responses safe | `initiateOrder` returns `clientSecret` only (expected for Stripe.js) |
+| Client responses safe | `initiateOrder` returns `clientSecret` only; `retrieveIntent` returns sanitized PI (#42) |
 | Stripe errors to client | Generic `500` or mapped `400`; no secret leakage |
 | PI idempotency | `pi:{orderId}` on create |
 | Order double-create on retry | Order persisted before PI; retry creates new order (no cart-level idempotency) |
@@ -186,9 +243,10 @@ sequenceDiagram
 | Connect onboarding incomplete | 400 `"Vendor Stripe onboarding incomplete."` | Yes |
 | Multi-vendor cart | 400 single-vendor message | Yes |
 | Price tampering | 400 price mismatch | Yes |
-| Legacy `/api/payments/create-payment-intent` | Plain PI, no Connect split, no auth | **Bypass risk** — document only |
-| Unauthenticated `/stripe/*` | Anyone with account ID can request sessions | **Unsafe** — track separately |
-| `retrieveIntent` full PI dump | Returns raw Stripe PaymentIntent object | **Review** — may expose internal fields |
+| Unapproved / deactivated vendor | 403 blocked at checkout (#42) | Yes |
+| Legacy `/api/payments/create-payment-intent` | Plain PI, no Connect split, no auth | **Bypass risk** — track #41 |
+| Unauthenticated `/stripe/*` | Anyone with account ID can request sessions | **Unsafe** — track #41 |
+| `retrieveIntent` over-exposure | Sanitized PI + order poll (#42) | **Mitigated** |
 | `PLATFORM_FEE_CENTS >= total` | Stripe rejects PI after order saved | Low — orphan pending order |
 | Pre-payment order emails | Sent in `initiateOrder` before pay succeeds | Known product issue (P0-6) |
 | Prod live charge without approval | **STOP** — see gate below | N/A |
@@ -258,6 +316,25 @@ New files:
 - **Test mode:** Stripe Dashboard refund or `orderController` reject/cancel refund path (`reverse_transfer: true`, `refund_application_fee: true`)
 - **Live approved smoke:** Same refund paths; record PI/charge IDs in proof pack; verify transfer reversal in Connect Dashboard
 - **Failed PI (never confirmed):** Order remains `pending`/`created`; no charge to refund
+
+---
+
+## Files changed in #42
+
+| File | Change |
+|------|--------|
+| `utils/checkoutGuards.js` | **Created** — business approval/active gate |
+| `utils/paymentIntentResponse.js` | **Created** — sanitized PI + order poll |
+| `controllers/orderController.js` | Approval gate before Connect checks |
+| `controllers/stripePaymentController.js` | Sanitized `retrieveIntent` + ownership |
+| `tests/stripe/order-initiate-connect.test.js` | +5 approval gate tests |
+| `tests/stripe/checkout-approval-paymentintent-safety.test.js` | **Created** — retrieve-intent safety |
+| `tests/utils/checkout-paymentintent-response.test.js` | **Created** — util unit tests |
+| `docs/MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md` | #42 sections |
+| `docs/TEST_MATRIX.md` | #42 test index |
+| `docs/MVP_BACKEND_PROGRAM_STATUS.md` | #42 status |
+
+**Not changed:** Connect destination-charge architecture, webhook handlers, deploy workflows, `GET /api/featured-products`.
 
 ---
 
