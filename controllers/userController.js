@@ -37,6 +37,45 @@ const FORGOT_PASSWORD_RESPONSE = {
 };
 const RESET_PASSWORD_MAX_OTP_ATTEMPTS = 5;
 
+function buildDuplicateRegistrationResponse(existingUser, requestedRole) {
+    if (existingUser.role === 'customer' && requestedRole === 'business_owner') {
+        return {
+            status: 409,
+            body: {
+                success: false,
+                code: 'EXISTING_CUSTOMER',
+                message:
+                    'An account with this email or mobile already exists. Log in to continue vendor setup.',
+            },
+        };
+    }
+
+    if (existingUser.role === 'business_owner') {
+        return {
+            status: 409,
+            body: {
+                success: false,
+                code: 'EXISTING_VENDOR',
+                message:
+                    'A vendor account with this email or mobile already exists. Log in to continue onboarding.',
+            },
+        };
+    }
+
+    return {
+        status: 409,
+        body: {
+            success: false,
+            code: 'USER_EXISTS',
+            message: 'User already exists with email or mobile',
+        },
+    };
+}
+
+function isDuplicateKeyError(err) {
+    return err && (err.code === 11000 || err.code === '11000');
+}
+
 exports.registerUser = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -49,10 +88,8 @@ exports.registerUser = async (req, res) => {
 
         const existingUser = await User.findOne({ $or: [{ email }, { mobile }] });
         if (existingUser) {
-            return res.status(400).json({
-                success: false,
-                message: 'User already exists with email or mobile',
-            });
+            const duplicate = buildDuplicateRegistrationResponse(existingUser, safeRole);
+            return res.status(duplicate.status).json(duplicate.body);
         }
 
         const passwordHash = await bcrypt.hash(password, 12);
@@ -89,6 +126,13 @@ exports.registerUser = async (req, res) => {
         });
     } catch (err) {
         console.error('Registration error:', err);
+        if (isDuplicateKeyError(err)) {
+            return res.status(409).json({
+                success: false,
+                code: 'DUPLICATE_KEY',
+                message: 'User already exists with email or mobile',
+            });
+        }
         return res.status(500).json({ success: false, message: 'Server error' });
     }
 };
