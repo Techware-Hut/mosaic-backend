@@ -1,9 +1,22 @@
 # Lightweight backend smoke tests - public endpoints first, optional auth if tokens set.
 # Usage: ./scripts/smoke-backend.ps1 -ApiBaseUrl https://api.mosaicbizhub.com
+# Optional auth: -CustomerToken / -VendorToken / -AdminToken (or SMOKE_TEST_* env vars)
+# See docs/SMOKE_TEST_TOKENS.md
 
 param(
-    [string]$ApiBaseUrl = $(if ($env:API_BASE_URL) { $env:API_BASE_URL } else { "http://localhost:3001" })
+    [string]$ApiBaseUrl = $(if ($env:API_BASE_URL) { $env:API_BASE_URL } else { "http://localhost:3001" }),
+    [string]$CustomerToken,
+    [string]$VendorToken,
+    [string]$AdminToken,
+    [string]$ProductId,
+    [string]$FrontendOrigin
 )
+
+if ($CustomerToken) { $env:SMOKE_TEST_CUSTOMER_TOKEN = $CustomerToken }
+if ($VendorToken) { $env:SMOKE_TEST_VENDOR_TOKEN = $VendorToken }
+if ($AdminToken) { $env:SMOKE_TEST_ADMIN_TOKEN = $AdminToken }
+if ($ProductId) { $env:SMOKE_TEST_PRODUCT_ID = $ProductId }
+if ($FrontendOrigin) { $env:FRONTEND_ORIGIN = $FrontendOrigin }
 
 $Base = $ApiBaseUrl.TrimEnd('/')
 $Pass = 0
