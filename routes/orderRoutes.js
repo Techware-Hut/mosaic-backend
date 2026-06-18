@@ -10,7 +10,7 @@ const { getInvoicePdf } = require('../controllers/invoiceController');
 
 
 
-router.post('/initiate', authenticate, initiateOrder);
+router.post('/initiate', authenticate, isCustomer, initiateOrder);
 router.get('/retrieve-intent/:id', authenticate, retrieveIntent);
 router.get('/user', authenticate, getUserOrders);
 router.get('/:id/invoice.pdf', authenticate, getInvoicePdf);

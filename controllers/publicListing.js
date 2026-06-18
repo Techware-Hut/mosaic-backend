@@ -37,6 +37,17 @@ const getVisibleBusinessIds = async () => {
   return businesses.map((business) => business._id.toString());
 };
 
+const PUBLIC_LIST_MAX_LIMIT = 50;
+
+function clipListPagination(page, limit, defaultLimit = 10) {
+  const pageN = Math.max(1, parseInt(page, 10) || 1);
+  const limitN = Math.max(
+    1,
+    Math.min(PUBLIC_LIST_MAX_LIMIT, parseInt(limit, 10) || defaultLimit)
+  );
+  return { page: pageN, limit: limitN, skip: (pageN - 1) * limitN };
+};
+
 const emptyListResponse = (page = 1) => ({
   success: true,
   total: 0,
@@ -255,13 +266,13 @@ exports.getAllServices = async (req, res) => {
     if (sort === 'rating') sortOption = { averageRating: -1 };
     if (sort === 'reviews') sortOption = { totalReviews: -1 };
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page: pageN, limit: limitN, skip } = clipListPagination(page, limit);
 
     let services = await Service.find(filters)
       .select('title services averageRating totalReviews slug description contact.address coverImage location price businessId')
       .sort(sortOption)
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limitN)
       .lean();
 
     const serviceBusinessIds = [...new Set(
@@ -328,8 +339,8 @@ exports.getAllServices = async (req, res) => {
     res.json({
       success: true,
       total,
-      page: parseInt(page),
-      totalPages: Math.ceil(total / limit),
+      page: pageN,
+      totalPages: Math.ceil(total / limitN),
       data: services,
     });
   } catch (err) {
@@ -655,7 +666,7 @@ exports.getAllFood = async (req, res) => {
     if (sort === 'price_desc') sortOption = { price: -1 };
     if (sort === 'rating') sortOption = { averageRating: -1 };
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page: pageN, limit: limitN, skip } = clipListPagination(page, limit);
 
     // Fetch foods with business info
 const foodItems = await Food.find(filters)
@@ -666,7 +677,7 @@ const foodItems = await Food.find(filters)
   })
   .sort(sortOption)
   .skip(skip)
-  .limit(parseInt(limit))
+  .limit(limitN)
   .lean();
 
     const total = await Food.countDocuments(filters);
@@ -674,8 +685,8 @@ const foodItems = await Food.find(filters)
     res.json({
       success: true,
       total,
-      page: parseInt(page),
-      totalPages: Math.ceil(total / limit),
+      page: pageN,
+      totalPages: Math.ceil(total / limitN),
       data: foodItems.map((food) => toPublicListingCard(food, { listingType: 'food' })),
     });
 
@@ -1134,25 +1145,25 @@ if (price) {
     if (sort === 'price_desc') sortOption = { price: -1 };
     if (sort === 'rating') sortOption = { averageRating: -1 };
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page: pageN, limit: limitN, skip } = clipListPagination(page, limit);
 
     let products = await Product.find(filters)
       .select('title description coverImage slug brand categoryId subcategoryId price businessId')
       .populate('businessId', 'businessName logo badge address tags')
       .sort(sortOption)
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limitN)
       .lean();
 
     products = await mapProductsWithBusinessMeta(products, 'product');
 
     const total = await Product.countDocuments(filters);
-    const totalPages = Math.ceil(total / limit);
+    const totalPages = Math.ceil(total / limitN);
 
     res.json({
       success: true,
       total,
-      page: parseInt(page),
+      page: pageN,
       totalPages,
       data: products,
     });
@@ -1252,14 +1263,14 @@ exports.getProductsByFilters = async (req, res) => {
     if (sort === 'price_desc') sortOption = { price: -1 };
     if (sort === 'rating') sortOption = { averageRating: -1 };
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page: pageN, limit: limitN, skip } = clipListPagination(page, limit);
 
     // First get products without populating variants to avoid ObjectId errors
     let products = await Product.find(filters)
       .select('title description coverImage variants slug')
       .sort(sortOption)
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limitN)
       .lean();
 
     // Manually fetch variants for each product
@@ -1317,8 +1328,8 @@ exports.getProductsByFilters = async (req, res) => {
     res.json({
       success: true,
       total: filteredTotal,
-      page: parseInt(page),
-      totalPages: Math.ceil(filteredTotal / limit) || 0,
+      page: pageN,
+      totalPages: Math.ceil(filteredTotal / limitN) || 0,
       data: products.map((product) => toPublicListingCard(product, { listingType: 'product' })),
     });
 
@@ -1592,13 +1603,13 @@ exports.getProductsByBusinessId = async (req, res) => {
     if (sort === 'price_desc') sortOption = { price: -1 };
     if (sort === 'rating') sortOption = { averageRating: -1 };
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page: pageN, limit: limitN, skip } = clipListPagination(page, limit);
 
     const products = await Product.find(filters)
       .select('title description coverImage slug brand price averageRating totalReviews')
       .sort(sortOption)
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limitN)
       .lean();
 
     const total = await Product.countDocuments(filters);
@@ -1606,8 +1617,8 @@ exports.getProductsByBusinessId = async (req, res) => {
     res.json({
       success: true,
       total,
-      page: parseInt(page),
-      totalPages: Math.ceil(total / limit),
+      page: pageN,
+      totalPages: Math.ceil(total / limitN),
       data: products.map((product) => toPublicListingCard(product, { listingType: 'product' })),
     });
 
@@ -1678,6 +1689,13 @@ exports.searchPublicListings = async (req, res) => {
     } else if (!Array.isArray(allowedBusinessIds) && keywordBusinessIds.length) {
       allowedBusinessIds = keywordBusinessIds;
       useBusinessKeywordOnly = true;
+    }
+
+    if (!Array.isArray(allowedBusinessIds)) {
+      allowedBusinessIds = await getVisibleBusinessIds();
+      if (!allowedBusinessIds.length) {
+        return res.json(emptyPayload);
+      }
     }
 
     const baseBusinessFilter = Array.isArray(allowedBusinessIds)

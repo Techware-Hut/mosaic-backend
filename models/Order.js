@@ -173,6 +173,10 @@ const orderSchema = new Schema(
       type: String, // Stripe PaymentIntent ID
       required: false,
     },
+    paidConfirmationEmailSentAt: {
+      type: Date,
+      default: null,
+    },
     stripeCustomerId: {
       type: String, // Optional: if using Stripe Customer objects
     },

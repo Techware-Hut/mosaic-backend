@@ -2,6 +2,7 @@ const Stripe = require('stripe');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
     apiVersion: '2024-06-20',
 });
+const { assertConnectAccountOwnedByUser } = require('../utils/stripeConnectOwnership');
 
 /**
  * Create a Stripe Account Session for embedded Connect components
@@ -10,8 +11,9 @@ exports.createAccountSession = async (req, res) => {
     try {
         const { account, components } = req.body;
 
-        if (!account) {
-            return res.status(400).json({ error: 'Missing connected account id' });
+        const ownership = await assertConnectAccountOwnedByUser(account, req.user.id);
+        if (!ownership.ok) {
+            return res.status(ownership.status).json({ error: ownership.message });
         }
 
         const enablePayments = Array.isArray(components) && components.includes('payments');
@@ -50,9 +52,11 @@ exports.createAccountSession = async (req, res) => {
 exports.createExpressLoginLink = async (req, res) => {
     try {
         const { account, redirect_url } = req.body;
-        if (!account) return res.status(400).json({ error: 'Missing connected account id' });
 
-        // (recommended) verify ownership of the account vs. the authenticated vendor here
+        const ownership = await assertConnectAccountOwnedByUser(account, req.user.id);
+        if (!ownership.ok) {
+            return res.status(ownership.status).json({ error: ownership.message });
+        }
 
         const link = await stripe.accounts.createLoginLink(account, {
             redirect_url, // optional: send them back to your app after closing dashboard
@@ -70,9 +74,11 @@ exports.createExpressLoginLink = async (req, res) => {
 exports.getAccountBalance = async (req, res) => {
     try {
         const { account } = req.query;
-        if (!account) return res.status(400).json({ error: 'Missing connected account id' });
 
-        // Verify ownership of `account` to the authenticated partner here if you have auth
+        const ownership = await assertConnectAccountOwnedByUser(account, req.user.id);
+        if (!ownership.ok) {
+            return res.status(ownership.status).json({ error: ownership.message });
+        }
         const balance = await stripe.balance.retrieve({ stripeAccount: account });
 
         // choose a single currency (Stripe returns arrays per currency)
@@ -92,7 +98,11 @@ exports.getAccountBalance = async (req, res) => {
 exports.getLastPayout = async (req, res) => {
     try {
         const { account } = req.query;
-        if (!account) return res.status(400).json({ error: 'Missing connected account id' });
+
+        const ownership = await assertConnectAccountOwnedByUser(account, req.user.id);
+        if (!ownership.ok) {
+            return res.status(ownership.status).json({ error: ownership.message });
+        }
 
         // Latest payout (could be pending or paid); adjust as you like
         const payouts = await stripe.payouts.list(

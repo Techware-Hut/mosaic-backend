@@ -73,6 +73,7 @@ const apiRoutes = require('./routes/api.routes');
 const googlePlace = require('./routes/googlePlace');
 const featuredProductRoutes = require('./routes/featuredProductRoutes');
 const contactInquiryRoutes = require('./routes/contactInquiryRoutes');
+const healthRoutes = require('./routes/healthRoutes');
 
 const authRoutes = require('./routes/authRoutes');
 const enquiryRoutes = require('./routes/enquiryRoutes');
@@ -140,6 +141,10 @@ app.use('/api/subscription/webhook',
   handleSubscriptionWebhook
 );
 app.use(express.json());
+app.use(mongoSanitize());
+app.use(xss());
+
+app.use('/api', healthRoutes);
 
 
 app.use('/api/product', productRoutes);

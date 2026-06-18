@@ -11,7 +11,7 @@ Application map: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 | If you are… | Read in this order |
 | --- | --- |
-| **LLM / AI agent** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [LLM_CONTEXT.md](LLM_CONTEXT.md) → [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md) → [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) → [API_SURFACE.md](API_SURFACE.md) |
+| **LLM / AI agent** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [LLM_CONTEXT.md](LLM_CONTEXT.md) → [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md) → [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) → [BACKEND_STABILITY_AGENT_PROMPT.md](BACKEND_STABILITY_AGENT_PROMPT.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **New backend developer** | [ARCHITECTURE.md](ARCHITECTURE.md) → [SETUP.md](../SETUP.md) → [AUTH_FLOW.md](AUTH_FLOW.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **QA / smoke tester** | [production-smoke-checklist.md](production-smoke-checklist.md) → [TEST_MATRIX.md](TEST_MATRIX.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **Release / deploy owner** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) → [DEPLOYMENT.md](../DEPLOYMENT.md) → [production-proof-pack-template.md](production-proof-pack-template.md) |
@@ -47,6 +47,12 @@ Canonical deep-dives. Prefer these over duplicating detail in chat or new docs.
 | [LLM_CONTEXT.md](LLM_CONTEXT.md) | Safe-edit rules, env names, issue map, and fast navigation for AI assistants |
 | [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md) | Route → controller → model ownership, boundaries, and no-touch zones (issue #50) |
 | [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) | Branch/PR guardrails, before-coding and before-PR checklists for agents |
+| [BACKEND_STABILITY_AGENT_PROMPT.md](BACKEND_STABILITY_AGENT_PROMPT.md) | Controlled stabilization sprint prompt for Cursor/OpenClaw |
+| [BACKEND_STABILITY_ROADMAP_AUDIT.md](BACKEND_STABILITY_ROADMAP_AUDIT.md) | Stability audit snapshot (working / fragile / deferred) |
+| [BACKEND_STABILITY_PROOF.md](BACKEND_STABILITY_PROOF.md) | Test and manual verification evidence for stability sprint |
+| [BACKEND_ROADMAP_ISSUES.md](BACKEND_ROADMAP_ISSUES.md) | Prioritized GitHub-ready issue backlog by lane |
+| [BACKEND_LAUNCH_BLOCKERS_BATCH_2_AUDIT.md](BACKEND_LAUNCH_BLOCKERS_BATCH_2_AUDIT.md) | Batch 2 audit — payment auth, email timing, health (#41/#43/#69) |
+| [BACKEND_LAUNCH_BLOCKERS_BATCH_2_PROOF.md](BACKEND_LAUNCH_BLOCKERS_BATCH_2_PROOF.md) | Batch 2 test and smoke proof |
 | [API_SURFACE.md](API_SURFACE.md) | Full HTTP route map, middleware, auth/role boundaries, smoke and risk notes |
 | [AUTH_FLOW.md](AUTH_FLOW.md) | Login, register, OTP, password reset, JWT, Google OAuth, rate limits |
 | [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) | Vendor onboarding states, admin review, payments, uploads, resubmit |
@@ -179,4 +185,7 @@ Follow these when changing code **or** docs.
 - [API surface map](API_SURFACE.md)
 - [Decision register](DECISION_REGISTER.md)
 - [Proof-pack template](production-proof-pack-template.md)
+- [Backend stability audit](BACKEND_STABILITY_ROADMAP_AUDIT.md)
+- [Backend roadmap issues](BACKEND_ROADMAP_ISSUES.md)
+- [Launch blockers batch 2 audit](BACKEND_LAUNCH_BLOCKERS_BATCH_2_AUDIT.md)
 - [Deployment docs](../DEPLOYMENT.md) · [Staging](../STAGING.md) · [Setup](../SETUP.md)

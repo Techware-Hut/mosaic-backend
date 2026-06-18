@@ -23,7 +23,13 @@ function mockResponse() {
   };
 }
 
-function loadController(mockProduct, total = 1) {
+function loadController(mockProduct, total = 1, options = {}) {
+  const {
+    visibleBusinessIds = ['507f1f77bcf86cd799439014'],
+    capturedFindQuery = { value: null },
+    capturedLimit = { value: null },
+  } = options;
+
   const chain = {
     populate() {
       return chain;
@@ -37,25 +43,38 @@ function loadController(mockProduct, total = 1) {
     skip() {
       return chain;
     },
-    limit() {
+    limit(value) {
+      capturedLimit.value = value;
       return Promise.resolve([mockProduct]);
     },
   };
 
   const Product = {
-    find: () => chain,
+    find: (query) => {
+      capturedFindQuery.value = query;
+      return chain;
+    },
     countDocuments: async () => total,
+  };
+
+  const Business = {
+    find: () => ({
+      select: () => ({
+        lean: async () => visibleBusinessIds.map((id) => ({ _id: id })),
+      }),
+    }),
   };
 
   const originalLoad = Module._load;
   Module._load = function mockLoad(request, parent, isMain) {
     if (request === '../models/Product') return Product;
+    if (request === '../models/Business') return Business;
     return originalLoad.call(this, request, parent, isMain);
   };
   delete require.cache[controllerPath];
   const loaded = require(controllerPath);
   Module._load = originalLoad;
-  return loaded;
+  return { controller: loaded, capturedFindQuery, capturedLimit };
 }
 
 test('getFeaturedProducts maps products through toPublicListingCard', async () => {
@@ -75,7 +94,7 @@ test('getFeaturedProducts maps products through toPublicListingCard', async () =
     },
   };
 
-  const controller = loadController(mockProduct);
+  const { controller } = loadController(mockProduct);
   const res = mockResponse();
 
   await controller.getFeaturedProducts({ query: { page: 1, limit: 12 } }, res);
@@ -106,7 +125,7 @@ test('getFeaturedProducts preserves products and pagination wrapper', async () =
     },
   };
 
-  const controller = loadController(mockProduct, 5);
+  const { controller } = loadController(mockProduct, 5);
   const res = mockResponse();
 
   await controller.getFeaturedProducts({ query: { page: 2, limit: 2 } }, res);
@@ -119,4 +138,50 @@ test('getFeaturedProducts preserves products and pagination wrapper', async () =
   assert.equal(res.body.pagination.totalPages, 3);
   assert.equal(res.body.products[0].price, null);
   assert.equal(res.body.products[0].priceLabel, 'Contact for price');
+});
+
+test('getFeaturedProducts scopes query to active businesses', async () => {
+  const mockProduct = {
+    toObject() {
+      return { _id: '507f1f77bcf86cd799439011', title: 'Featured' };
+    },
+  };
+  const activeBusinessId = '507f1f77bcf86cd799439014';
+  const { controller, capturedFindQuery } = loadController(mockProduct, 1, {
+    visibleBusinessIds: [activeBusinessId],
+  });
+  const res = mockResponse();
+
+  await controller.getFeaturedProducts({ query: { page: 1, limit: 12 } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(capturedFindQuery.value);
+  assert.equal(capturedFindQuery.value.isFeatured, true);
+  assert.equal(capturedFindQuery.value.isPublished, true);
+  assert.deepEqual(capturedFindQuery.value.businessId.$in, [activeBusinessId]);
+});
+
+test('getFeaturedProducts returns empty list when no active businesses', async () => {
+  const { controller } = loadController(null, 0, { visibleBusinessIds: [] });
+  const res = mockResponse();
+
+  await controller.getFeaturedProducts({ query: { page: 1, limit: 12 } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.products, []);
+  assert.equal(res.body.pagination.totalProducts, 0);
+});
+
+test('getFeaturedProducts caps limit at 50', async () => {
+  const mockProduct = {
+    toObject() {
+      return { _id: '507f1f77bcf86cd799439011', title: 'Featured' };
+    },
+  };
+  const { controller, capturedLimit } = loadController(mockProduct, 1);
+  const res = mockResponse();
+
+  await controller.getFeaturedProducts({ query: { page: 1, limit: 500 } }, res);
+
+  assert.equal(capturedLimit.value, 50);
 });

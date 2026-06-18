@@ -97,7 +97,7 @@ const User = require("../models/User");
 const ProductVariant = require("../models/ProductVariant")  ;
 const Business = require("../models/Business");
 const { getBusinessCheckoutBlock } = require("../utils/checkoutGuards");
-const { sendOrderStatusEmail, sendOrderUpdateEmail, sendVendorNewOrderEmail, sendCustomerOrderPlacedEmail } = require("../utils/orderPhase");
+const { sendOrderStatusEmail, sendOrderUpdateEmail } = require("../utils/orderPhase");
 const {
   calculateShippingForVendor,
   normalizeDeliverySpeed,
@@ -782,33 +782,6 @@ exports.initiateOrder = async (req, res) => {
 
     order.paymentId = paymentIntent.id;
     await order.save();
-
-    // =========================
-    // 📧 EMAILS (CUSTOMER + VENDOR)
-    // =========================
-    try {
-      const orderUrlCustomer =
-        "https://app.mosaicbizhub.com/customer/order";
-
-      const orderUrlVendor =
-        "https://app.mosaicbizhub.com/partners/orders";
-
-      // 👤 CUSTOMER EMAIL
-      if (user?.email) {
-        await sendCustomerOrderPlacedEmail(user.email, order, orderUrlCustomer);
-      }
-
-      // 👨‍💼 VENDOR EMAIL
-      if (business?.email) {
-        await sendVendorNewOrderEmail(
-          business.email,
-          order,
-          orderUrlVendor
-        );
-      }
-    } catch (err) {
-      console.error("Email sending failed:", err?.message || err);
-    }
 
     return res.status(201).json({
       success: true,

@@ -60,6 +60,8 @@ exports.stripePaymentWebhook = async (req, res) => {
       }
 
       for (const order of orders) {
+        const shouldSendPaidEmail = !order.paidConfirmationEmailSentAt;
+
         // status updates
         order.paymentStatus = "paid";
         if (order.status === "created") {
@@ -85,7 +87,13 @@ exports.stripePaymentWebhook = async (req, res) => {
         // order.applicationFeeId = applicationFeeId;
 
         await order.save();
-        // ---------------------------------
+
+        if (!shouldSendPaidEmail) {
+          console.log(
+            `Paid confirmation email already sent for order ${order._id}, skipping duplicate send`
+          );
+          continue;
+        }
 
         // ✅ recipients (deduped)
         const customerEmails = [...new Set([order.userId?.email].filter(Boolean))];
@@ -105,6 +113,8 @@ exports.stripePaymentWebhook = async (req, res) => {
             customerEmails,
             vendorEmails: uniqueVendorEmails,
           });
+          order.paidConfirmationEmailSentAt = new Date();
+          await order.save();
         } catch (mailErr) {
           console.error("✉️ Failed to send order-paid emails:", mailErr?.message || mailErr);
         }

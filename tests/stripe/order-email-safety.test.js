@@ -38,13 +38,14 @@ function createStripeModule(stripeMock) {
   };
 }
 
-function buildOrderForPostPayment() {
+function buildOrderForPostPayment(overrides = {}) {
   return {
     _id: ORDER_ID,
     paymentId: PAYMENT_ID,
     paymentStatus: 'pending',
     status: 'created',
     statusHistory: [{ status: 'created' }],
+    paidConfirmationEmailSentAt: null,
     items: [{ chargeId: null, transferId: null, applicationFeeId: null }],
     userId: { email: 'customer@example.com' },
     vendorId: { email: 'vendor@example.com' },
@@ -56,6 +57,7 @@ function buildOrderForPostPayment() {
     save: async function save() {
       return this;
     },
+    ...overrides,
   };
 }
 
@@ -134,6 +136,7 @@ test('post-payment webhook calls sendOrderPaidEmails on success', async () => {
 
   assert.ok(res.body.received);
   assert.equal(getEmailSendCount(), 1);
+  assert.ok(order.paidConfirmationEmailSentAt instanceof Date);
 });
 
 test('post-payment webhook still returns received when email send fails', async () => {
@@ -165,16 +168,29 @@ test('post-payment webhook still returns received when email send fails', async 
   assert.ok(!errorLogs.some((line) => line.includes('whsec_')));
 });
 
-test('initiateOrder catches pre-payment email failures without rethrowing', () => {
-  const source = fs.readFileSync(orderControllerPath, 'utf8');
-  const initiateBlock = source.slice(
-    source.indexOf('// 📧 EMAILS (CUSTOMER + VENDOR)'),
-    source.indexOf('return res.status(201).json({', source.indexOf('// 📧 EMAILS (CUSTOMER + VENDOR)'))
+test('post-payment webhook skips duplicate paid confirmation emails', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const order = buildOrderForPostPayment({
+    paidConfirmationEmailSentAt: new Date('2026-06-18T00:00:00.000Z'),
+  });
+  const { stripePaymentWebhook, getEmailSendCount } = loadPostPaymentWebhook({ orders: [order] });
+  const res = mockResponse();
+
+  await stripePaymentWebhook(
+    {
+      headers: { 'stripe-signature': 'sig_test' },
+      body: Buffer.from('{}'),
+    },
+    res
   );
 
-  assert.ok(initiateBlock.includes('try {'));
-  assert.ok(initiateBlock.includes('sendCustomerOrderPlacedEmail'));
-  assert.ok(initiateBlock.includes('sendVendorNewOrderEmail'));
-  assert.ok(initiateBlock.includes('catch (err)'));
-  assert.ok(initiateBlock.includes('err?.message'));
+  assert.ok(res.body.received);
+  assert.equal(getEmailSendCount(), 0);
+});
+
+test('initiateOrder no longer sends pre-payment customer or vendor emails', () => {
+  const source = fs.readFileSync(orderControllerPath, 'utf8');
+
+  assert.ok(!source.includes('sendCustomerOrderPlacedEmail'));
+  assert.ok(!source.includes('sendVendorNewOrderEmail'));
 });

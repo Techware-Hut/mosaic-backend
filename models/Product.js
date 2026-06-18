@@ -139,6 +139,10 @@ const productSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
+productSchema.index({ isFeatured: 1, isPublished: 1, isDeleted: 1, createdAt: -1 });
+productSchema.index({ businessId: 1, isPublished: 1, isDeleted: 1 });
+productSchema.index({ isPublished: 1, isDeleted: 1, createdAt: -1 });
+
 productSchema.pre('save', async function (next) {
   if (!this.slug && this.title) {
     let baseSlug = slugify(this.title, { lower: true, strict: true });
