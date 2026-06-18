@@ -46,6 +46,7 @@ async function listProductsRanked(req, res) {
     if (!businessType && !location && !minority) {
       const products = await Product.find({
         isDeleted: false,
+        isPublished: true,
         businessId: { $in: visibleBusinessIds },
       })
         .populate('businessId', 'businessName')
@@ -57,6 +58,7 @@ async function listProductsRanked(req, res) {
 
       const total = await Product.countDocuments({
         isDeleted: false,
+        isPublished: true,
         businessId: { $in: visibleBusinessIds },
       });
 
@@ -89,6 +91,7 @@ async function listProductsRanked(req, res) {
       {
         $match: {
           isDeleted: false,
+          isPublished: true,
           businessId: { $in: visibleBusinessIds },
         }
       }

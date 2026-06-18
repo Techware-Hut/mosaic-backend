@@ -2,7 +2,7 @@
 
 Process guide for AI agents and developers working on `Techware-Hut/mosaic-backend`. Read this before opening a branch.
 
-**Related:** [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) · [LLM_CONTEXT.md](LLM_CONTEXT.md) · [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md)
+**Related:** [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) · [LLM_CONTEXT.md](LLM_CONTEXT.md) · [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md) · [BACKEND_STABILITY_AGENT_PROMPT.md](BACKEND_STABILITY_AGENT_PROMPT.md)
 
 ---
 
@@ -50,7 +50,7 @@ Process guide for AI agents and developers working on `Techware-Hut/mosaic-backe
 ## Before opening a PR
 
 1. Run relevant tests for your domain
-2. Run full suite when practical: `npm test` (expect **168/168** on current `main`)
+2. Run full suite when practical: `npm test` (expect **173/173** on current `main`)
 3. Confirm diff contains **no secrets** and **no unrelated files**
 4. Confirm docs updated where the issue requires it
 5. Do **not** use `git add .` — stage files intentionally

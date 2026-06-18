@@ -140,6 +140,8 @@ app.use('/api/subscription/webhook',
   handleSubscriptionWebhook
 );
 app.use(express.json());
+app.use(mongoSanitize());
+app.use(xss());
 
 
 app.use('/api/product', productRoutes);

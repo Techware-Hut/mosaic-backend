@@ -323,3 +323,51 @@ test('searchPublicListings preserves backward compatible response shape', async 
   assert.ok(Array.isArray(res.body.data.services));
   assert.ok(Array.isArray(res.body.data.foods));
 });
+
+test('searchPublicListings defaults to active business scope when no filters', async () => {
+  const activeBusinessId = '507f1f77bcf86cd799439011';
+  let productFindFilter = null;
+
+  const originalLoad = Module._load;
+  Module._load = function mockLoad(request, parent, isMain) {
+    if (String(request).includes('models/Product')) {
+      return {
+        find: (filter) => {
+          productFindFilter = filter;
+          return buildFindChain([]);
+        },
+      };
+    }
+    if (String(request).includes('models/Service')) return { find: () => buildFindChain([]) };
+    if (String(request).includes('models/Food')) return { find: () => buildFindChain([]) };
+    if (String(request).includes('models/Business')) {
+      return wrapModelFind({
+        find: async (filter) => {
+          if (filter?.isActive === true) {
+            return [{ _id: activeBusinessId }];
+          }
+          return [];
+        },
+      });
+    }
+    if (String(request).includes('models/VendorOnboardingStage1')) {
+      return wrapModelFind({ find: async () => [] });
+    }
+    if (String(request).includes('models/MinorityType')) return { find: async () => [] };
+    if (String(request).includes('models/ProductCategory')) return { findOne: async () => null };
+    if (String(request).includes('models/ServiceCategory')) return { findOne: async () => null };
+    if (String(request).includes('models/FoodCategory')) return { findOne: async () => null };
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  delete require.cache[controllerPath];
+  const controller = require(controllerPath);
+  Module._load = originalLoad;
+
+  const res = mockResponse();
+  await controller.searchPublicListings({ query: {} }, res);
+
+  assert.equal(res.body.success, true);
+  assert.ok(productFindFilter);
+  assert.equal(productFindFilter.isPublished, true);
+  assert.deepEqual(productFindFilter.businessId.$in, [activeBusinessId]);
+});
