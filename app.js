@@ -140,7 +140,7 @@ app.use('/api/subscription/webhook',
   express.raw({ type: 'application/json' }), 
   handleSubscriptionWebhook
 );
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 // Express 5 makes req.query read-only; sanitize body/params only (query uses Mongoose/validators).
 app.use((req, res, next) => {
   if (req.body && typeof req.body === 'object') {

@@ -174,7 +174,7 @@ function setWebhookSecrets() {
 
 test('app.js mounts Stripe webhook routes before express.json()', () => {
   const appSource = fs.readFileSync(appPath, 'utf8');
-  const jsonMiddlewareIndex = appSource.indexOf('app.use(express.json())');
+  const jsonMiddlewareIndex = appSource.indexOf('app.use(express.json');
   const webhookMounts = [
     "app.use('/api/stripe'",
     "app.use('/api/webhooks'",
