@@ -71,6 +71,23 @@ foreach ($p in $paths) {
     if ($code -eq 200) { Write-SmokePass "P1 GET $p ($code)" } else { Write-SmokeFail "P1 GET $p ($code, expected 200)" }
 }
 
+$corsOrigin = if ($env:FRONTEND_ORIGIN) { $env:FRONTEND_ORIGIN } else { 'https://mosaic-biz-frontend-launch.vercel.app' }
+try {
+    $corsHeaders = @{
+        Origin                         = $corsOrigin
+        'Access-Control-Request-Method' = 'GET'
+    }
+    $cors = Invoke-WebRequest -Uri "$Base/api/featured-products" -Method OPTIONS -Headers $corsHeaders -UseBasicParsing -ErrorAction Stop
+    $allowOrigin = $cors.Headers['Access-Control-Allow-Origin']
+    if ($cors.StatusCode -in 200, 204 -and $allowOrigin -eq $corsOrigin) {
+        Write-SmokePass "P0.4 CORS preflight ($($cors.StatusCode), Origin=$corsOrigin)"
+    } else {
+        Write-SmokeFail "P0.4 CORS preflight ($($cors.StatusCode), Allow-Origin=$allowOrigin, expected $corsOrigin)"
+    }
+} catch {
+    Write-SmokeFail "P0.4 CORS preflight - $($_.Exception.Message)"
+}
+
 $code = Get-StatusCode -Uri "$Base/api/orders/initiate" -Method POST -Body '{}'
 if ($code -eq 401) { Write-SmokePass "P4.2 POST /api/orders/initiate unauth ($code)" } else { Write-SmokeFail "P4.2 POST /api/orders/initiate ($code, expected 401)" }
 

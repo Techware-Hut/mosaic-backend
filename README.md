@@ -86,6 +86,7 @@ npm run dev
 | `npm test` | Run automated tests (`node --test tests/**/*.test.js`) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) and [docs/MVP_BACKEND_PROGRAM_STATUS.md](docs/MVP_BACKEND_PROGRAM_STATUS.md) for current count |
 | `./scripts/smoke-backend.ps1` | Post-deploy smoke (PowerShell) — public P0/P1 checks; optional auth with `SMOKE_TEST_*` env vars |
 | `./scripts/smoke-backend.sh` | Same smoke helper for bash/Linux/macOS |
+| `npm run smoke:backend` | Cross-platform wrapper (runs `.ps1` on Windows, `.sh` elsewhere) |
 | CI | GitHub Actions [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs tests on PR/push to `staging`/`main` |
 
 ### Smoke testing

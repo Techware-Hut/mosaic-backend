@@ -59,6 +59,9 @@ Canonical deep-dives. Prefer these over duplicating detail in chat or new docs.
 | [EB_DEPLOYMENT_READINESS_CHECKLIST.md](EB_DEPLOYMENT_READINESS_CHECKLIST.md) | Pre/post EB deploy checklist |
 | [BACKEND_REMAINING_BLOCKERS_AFTER_BATCH_3.md](BACKEND_REMAINING_BLOCKERS_AFTER_BATCH_3.md) | Post-Batch 3 blocker classification |
 | [GITHUB_ISSUE_TRIAGE_2026-06-18.md](GITHUB_ISSUE_TRIAGE_2026-06-18.md) | GitHub issue close/comment/reopen log |
+| [ENV_VAR_INVENTORY.md](ENV_VAR_INVENTORY.md) | Env var names by environment (#64) |
+| [PUSH_TO_MAIN_DEPLOY_CRITERIA.md](PUSH_TO_MAIN_DEPLOY_CRITERIA.md) | Criteria to re-enable push-to-main deploy (#23) |
+| [BACKUP_ROLLBACK_RUNBOOK.md](BACKUP_ROLLBACK_RUNBOOK.md) | Code rollback + Atlas backup assumptions (#75) |
 | [API_SURFACE.md](API_SURFACE.md) | Full HTTP route map, middleware, auth/role boundaries, smoke and risk notes |
 | [AUTH_FLOW.md](AUTH_FLOW.md) | Login, register, OTP, password reset, JWT, Google OAuth, rate limits |
 | [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) | Vendor onboarding states, admin review, payments, uploads, resubmit |

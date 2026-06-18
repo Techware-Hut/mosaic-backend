@@ -57,6 +57,17 @@ do
   if [ "$code" = "200" ]; then pass "P1 GET $path ($code)"; else fail "P1 GET $path ($code, expected 200)"; fi
 done
 
+CORS_ORIGIN="${FRONTEND_ORIGIN:-https://mosaic-biz-frontend-launch.vercel.app}"
+cors_headers=$(curl -s -D - -o /dev/null -X OPTIONS \
+  -H "Origin: $CORS_ORIGIN" \
+  -H "Access-Control-Request-Method: GET" \
+  "$BASE/api/featured-products")
+if echo "$cors_headers" | grep -qi "access-control-allow-origin: $CORS_ORIGIN"; then
+  pass "P0.4 CORS preflight (Origin=$CORS_ORIGIN)"
+else
+  fail "P0.4 CORS preflight (Origin=$CORS_ORIGIN)"
+fi
+
 # Optional auth probes
 auth_header() {
   local token="$1"

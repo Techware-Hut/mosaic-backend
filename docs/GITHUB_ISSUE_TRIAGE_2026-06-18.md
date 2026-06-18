@@ -34,7 +34,17 @@
 
 ## Commented — deferred post-launch (remain open)
 
-#34, #35, #45, #46, #51, #52, #54, #55, #56, #58, #59, #60, #65, #66, #67, #68, #70, #71, #72, #73, #74, #75, #76
+#34, #35, #45, #46, #51, #52, #54, #55, #56, #58, #59, #60, #65, #66, #67, #68, #70, #71, #72, #73, #74, #76
+
+## Closed — batch 2 (2026-06-18)
+
+| Issue | Action | Evidence |
+| --- | --- | --- |
+| #63 | Closed | `scripts/smoke-backend.*`, `npm run smoke:backend`, CORS check, `docs/BACKEND_FULL_SMOKE_PROOF_PACK.md` |
+| #64 | Closed | `docs/ENV_VAR_INVENTORY.md` |
+| #21 | Closed | CORS in smoke scripts + GHA post-deploy probe in `deploy-eb-production.yml` |
+| #23 | Closed | `docs/PUSH_TO_MAIN_DEPLOY_CRITERIA.md` |
+| #75 | Closed | `docs/BACKUP_ROLLBACK_RUNBOOK.md` |
 
 ## Commented — ops blocked (remain open)
 
