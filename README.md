@@ -84,7 +84,29 @@ npm run dev
 | `npm run dev` | Start the API with `nodemon` |
 | `npm start` | Start the API with `node index.js` |
 | `npm test` | Run automated tests (`node --test tests/**/*.test.js`) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) and [docs/MVP_BACKEND_PROGRAM_STATUS.md](docs/MVP_BACKEND_PROGRAM_STATUS.md) for current count |
+| `./scripts/smoke-backend.ps1` | Post-deploy smoke (PowerShell) — public P0/P1 checks; optional auth with `SMOKE_TEST_*` env vars |
+| `./scripts/smoke-backend.sh` | Same smoke helper for bash/Linux/macOS |
 | CI | GitHub Actions [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs tests on PR/push to `staging`/`main` |
+
+### Smoke testing
+
+Run against local or production API (no secrets in scripts):
+
+```powershell
+# Public checks only
+./scripts/smoke-backend.ps1 -ApiBaseUrl http://localhost:3001
+
+# Production (after EB deploy)
+./scripts/smoke-backend.ps1 -ApiBaseUrl https://api.mosaicbizhub.com
+
+# Optional authenticated tiers
+$env:SMOKE_TEST_CUSTOMER_TOKEN = "<from secure store>"
+$env:SMOKE_TEST_VENDOR_TOKEN = "<from secure store>"
+$env:SMOKE_TEST_ADMIN_TOKEN = "<from secure store>"
+./scripts/smoke-backend.ps1 -ApiBaseUrl https://api.mosaicbizhub.com
+```
+
+Full matrix: [docs/BACKEND_FULL_SMOKE_PROOF_PACK.md](docs/BACKEND_FULL_SMOKE_PROOF_PACK.md). Deploy checklist: [docs/EB_DEPLOYMENT_READINESS_CHECKLIST.md](docs/EB_DEPLOYMENT_READINESS_CHECKLIST.md).
 
 ## Operational docs
 
