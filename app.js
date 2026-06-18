@@ -83,7 +83,7 @@ const enquiryRoutes = require('./routes/enquiryRoutes');
 
 
 const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss-clean');
+const { clean: xssClean } = require('xss-clean/lib/xss');
 const sentryHttpCapture = require('./middlewares/sentryHttpCapture');
 const { isSentryEnabled } = require('./instrument');
 
@@ -141,8 +141,25 @@ app.use('/api/subscription/webhook',
   handleSubscriptionWebhook
 );
 app.use(express.json());
-app.use(mongoSanitize());
-app.use(xss());
+// Express 5 makes req.query read-only; sanitize body/params only (query uses Mongoose/validators).
+app.use((req, res, next) => {
+  if (req.body && typeof req.body === 'object') {
+    req.body = mongoSanitize.sanitize(req.body);
+  }
+  if (req.params && typeof req.params === 'object') {
+    req.params = mongoSanitize.sanitize(req.params);
+  }
+  next();
+});
+app.use((req, res, next) => {
+  if (req.body && typeof req.body === 'object') {
+    req.body = xssClean(req.body);
+  }
+  if (req.params && typeof req.params === 'object') {
+    req.params = xssClean(req.params);
+  }
+  next();
+});
 
 app.use('/api', healthRoutes);
 
