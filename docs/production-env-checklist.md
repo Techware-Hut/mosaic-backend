@@ -104,3 +104,31 @@ Note: Backend code does **not** read `STRIPE_PUBLIC_KEY` (frontend uses `NEXT_PU
 | `JWT_SECRET` | Must match backend `JWT_SECRET` for middleware |
 
 See `mosaic-biz-frontend/.env.example` when present.
+
+---
+
+## Observability (Sentry)
+
+Optional production error monitoring. **Set `SENTRY_DSN` in EB only** — never commit the DSN to git.
+
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `SENTRY_DSN` | Yes (to enable) | From Sentry project settings |
+| `SENTRY_ENVIRONMENT` | Recommended | e.g. `production` |
+| `SENTRY_RELEASE` | Recommended | Match EB version label, e.g. `mosaic-<git-sha>` |
+| `SENTRY_TRACES_SAMPLE_RATE` | Optional | Default `0` (errors only) |
+| `SENTRY_PROFILES_SAMPLE_RATE` | Optional | Default `0` |
+| `SENTRY_ENABLED` | Optional | Set `false` to disable without removing DSN |
+| `ENABLE_SENTRY_DEBUG_ROUTE` | Optional | `true` only during verification; exposes `GET /internal/sentry-debug` |
+
+### Verification after enabling Sentry
+
+1. Set `SENTRY_DSN`, `SENTRY_ENVIRONMENT=production`, and `SENTRY_RELEASE=mosaic-<deployed-sha>` on EB.
+2. Redeploy or restart the EB environment.
+3. Temporarily set `ENABLE_SENTRY_DEBUG_ROUTE=true`.
+4. `GET https://api.mosaicbizhub.com/internal/sentry-debug` — expect 500; confirm event in Sentry dashboard.
+5. Set `ENABLE_SENTRY_DEBUG_ROUTE=false` before sign-off.
+
+See [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) § Observability.
+
+---
