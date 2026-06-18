@@ -102,7 +102,7 @@ exports.stripePaymentWebhook = async (req, res) => {
             vendorEmails: uniqueVendorEmails,
           });
         } catch (mailErr) {
-          console.error("✉️ Failed to send order-paid emails:", mailErr);
+          console.error("✉️ Failed to send order-paid emails:", mailErr?.message || mailErr);
         }
       }
 

@@ -2,7 +2,7 @@
 
 Maps backend features to automated tests (`npm test`), manual smoke checks, and proof-pack evidence.
 
-**Runner:** `npm test` → `node --test tests/**/*.test.js` (138 tests, Node built-in runner)
+**Runner:** `npm test` → `node --test tests/**/*.test.js` (155 tests, Node built-in runner)
 
 **Test style:** Unit/integration-style tests with mocked Mongoose models and module hooks. They prove **handler logic and wiring** — not full end-to-end flows against live MongoDB, Stripe, or AWS in CI.
 
@@ -14,7 +14,7 @@ Maps backend features to automated tests (`npm test`), manual smoke checks, and 
 
 | Layer | Count | What it validates |
 |-------|-------|-------------------|
-| Automated (`tests/`) | **138** | DTOs, middleware, controller logic, webhook wiring, search filters, vendor listing/order/stock, **Stripe Connect checkout guards** (mocked) |
+| Automated (`tests/`) | **155** | DTOs, middleware, controller logic, webhook wiring, search filters, vendor listing/order/stock, **Stripe Connect checkout guards** (mocked), **email notification safety** |
 | Manual smoke script | 1 | Live API + DB auth/check per role |
 | Production smoke tiers | P0–P6 | Post-deploy on `https://api.mosaicbizhub.com` |
 | Proof pack | Per release | Redacted evidence matrix |
@@ -208,7 +208,7 @@ These launch-critical areas have **no** meaningful automated coverage. They requ
 | **Connect onboarding** | No Connect tests | P5.1 | Connect status in Dashboard |
 | **Subscription billing E2E** | Webhook logic mocked | P4.3 | Invoice payment delivery |
 | **Order checkout E2E** | Order controller not tested | P5.2–P5.5 | Test order `paymentStatus: paid` |
-| **Admin finalize + emails** | Controller not tested | P3.4 | Approval/rejection email received |
+| **Admin finalize + emails** | Yes (5 finalize tests) | P3.4 | Live approval/rejection email received |
 | **Frontend integration** | Backend tests only | Script + P6 | `verify-auth-check-smoke.js` page loads |
 | **Cross-domain cookies** | Cookie helper unit-tested only | P1.4 | Browser session on `app.mosaicbizhub.com` |
 | **Open P0 blockers** | Documented gaps, not tested | Launch review | [launch-readiness-report.md](launch-readiness-report.md) §9 |
@@ -249,6 +249,19 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 
 ---
 
+## Email notification tests (issue #33)
+
+| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
+| --- | --- | --- | --- | --- |
+| Submit email flags | [`tests/vendor/vendor-onboarding-submit-email.test.js`](../tests/vendor/vendor-onboarding-submit-email.test.js) | `emailSent`/`emailSkipped`, SMTP skip/failure, idempotent resubmit | Live SMTP delivery | Yes — Tier C |
+| Delivery helper | [`tests/utils/vendor-onboarding-email-delivery.test.js`](../tests/utils/vendor-onboarding-email-delivery.test.js) | Config gate, aggregation, message-only logging | Nodemailer transport | No |
+| Logging + review gap | [`tests/email/email-notification-safety.test.js`](../tests/email/email-notification-safety.test.js) | No review follow-up mailer; OTP not logged | Runtime log capture | No |
+| Order email safety | [`tests/stripe/order-email-safety.test.js`](../tests/stripe/order-email-safety.test.js) | Post-payment email call; webhook ack on mail failure | Live inbox | Yes — Tier B |
+
+**Readiness doc:** [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md)
+
+---
+
 ## Vendor onboarding email tests (issue #30)
 
 | Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
@@ -283,7 +296,7 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 ## How to run
 
 ```bash
-# All automated tests (123)
+# All automated tests (155)
 npm test
 
 # Manual auth smoke (live API + DB)
@@ -299,7 +312,7 @@ node scripts/verify-auth-check-smoke.js
 
 | Evidence type | Source | Automated equivalent |
 | --- | --- | --- |
-| `npm test` 138/138 pass | Pre-merge local/CI | Yes — full suite (see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for prod vs branch) |
+| `npm test` 155/155 pass | Pre-merge local/CI | Yes — full suite (see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for prod vs branch) |
 | Auth smoke script output | `scripts/verify-auth-check-smoke.js` | Partial — live auth/check only |
 | Smoke matrix P0–P6 | [production-smoke-checklist.md](production-smoke-checklist.md) | No — human execution |
 | Webhook unsigned 400 | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) curl | Partial — 9 tests cover handler logic |
@@ -331,10 +344,14 @@ node scripts/verify-auth-check-smoke.js
 | `tests/vendor/vendor-listing-ownership.test.js` | 2 | Product update ownership |
 | `tests/vendor/vendor-variant-stock.test.js` | 5 | Variant stock PATCH |
 | `tests/vendor/vendor-orders.test.js` | 4 | Vendor order filter + accept guards |
+| `tests/vendor/vendor-onboarding-submit-email.test.js` | 4 | Submit email flags + graceful failure |
+| `tests/utils/vendor-onboarding-email-delivery.test.js` | 6 | Onboarding email delivery helper |
+| `tests/email/email-notification-safety.test.js` | 4 | Logging safety + review gap audit |
+| `tests/stripe/order-email-safety.test.js` | 3 | Post-payment email safe failure |
 | `tests/stripe/stripe-webhook-routing-signature.test.js` | 9 | Webhook routing + signatures |
 | `tests/stripe/order-initiate-connect.test.js` | 10 | Connect checkout guards + PI params |
 | `tests/stripe/order-webhook-handlers.test.js` | 5 | Order payment webhook handlers |
 | `tests/marketplace/public-listing-dto.test.js` | 18 | Marketplace DTO normalization |
 | `tests/marketplace/featured-products-response.test.js` | 2 | Featured products wiring |
 | `tests/marketplace/public-search-filters.test.js` | 15 | Search/filter helpers + handler |
-| **Total** | **138** | |
+| **Total** | **155** | |
