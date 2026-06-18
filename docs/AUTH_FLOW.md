@@ -476,8 +476,9 @@ All use `express-rate-limit`, **15-minute window**, defined in route files.
 
 ### CORS and cookies
 
-- CORS allowlist in `app.js` includes production frontends and `FRONTEND_URL`; `credentials: true`.
+- CORS allowlist resolved by [`utils/corsOrigins.js`](../utils/corsOrigins.js): `CORS_ORIGINS` (comma-separated) when set, otherwise `FRONTEND_URL` plus legacy production defaults. [`app.js`](../app.js) mounts `cors` with `credentials: true` (no wildcard `*`).
 - Production cookies: `secure` + `sameSite` from env; domain `.mosaicbizhub.com` when `NODE_ENV=production`.
+- Frontend authenticated requests must use `credentials: 'include'` (fetch) or `withCredentials: true` (axios).
 
 ---
 

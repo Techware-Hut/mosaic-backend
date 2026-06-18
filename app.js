@@ -86,24 +86,11 @@ const mongoSanitize = require('express-mongo-sanitize');
 const { clean: xssClean } = require('xss-clean/lib/xss');
 const sentryHttpCapture = require('./middlewares/sentryHttpCapture');
 const { isSentryEnabled } = require('./instrument');
+const { getAllowedOrigins } = require('./utils/corsOrigins');
 
 const app = express();
 
-const allowedOrigins = Array.from(
-  new Set([
-    'https://www.mosaicbizhub.com',
-    'https://app.mosaicbizhub.com',
-    'https://mosaic-biz-frontend-launch.vercel.app',
-    'http://localhost:3000',
-    'http://localhost:8081',
-    'https://app.minorityownedbusiness.info',
-    'http://192.168.1.50:3000',
-    'exp://192.168.0.104:8081',
-    'exp://192.168.0.104:3000',
-    'exp://192.168.0.104:3001',
-    process.env.FRONTEND_URL,
-  ].filter(Boolean))
-);
+const allowedOrigins = getAllowedOrigins();
 app.set('trust proxy', 1);
 app.use(sentryHttpCapture);
 app.use(cors({
