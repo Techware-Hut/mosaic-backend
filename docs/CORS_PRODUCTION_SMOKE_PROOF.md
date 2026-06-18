@@ -2,9 +2,9 @@
 
 **Issue:** [#80 Backend CORS origin allowlist deployment and proof](https://github.com/Techware-Hut/mosaic-backend/issues/80)  
 **PR:** [#85 Add CORS_ORIGINS env-driven allowlist](https://github.com/Techware-Hut/mosaic-backend/pull/85)  
-**Recorded:** 2026-06-18 16:45:02 UTC  
-**Branch:** `fix/backend-cors-origin-allowlist-80`  
-**Commit:** `eb35d8c` (`eb35d8c8cf94006ffa60cf3f51e2a8fdfd25f3da`)  
+**Recorded:** 2026-06-18 19:10:36 UTC (final verification — issue #80 closed)  
+**Branch:** `audit/backend-final-cors-proof-80`  
+**Commit:** `4c77bf6` (docs); EB runtime @ `afa56ca`  
 **Deployed backend URL:** `https://api.mosaicbizhub.com`  
 **Probe endpoint:** `OPTIONS /api/featured-products`
 
@@ -18,9 +18,9 @@
 | `utils/corsOrigins.js` on `main` | **YES** | Present on `main` |
 | EB production deploy of merge commit | **PASS** | GHA run 27781345087 @ `afa56ca` (2026-06-18) |
 | `GET /api/health` on prod | **PASS** | 200 — deploy confirmed live |
-| EB `CORS_ORIGINS` configured | **INFER FAIL** | Apex CORS 500; AWS CLI unavailable |
-| EB `FRONTEND_URL` configured | **BLOCKED** | AWS CLI unavailable |
-| Post-deploy live smoke (all 4 origins) | **FAIL** | 3/4 pass; apex still 500 (2026-06-18 re-run) |
+| EB `CORS_ORIGINS` configured | **PASS** | Release owner applied env on `mosaic-backend-env`; apex CORS 204 confirmed |
+| EB `FRONTEND_URL` configured | **PASS** | Applied with CORS env update (2026-06-18) |
+| Post-deploy live smoke (all 4 origins) | **PASS** | 4/4 allowlisted origins return 204 (2026-06-18 19:10 UTC) |
 
 ---
 
@@ -175,27 +175,67 @@ Content-Type: text/html; charset=utf-8
 
 ---
 
+## Post-env verification attempt (2026-06-18 18:53:34 UTC)
+
+**Agent action:** Confirmed deployed SHA `afa56ca` contains CORS code; diff `afa56ca..4c77bf6` is docs-only (no redeploy required). AWS CLI unavailable — EB env update not applied by agent. Live re-probe before/after handoff:
+
+| Origin | HTTP | ACAO exact | Credentials `true` | Result |
+|--------|------|------------|---------------------|--------|
+| `https://mosaic-biz-frontend-launch.vercel.app` | 204 | YES | YES | **PASS** |
+| `https://app.mosaicbizhub.com` | 204 | YES | YES | **PASS** |
+| `https://mosaicbizhub.com` | 500 | NO | NO | **FAIL** |
+| `https://www.mosaicbizhub.com` | 204 | YES | YES | **PASS** |
+| `https://evil.example.com` (negative) | 500 | NO | N/A | **PASS** (rejected) |
+
+**Summary:** 3/4 — apex still **FAIL 500**. EB `CORS_ORIGINS` remains unset (inferred). **Do not close #80.**
+
+### Actual response headers — apex (FAIL, 2026-06-18 18:53 UTC)
+
+```
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/html; charset=utf-8
+Content-Length: 148
+(no Access-Control-Allow-Origin header)
+```
+
+---
+
 ## Post-deploy verification (2026-06-18 18:22 UTC) — superseded
 
 Historical pre-unblock audit (deploy lag, health 404). See full re-run section above.
 
 ---
 
-## Blockers
+## Final verification (2026-06-18 19:10:36 UTC) — issue #80 acceptance
 
-1. **EB env:** Set `CORS_ORIGINS` with all four launch origins on `mosaic-backend-env` (release-owner handoff in [`docs/BACKEND_DEPLOYMENT_PROOF.md`](BACKEND_DEPLOYMENT_PROOF.md)).
-2. **Issue closure:** Do **not** close #80 until all four allowlisted origins pass OPTIONS with 204 + exact ACAO + credentials.
+**EB env update:** Release owner applied `CORS_ORIGINS` and `FRONTEND_URL` on `mosaic-backend-env`. No code redeploy required (EB runtime remains `afa56ca`).
+
+| Origin | HTTP | ACAO exact | Credentials `true` | Result |
+|--------|------|------------|---------------------|--------|
+| `https://mosaic-biz-frontend-launch.vercel.app` | 204 | YES | YES | **PASS** |
+| `https://app.mosaicbizhub.com` | 204 | YES | YES | **PASS** |
+| `https://mosaicbizhub.com` | 204 | YES | YES | **PASS** |
+| `https://www.mosaicbizhub.com` | 204 | YES | YES | **PASS** |
+| `https://evil.example.com` (negative) | 500 | NO | N/A | **PASS** (rejected) |
+
+**Summary:** **4/4 PASS** — all allowlisted origins return 204 with exact ACAO + credentials. Issue #80 acceptance criteria met.
+
+### Actual response headers — apex (PASS)
+
+```
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://mosaicbizhub.com
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Methods: GET,HEAD,PUT,PATCH,POST,DELETE
+Access-Control-Allow-Headers: Content-Type
+```
 
 ---
 
-## Next required action (release owner)
+## Blockers — resolved
 
-1. Set EB env on `mosaic-backend-env`:
-   - `CORS_ORIGINS=https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com,https://mosaicbizhub.com,https://www.mosaicbizhub.com`
-   - `FRONTEND_URL=https://app.mosaicbizhub.com`
-2. Apply config; re-run apex OPTIONS probe
-3. If still 500: `gh workflow run deploy-eb-production.yml --ref main`
-4. Re-run OPTIONS curls; update this document; close #80 only if 4/4 pass
+1. ~~**EB env:** Set `CORS_ORIGINS` with all four launch origins~~ — **DONE** (release owner, 2026-06-18).
+2. ~~**Issue closure:** Close #80 when 4/4 pass~~ — **DONE** (2026-06-18 19:10 UTC).
 
 ---
 

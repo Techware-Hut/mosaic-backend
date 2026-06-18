@@ -1,8 +1,8 @@
 # Backend Production Smoke Proof — Auth, Checkout, Order, Email
 
 **Issue:** [#84 Backend production smoke proof for domain/API/auth](https://github.com/Techware-Hut/mosaic-backend/issues/84)  
-**Recorded:** 2026-06-18 (full post-deploy smoke re-run)  
-**Repo `main` commit:** `d3236b9` (docs); EB runtime @ `afa56ca`  
+**Recorded:** 2026-06-18 19:10:36 UTC (final verification — CORS 4/4 PASS)  
+**Repo `main` commit:** `4c77bf6` (docs); EB runtime @ `afa56ca`  
 **Production API:** `https://api.mosaicbizhub.com`
 
 ---
@@ -11,20 +11,20 @@
 
 | Field | Value |
 |-------|-------|
-| `main` HEAD | `d3236b9` |
+| `main` HEAD | `4c77bf6` |
 | EB deployed SHA | `afa56ca` — GHA run [27781345087](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27781345087) |
 | Live deploy confirmed | **YES** — `/api/health` + `/api/ready` return **200** |
-| EB env names verified | **BLOCKED** — AWS CLI not available; apex CORS infers `CORS_ORIGINS` not set |
+| EB env names verified | **PASS** (inferred) — CORS 4/4 after release-owner env apply |
 
 No secrets in this document.
 
 ---
 
-## Local validation (2026-06-18)
+## Local validation (2026-06-18 18:53 UTC)
 
 | Check | Result |
 |-------|--------|
-| `npm test` | **PASS** — 196/196 |
+| `npm test` | **PASS** — 196/196 (re-run during #80 resolution) |
 | `node -c app.js` | **PASS** |
 
 ### Email / order safety (unit tests + code)
@@ -61,7 +61,7 @@ Note: `/api/products/ranked` returns **404** — canonical ranked route is **`GE
 
 ## Production — CORS credentials
 
-See [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md). Summary: **3/4** allowlisted origins pass; apex **FAIL** (500).
+See [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md). Summary: **4/4 PASS** (2026-06-18 19:10 UTC) — all allowlisted origins return 204 + exact ACAO + credentials.
 
 ---
 
@@ -114,7 +114,7 @@ Unauth body example: `{"success":false,"message":"Authentication required"}` —
 | Public browse routes | **PASS** |
 | Health/readiness on prod | **PASS** |
 | Protected routes reject unauth (no 500) | **PASS** |
-| CORS credentials (4 origins) | **FAIL** — apex |
+| CORS credentials (4 origins) | **PASS** |
 | No pre-payment email regression | **PASS** (unit tests) |
 | No duplicate paid email risk | **PASS** (unit tests + code) |
 | Authenticated checkout on prod | **BLOCKED** |
@@ -123,10 +123,9 @@ Unauth body example: `{"success":false,"message":"Authentication required"}` —
 
 ## Remaining blockers
 
-1. **Release owner:** Set `CORS_ORIGINS` + `FRONTEND_URL` on EB (see [`docs/BACKEND_DEPLOYMENT_PROOF.md`](BACKEND_DEPLOYMENT_PROOF.md) handoff)
-2. Re-run apex CORS probe; optional `workflow_dispatch` redeploy
-3. Provide approved smoke test tokens for auth/checkout tier
-4. Sentry dashboard proof — **BLOCKED** until release owner verifies
+1. ~~CORS 4/4 on production~~ — **RESOLVED** (2026-06-18)
+2. Provide approved smoke test tokens for auth/checkout tier — see [`docs/BACKEND_NEXT_LAUNCH_HARDENING_BATCH.md`](BACKEND_NEXT_LAUNCH_HARDENING_BATCH.md) Batch A
+3. Sentry dashboard proof — **BLOCKED** until release owner verifies — Batch B
 
 ---
 
