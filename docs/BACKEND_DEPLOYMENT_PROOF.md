@@ -2,7 +2,43 @@
 
 **Production API:** `https://api.mosaicbizhub.com`  
 **Issues:** [#80 CORS](https://github.com/Techware-Hut/mosaic-backend/issues/80) · [#84 Smoke](https://github.com/Techware-Hut/mosaic-backend/issues/84) · [#18 Sentry](https://github.com/Techware-Hut/mosaic-backend/issues/18)  
-**Latest verification:** 2026-06-18 (full smoke re-run after deploy unblock)
+**Latest verification:** 2026-06-18 19:10:36 UTC (final CORS 4/4 — issue #80 closed)
+
+---
+
+## Final verification (2026-06-18 19:10:36 UTC) — issue #80 closed
+
+| Field | Value |
+|-------|-------|
+| Repo `main` SHA | `4c77bf6` |
+| EB deployed SHA | `afa56ca` (unchanged — no redeploy required) |
+| EB env update | **APPLIED** — release owner set `CORS_ORIGINS` + `FRONTEND_URL` on `mosaic-backend-env` |
+| CORS 4/4 | **PASS** — all allowlisted origins return 204 + exact ACAO + credentials |
+| Smoke script | **PASS=11 FAIL=0 SKIP=1 BLOCKED=3** |
+| `npm test` | **196/196 PASS** |
+
+### CORS (OPTIONS `/api/featured-products`)
+
+| Origin | HTTP | ACAO exact | Credentials | Result |
+|--------|------|------------|-------------|--------|
+| `https://mosaic-biz-frontend-launch.vercel.app` | 204 | YES | YES | **PASS** |
+| `https://app.mosaicbizhub.com` | 204 | YES | YES | **PASS** |
+| `https://mosaicbizhub.com` (apex) | 204 | YES | YES | **PASS** |
+| `https://www.mosaicbizhub.com` | 204 | YES | YES | **PASS** |
+| `https://evil.example.com` (negative) | 500 | NO | N/A | **PASS** (rejected) |
+
+### Stakeholder summary (final)
+
+| Gate | Status |
+|------|--------|
+| Code on `main` | **PASS** |
+| EB deploy of CORS code | **PASS** (`afa56ca`) |
+| EB `CORS_ORIGINS` env | **PASS** |
+| Health + readiness | **PASS** |
+| Public API browse | **PASS** |
+| CORS 4/4 | **PASS** |
+| Auth rejection (unauth) | **PASS** |
+| Full launch sign-off | **PARTIAL** — authenticated smoke + Sentry dashboard remain |
 
 ---
 
@@ -20,11 +56,26 @@
 
 ---
 
+## Issue #80 resolution attempt (2026-06-18 18:53:34 UTC)
+
+| Field | Value |
+|-------|-------|
+| Repo `main` SHA | `4c77bf6` |
+| EB deployed SHA | `afa56ca` (unchanged) |
+| `afa56ca..4c77bf6` diff | **Docs only** — 4 files; no code redeploy required for CORS |
+| CORS code on EB | **YES** — `utils/corsOrigins.js` present at `afa56ca` |
+| EB env update | **NOT APPLIED** — AWS CLI unavailable; release-owner handoff active |
+| Apex CORS | **FAIL 500** — inferred `CORS_ORIGINS` unset |
+| Smoke script | **PASS=11 FAIL=0 BLOCKED=3** |
+| `npm test` | **196/196 PASS** |
+
+---
+
 ## Post-deploy verification (2026-06-18 — full smoke re-run)
 
 | Field | Value |
 |-------|-------|
-| Repo `main` SHA | `d3236b9` (docs); EB runtime deploy @ `afa56ca` |
+| Repo `main` SHA | `4c77bf6` (docs); EB runtime deploy @ `afa56ca` |
 | Docs merged | PR [#86](https://github.com/Techware-Hut/mosaic-backend/pull/86) → `main` @ `afa56ca` |
 | GHA deploy run | [27781345087](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27781345087) — **success** |
 | Deployed EB version | `mosaic-afa56cab386a73581e71c3a9e4be8b1174d26825` |
@@ -112,12 +163,11 @@ Historical record from before redeploy. Kept for audit trail.
 
 ---
 
-## Release-owner handoff — apex CORS blocker
+## Release-owner handoff — apex CORS blocker — COMPLETE
 
-**Owner:** Person with AWS Console access to Elastic Beanstalk.  
-**Agent cannot set EB env** — AWS CLI unavailable in verification environment.
+**Status:** **COMPLETE** (2026-06-18). Release owner applied EB env on `mosaic-backend-env`. Apex CORS returns **204** with exact ACAO + credentials.
 
-### Steps
+Historical steps (for audit):
 
 1. AWS Console → Elastic Beanstalk → **`mosaic-backend-env`** (app: **`mosaic-biz-hub-backend`**, region: **`us-east-1`**) → Configuration → Software → Environment properties.
 2. Set these properties (exact values — not secrets):
@@ -136,18 +186,16 @@ gh workflow run deploy-eb-production.yml --repo Techware-Hut/mosaic-backend --re
 gh run watch --repo Techware-Hut/mosaic-backend
 ```
 
-6. Do **not** close [#80](https://github.com/Techware-Hut/mosaic-backend/issues/80) until all four allowlisted origins return **204** with exact ACAO + credentials.
+6. ~~Do **not** close [#80](https://github.com/Techware-Hut/mosaic-backend/issues/80) until 4/4 pass~~ — **CLOSED** 2026-06-18.
 
 ---
 
-AWS CLI unavailable — **presence not directly verified**. Apex CORS 500 **infers** `CORS_ORIGINS` is unset or missing apex domain. Required names per [`docs/ENV_VAR_INVENTORY.md`](ENV_VAR_INVENTORY.md):
-
-### CORS / frontend
+### CORS / frontend (post-env)
 
 | Variable | Expected | Verified |
 |----------|----------|----------|
-| `CORS_ORIGINS` | Four launch origins (see CORS proof doc) | **INFER FAIL** — apex CORS 500 |
-| `FRONTEND_URL` | `https://app.mosaicbizhub.com` | **BLOCKED** |
+| `CORS_ORIGINS` | Four launch origins (see CORS proof doc) | **PASS** — 4/4 CORS probe |
+| `FRONTEND_URL` | `https://app.mosaicbizhub.com` | **PASS** (inferred with CORS fix) |
 
 ### Sentry
 
@@ -197,7 +245,7 @@ No secret values recorded.
 |--------|--------|
 | launch.vercel.app | **PASS** |
 | app.mosaicbizhub.com | **PASS** |
-| mosaicbizhub.com (apex) | **FAIL** |
+| mosaicbizhub.com (apex) | **PASS** |
 | www.mosaicbizhub.com | **PASS** |
 | evil.example.com | **PASS** (rejected) |
 
@@ -223,12 +271,11 @@ No secret values recorded.
 
 ---
 
-## Remaining launch blockers (post-deploy)
+## Remaining launch blockers
 
-1. **Set** `CORS_ORIGINS` on EB to include apex `https://mosaicbizhub.com` (all four launch origins)
-2. **Redeploy** or restart EB after env update if apex CORS still 500
-3. **Provide** approved smoke test tokens for authenticated tier
-4. **Verify** Sentry dashboard capture (optional debug route — disable after)
+1. ~~Set `CORS_ORIGINS` on EB~~ — **RESOLVED** (2026-06-18)
+2. **Provide** approved smoke test tokens for authenticated tier — Batch A in [`docs/BACKEND_NEXT_LAUNCH_HARDENING_BATCH.md`](BACKEND_NEXT_LAUNCH_HARDENING_BATCH.md)
+3. **Verify** Sentry dashboard capture — Batch B (release owner)
 
 ---
 
