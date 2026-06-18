@@ -1,18 +1,34 @@
 # Backend Deployment Proof — Post-Deploy Release Verification
 
 **Production API:** `https://api.mosaicbizhub.com`  
-**Issues:** [#80 CORS](https://github.com/Techware-Hut/mosaic-backend/issues/80) · [#84 Smoke](https://github.com/Techware-Hut/mosaic-backend/issues/84) · [#18 Sentry](https://github.com/Techware-Hut/mosaic-backend/issues/18)
+**Issues:** [#80 CORS](https://github.com/Techware-Hut/mosaic-backend/issues/80) · [#84 Smoke](https://github.com/Techware-Hut/mosaic-backend/issues/84) · [#18 Sentry](https://github.com/Techware-Hut/mosaic-backend/issues/18)  
+**Latest verification:** 2026-06-18 (full smoke re-run after deploy unblock)
 
 ---
 
-## Post-deploy verification (2026-06-18 18:40 UTC)
+## Why EB was behind `main` (root cause)
+
+| Finding | Detail |
+|---------|--------|
+| Auto-deploy disabled | [`.github/workflows/deploy-eb-production.yml`](../.github/workflows/deploy-eb-production.yml) — `push: main` is **commented out**; only `workflow_dispatch` triggers deploy |
+| PR #85 merge did not deploy | Merging CORS code to `main` @ `5f98461` did **not** trigger EB deploy |
+| Last deploy before unblock | GHA run @ `7d01011` (2026-06-18T01:13:55Z) — predated PR #85 merge |
+| Production lag evidence | Pre-unblock: `GET /api/health` and `/api/ready` → **404** while public browse routes still returned **200** (older bundle without health routes) |
+| Resolution | Manual `workflow_dispatch` run [27781345087](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27781345087) deployed `afa56ca`; health/readiness now **200** |
+
+**Takeaway:** Every merge to `main` requires an explicit `gh workflow run deploy-eb-production.yml --ref main` until push deploy is re-enabled.
+
+---
+
+## Post-deploy verification (2026-06-18 — full smoke re-run)
 
 | Field | Value |
 |-------|-------|
+| Repo `main` SHA | `d3236b9` (docs); EB runtime deploy @ `afa56ca` |
 | Docs merged | PR [#86](https://github.com/Techware-Hut/mosaic-backend/pull/86) → `main` @ `afa56ca` |
 | GHA deploy run | [27781345087](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27781345087) — **success** |
 | Deployed EB version | `mosaic-afa56cab386a73581e71c3a9e4be8b1174d26825` |
-| Deployed commit | `afa56ca` — Merge PR #86 (launch proof docs) + includes CORS code from #85 |
+| Deployed commit | `afa56ca` — includes CORS code from PR #85 |
 
 ### Live smoke (`./scripts/smoke-backend.ps1`)
 
@@ -27,16 +43,45 @@
 
 **Summary:** PASS=11, FAIL=0, BLOCKED=3
 
-### CORS (OPTIONS `/api/health`, all four launch origins)
+### CORS (OPTIONS `/api/featured-products`, all four launch origins + negative)
 
-| Origin | HTTP | Result |
-|--------|------|--------|
-| `https://mosaic-biz-frontend-launch.vercel.app` | 204 | **PASS** |
-| `https://app.mosaicbizhub.com` | 204 | **PASS** |
-| `https://mosaicbizhub.com` (apex) | 500 | **FAIL** |
-| `https://www.mosaicbizhub.com` | 204 | **PASS** |
+| Origin | HTTP | ACAO exact | Credentials `true` | Result |
+|--------|------|------------|----------------------|--------|
+| `https://mosaic-biz-frontend-launch.vercel.app` | 204 | YES | YES | **PASS** |
+| `https://app.mosaicbizhub.com` | 204 | YES | YES | **PASS** |
+| `https://mosaicbizhub.com` (apex) | 500 | NO | NO | **FAIL** |
+| `https://www.mosaicbizhub.com` | 204 | YES | YES | **PASS** |
+| `https://evil.example.com` (negative) | 500 | NO | N/A | **PASS** (rejected) |
 
-**CORS 4/4:** **FAIL** (3/4) — apex still returns 500; likely missing `https://mosaicbizhub.com` in EB `CORS_ORIGINS`.
+**CORS 4/4:** **FAIL** (3/4) — apex returns 500 because `CORS_ORIGINS` is unset on EB; fallback [`LEGACY_DEFAULT_ORIGINS`](../utils/corsOrigins.js) excludes apex.
+
+### Additional public endpoints
+
+| Endpoint | HTTP | Result |
+|----------|------|--------|
+| `GET /api/categories` | 200 | **PASS** |
+| `GET /api/ranked?limit=5` | 200 | **PASS** (canonical ranked route) |
+
+### Protected unauth probes
+
+| Route | HTTP | Stack leak | Result |
+|-------|------|------------|--------|
+| `GET /api/business/my` | 401 | No | **PASS** |
+| `GET /api/vendor-onboarding/onboarding-data` | 401 | No | **PASS** |
+| `POST /api/orders/initiate` | 401 | No | **PASS** |
+| `POST /api/connect/:id/account-link` | 401 | No | **PASS** |
+| `POST /stripe/account-session` | 401 | No | **PASS** |
+| `GET /admin/users` | 401 | No | **PASS** |
+| `GET /api/admin/categories` | 200 | No | **NOTE** — route has no auth middleware (public admin category list) |
+
+### Sentry (safe probes)
+
+| Check | Result |
+|-------|--------|
+| `GET /internal/sentry-debug` | **404** — debug route disabled |
+| Unauth JSON body | **PASS** — no stack trace |
+| Dashboard event | **BLOCKED** |
+| EB `SENTRY_*` env names | **BLOCKED** — AWS CLI unavailable |
 
 ### Stakeholder summary (post-deploy)
 
@@ -67,9 +112,35 @@ Historical record from before redeploy. Kept for audit trail.
 
 ---
 
-## EB environment variables (names only)
+## Release-owner handoff — apex CORS blocker
 
-AWS CLI unavailable in audit environment — **presence not directly verified**. Required names per [`docs/ENV_VAR_INVENTORY.md`](ENV_VAR_INVENTORY.md):
+**Owner:** Person with AWS Console access to Elastic Beanstalk.  
+**Agent cannot set EB env** — AWS CLI unavailable in verification environment.
+
+### Steps
+
+1. AWS Console → Elastic Beanstalk → **`mosaic-backend-env`** (app: **`mosaic-biz-hub-backend`**, region: **`us-east-1`**) → Configuration → Software → Environment properties.
+2. Set these properties (exact values — not secrets):
+
+```
+CORS_ORIGINS=https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com,https://mosaicbizhub.com,https://www.mosaicbizhub.com
+FRONTEND_URL=https://app.mosaicbizhub.com
+```
+
+3. Confirm **names only** (do not log values): `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_PROFILES_SAMPLE_RATE`, `SENTRY_ENABLED`, `ENABLE_SENTRY_DEBUG_ROUTE`, Stripe webhook secret env names, `MAIL_USER`, `MAIL_PASSWORD` — per [`docs/ENV_VAR_INVENTORY.md`](ENV_VAR_INVENTORY.md).
+4. Apply configuration (EB restarts instances).
+5. Re-run apex CORS probe; if still 500, trigger redeploy:
+
+```powershell
+gh workflow run deploy-eb-production.yml --repo Techware-Hut/mosaic-backend --ref main
+gh run watch --repo Techware-Hut/mosaic-backend
+```
+
+6. Do **not** close [#80](https://github.com/Techware-Hut/mosaic-backend/issues/80) until all four allowlisted origins return **204** with exact ACAO + credentials.
+
+---
+
+AWS CLI unavailable — **presence not directly verified**. Apex CORS 500 **infers** `CORS_ORIGINS` is unset or missing apex domain. Required names per [`docs/ENV_VAR_INVENTORY.md`](ENV_VAR_INVENTORY.md):
 
 ### CORS / frontend
 
@@ -116,8 +187,9 @@ No secret values recorded.
 | Tier | Result |
 |------|--------|
 | Root + marketplace browse | **PASS** (200) |
-| Health/readiness | **FAIL** (404) |
+| Health/readiness | **PASS** (200) |
 | Featured canonical route | **PASS** |
+| Categories + ranked | **PASS** (200) |
 
 ### CORS (OPTIONS `/api/featured-products`)
 

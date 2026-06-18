@@ -1,9 +1,8 @@
 # Backend Production Smoke Proof — Auth, Checkout, Order, Email
 
 **Issue:** [#84 Backend production smoke proof for domain/API/auth](https://github.com/Techware-Hut/mosaic-backend/issues/84)  
-**Recorded:** 2026-06-18 18:22:36 UTC (post-deploy verification pass)  
-**Branch:** `audit/backend-post-deploy-release-verification`  
-**Repo `main` commit:** `5f98461`  
+**Recorded:** 2026-06-18 (full post-deploy smoke re-run)  
+**Repo `main` commit:** `d3236b9` (docs); EB runtime @ `afa56ca`  
 **Production API:** `https://api.mosaicbizhub.com`
 
 ---
@@ -12,10 +11,10 @@
 
 | Field | Value |
 |-------|-------|
-| `main` HEAD | `5f98461` (PR #85 CORS merge) |
-| Last GHA EB deploy | `7d01011` — 2026-06-18T01:13:55Z |
-| Live deploy confirmed | **NO** — `/api/health` + `/api/ready` return **404** on production |
-| EB env names verified | **BLOCKED** — AWS CLI not available in audit environment |
+| `main` HEAD | `d3236b9` |
+| EB deployed SHA | `afa56ca` — GHA run [27781345087](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27781345087) |
+| Live deploy confirmed | **YES** — `/api/health` + `/api/ready` return **200** |
+| EB env names verified | **BLOCKED** — AWS CLI not available; apex CORS infers `CORS_ORIGINS` not set |
 
 No secrets in this document.
 
@@ -44,23 +43,25 @@ No secrets in this document.
 | Endpoint | HTTP | Expected | Result |
 |----------|------|----------|--------|
 | `GET /` | 200 | 200 | **PASS** |
-| `GET /api/health` | 404 | 200 | **FAIL** |
-| `GET /api/ready` | 404 | 200 | **FAIL** |
+| `GET /api/health` | 200 | 200 | **PASS** |
+| `GET /api/ready` | 200 | 200 | **PASS** |
 | `GET /api/featured-products` | 200 | 200 | **PASS** |
 | `GET /api/products/list?limit=5` | 200 | 200 | **PASS** |
 | `GET /api/services/list?limit=5` | 200 | 200 | **PASS** |
 | `GET /api/food/list?limit=5` | 200 | 200 | **PASS** |
 | `GET /api/public/search?keyword=test&limit=5` | 200 | 200 | **PASS** |
 | `GET /api/categories` | 200 | 200 | **PASS** |
-| `GET /api/ranked` | 200 | 200 | **PASS** |
+| `GET /api/ranked?limit=5` | 200 | 200 | **PASS** |
 
-Smoke script: **PASS=9 FAIL=2 SKIP=1 BLOCKED=3**
+Smoke script (`./scripts/smoke-backend.ps1`): **PASS=11 FAIL=0 SKIP=1 BLOCKED=3**
+
+Note: `/api/products/ranked` returns **404** — canonical ranked route is **`GET /api/ranked`** (see [`routes/publicListing.js`](../routes/publicListing.js)).
 
 ---
 
 ## Production — CORS credentials
 
-See [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md). Summary: **3/4** allowlisted origins pass; apex **FAIL**.
+See [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md). Summary: **3/4** allowlisted origins pass; apex **FAIL** (500).
 
 ---
 
@@ -72,10 +73,10 @@ See [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md). Sum
 | `/api/business/my` | GET | 401 | No | **PASS** |
 | `/api/vendor-onboarding/onboarding-data` | GET | 401 | No | **PASS** |
 | `/api/orders/initiate` | POST | 401 | No | **PASS** |
-| `/api/orders/vendor` | GET | 401 | No | **PASS** |
-| `/api/connect/.../account-link` | POST | 401 | No | **PASS** |
-| `/stripe/account-session` | POST | 400 | No | **PARTIAL** (rejected, not 401) |
+| `/api/connect/:id/account-link` | POST | 401 | No | **PASS** |
+| `/stripe/account-session` | POST | 401 | No | **PASS** |
 | `/admin/users` | GET | 401 | No | **PASS** |
+| `/api/admin/categories` | GET | 200 | No | **NOTE** — no auth middleware on route |
 
 Unauth body example: `{"success":false,"message":"Authentication required"}` — no stack trace.
 
@@ -101,6 +102,7 @@ Unauth body example: `{"success":false,"message":"Authentication required"}` —
 | `GET /internal/sentry-debug` | **404** — debug route disabled (launch-safe) |
 | Unauth error body stack leak | **PASS** — no stack in JSON |
 | Sentry dashboard event capture | **BLOCKED** — no dashboard access; debug route not enabled |
+| EB `SENTRY_*` env names | **BLOCKED** — AWS CLI unavailable |
 
 ---
 
@@ -110,8 +112,8 @@ Unauth body example: `{"success":false,"message":"Authentication required"}` —
 |-----------|--------|
 | npm test passes | **PASS** |
 | Public browse routes | **PASS** |
-| Health/readiness on prod | **FAIL** — deploy not live |
-| Protected routes reject unauth | **PASS** |
+| Health/readiness on prod | **PASS** |
+| Protected routes reject unauth (no 500) | **PASS** |
 | CORS credentials (4 origins) | **FAIL** — apex |
 | No pre-payment email regression | **PASS** (unit tests) |
 | No duplicate paid email risk | **PASS** (unit tests + code) |
@@ -121,10 +123,10 @@ Unauth body example: `{"success":false,"message":"Authentication required"}` —
 
 ## Remaining blockers
 
-1. Redeploy `main` @ `5f98461`+ to EB
-2. Confirm `CORS_ORIGINS` + `FRONTEND_URL` on EB
-3. Re-run smoke after deploy (`/api/health` must return 200)
-4. Provide approved smoke test tokens for auth/checkout tier
+1. **Release owner:** Set `CORS_ORIGINS` + `FRONTEND_URL` on EB (see [`docs/BACKEND_DEPLOYMENT_PROOF.md`](BACKEND_DEPLOYMENT_PROOF.md) handoff)
+2. Re-run apex CORS probe; optional `workflow_dispatch` redeploy
+3. Provide approved smoke test tokens for auth/checkout tier
+4. Sentry dashboard proof — **BLOCKED** until release owner verifies
 
 ---
 

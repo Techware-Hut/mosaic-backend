@@ -16,10 +16,11 @@
 |------|--------|-------|
 | PR #85 merged to `main` | **YES** | Merged @ `5f98461` (2026-06-18) |
 | `utils/corsOrigins.js` on `main` | **YES** | Present on `main` |
-| EB production deploy of merge commit | **FAIL / UNVERIFIED** | Last GHA deploy `7d01011`; live probes show pre-merge behavior |
-| EB `CORS_ORIGINS` configured | **BLOCKED** | AWS CLI unavailable; apex CORS still fails on prod |
+| EB production deploy of merge commit | **PASS** | GHA run 27781345087 @ `afa56ca` (2026-06-18) |
+| `GET /api/health` on prod | **PASS** | 200 — deploy confirmed live |
+| EB `CORS_ORIGINS` configured | **INFER FAIL** | Apex CORS 500; AWS CLI unavailable |
 | EB `FRONTEND_URL` configured | **BLOCKED** | AWS CLI unavailable |
-| Post-deploy live smoke (all 4 origins) | **FAIL** | 3/4 pass; apex still 500 (2026-06-18 18:22 UTC) |
+| Post-deploy live smoke (all 4 origins) | **FAIL** | 3/4 pass; apex still 500 (2026-06-18 re-run) |
 
 ---
 
@@ -157,18 +158,10 @@ Content-Type: text/html; charset=utf-8
 
 ---
 
-## Post-deploy verification (2026-06-18 18:22:36 UTC)
+## Post-deploy verification (2026-06-18 — full smoke re-run)
 
-**Recorded by:** post-deploy release verification (`audit/backend-post-deploy-release-verification`)
-
-**Deploy evidence:**
-
-| Signal | Value |
-|--------|-------|
-| `main` HEAD | `5f98461` |
-| Last GHA EB deploy SHA | `7d01011` (2026-06-18T01:13:55Z) — **older than merge commit** |
-| `GET /api/health` on prod | **404** — merge commit not confirmed live |
-| Apex CORS on prod | **500** — `CORS_ORIGINS` env-driven allowlist not confirmed live |
+**Deployed commit:** `afa56ca` via GHA [27781345087](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27781345087)  
+**Probe endpoint:** `OPTIONS /api/featured-products`
 
 | Origin | HTTP | ACAO exact | Credentials `true` | Result |
 |--------|------|------------|---------------------|--------|
@@ -178,25 +171,30 @@ Content-Type: text/html; charset=utf-8
 | `https://www.mosaicbizhub.com` | 204 | YES | YES | **PASS** |
 | `https://evil.example.com` (negative) | 500 | NO | N/A | **PASS** (rejected) |
 
-**Summary:** 3/4 allowlisted origins pass. Apex failure indicates production is still running pre-`CORS_ORIGINS` behavior despite merge to `main`.
+**Summary:** 3/4 allowlisted origins pass. Apex fails because EB `CORS_ORIGINS` is unset — [`LEGACY_DEFAULT_ORIGINS`](../utils/corsOrigins.js) excludes apex. **Do not close #80** until apex returns 204.
+
+---
+
+## Post-deploy verification (2026-06-18 18:22 UTC) — superseded
+
+Historical pre-unblock audit (deploy lag, health 404). See full re-run section above.
 
 ---
 
 ## Blockers
 
-1. **Deploy lag:** GHA last deploy `7d01011`; `main` is `5f98461`. Redeploy required.
-2. **EB env:** `CORS_ORIGINS` / `FRONTEND_URL` not verified (AWS CLI unavailable); apex failure suggests env not applied or deploy not live.
-3. **Issue closure:** Do **not** close #80 until all four allowlisted origins pass and deploy SHA is confirmed.
+1. **EB env:** Set `CORS_ORIGINS` with all four launch origins on `mosaic-backend-env` (release-owner handoff in [`docs/BACKEND_DEPLOYMENT_PROOF.md`](BACKEND_DEPLOYMENT_PROOF.md)).
+2. **Issue closure:** Do **not** close #80 until all four allowlisted origins pass OPTIONS with 204 + exact ACAO + credentials.
 
 ---
 
 ## Next required action (release owner)
 
-1. Set EB env (if not already):
+1. Set EB env on `mosaic-backend-env`:
    - `CORS_ORIGINS=https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com,https://mosaicbizhub.com,https://www.mosaicbizhub.com`
    - `FRONTEND_URL=https://app.mosaicbizhub.com`
-2. Deploy `main` @ `5f98461`+ to EB via `workflow_dispatch`
-3. Confirm `GET /api/health` → 200 and apex OPTIONS → 204
+2. Apply config; re-run apex OPTIONS probe
+3. If still 500: `gh workflow run deploy-eb-production.yml --ref main`
 4. Re-run OPTIONS curls; update this document; close #80 only if 4/4 pass
 
 ---
