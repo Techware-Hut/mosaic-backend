@@ -29,7 +29,8 @@ Sources compared: [`.env.example`](../.env.example), [README.md](../README.md), 
 | `NODE_ENV` | Required-prod | Optional | No | Yes | `production` on EB |
 | `MONGODB_URI` | Required-prod | Yes | No | Yes | Atlas connection string |
 | `JWT_SECRET` | Required-prod | Yes | No | Yes | Auth signing |
-| `FRONTEND_URL` | Required-prod | Yes | No | Yes | CORS + redirects |
+| `FRONTEND_URL` | Required-prod | Yes | No | Yes | CORS fallback + redirects |
+| `CORS_ORIGINS` | Recommended-prod | Optional | No | Yes | Comma-separated CORS allowlist; explicit domains only |
 | `API_BASE_URL` | Required-prod | Yes | No | Yes | OAuth callback base |
 | `GOOGLE_CLIENT_ID` | Required-prod | Yes | No | Yes | Auth module load |
 | `GOOGLE_CLIENT_SECRET` | Required-prod | Yes | No | Yes | OAuth |
