@@ -344,3 +344,27 @@ Workflow post-deploy probes: root **200**, unauth auth/check **401**.
 ### Conclusion
 
 **Deploy Go** for issue #32 on `7f7e293`. Audit and test coverage merged; payment runtime unchanged (docs/tests only in deploy package). Live checkout proof **PENDING** smoke accounts. Follow-ups: #41, #42, #43, expanded #27.
+
+---
+
+## Planned — Issue #42 checkout approval gate + safe PaymentIntent response (pre-deploy)
+
+**Branch:** `sprint/backend-checkout-approval-paymentintent-safety` (not yet merged/deployed)
+
+| Field | Value |
+|-------|-------|
+| Scope | `Business.isApproved`/`isActive` checkout gate; sanitized `retrieveIntent` |
+| Connect architecture | **Unchanged** — destination charges preserved |
+| Webhooks | **Unchanged** |
+| Automated tests | **151/151** (138 baseline + 13 new) |
+
+### Planned smoke (post-merge deploy, `SMOKE_TEST_*` only)
+
+| Area | Expected | Status |
+|------|----------|--------|
+| Approved vendor checkout | `POST /api/orders/initiate` → 201 + `clientSecret` | **PENDING** |
+| Unapproved vendor checkout | 403 blocked | **PENDING** |
+| `GET /api/orders/retrieve-intent/:id` | Sanitized PI only; 403 for wrong customer | **PENDING** |
+| Tier C live charge | Written approval still required | **BLOCKED** |
+
+**Conclusion:** Pre-merge only. No deploy claim until PR merged and EB deploy completed.

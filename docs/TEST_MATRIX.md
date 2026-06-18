@@ -2,7 +2,7 @@
 
 Maps backend features to automated tests (`npm test`), manual smoke checks, and proof-pack evidence.
 
-**Runner:** `npm test` → `node --test tests/**/*.test.js` (138 tests, Node built-in runner)
+**Runner:** `npm test` → `node --test tests/**/*.test.js` (151 tests, Node built-in runner)
 
 **Test style:** Unit/integration-style tests with mocked Mongoose models and module hooks. They prove **handler logic and wiring** — not full end-to-end flows against live MongoDB, Stripe, or AWS in CI.
 
@@ -14,7 +14,7 @@ Maps backend features to automated tests (`npm test`), manual smoke checks, and 
 
 | Layer | Count | What it validates |
 |-------|-------|-------------------|
-| Automated (`tests/`) | **138** | DTOs, middleware, controller logic, webhook wiring, search filters, vendor listing/order/stock, **Stripe Connect checkout guards** (mocked) |
+| Automated (`tests/`) | **151** | DTOs, middleware, controller logic, webhook wiring, search filters, vendor listing/order/stock, **Stripe Connect checkout guards** (mocked), **checkout approval gate + sanitized PI** |
 | Manual smoke script | 1 | Live API + DB auth/check per role |
 | Production smoke tiers | P0–P6 | Post-deploy on `https://api.mosaicbizhub.com` |
 | Proof pack | Per release | Redacted evidence matrix |
@@ -135,6 +135,16 @@ See [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) for route ownership and curl smoke 
 | Full checkout E2E | — | *(no automated test)* | Client Stripe.js confirm + live webhooks | Yes — P5.2–P5.5 (test mode) |
 
 See [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md).
+
+---
+
+## Checkout approval + PaymentIntent safety tests (#42)
+
+| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
+| --- | --- | --- | --- | --- |
+| Business approval gate | [`tests/stripe/order-initiate-connect.test.js`](../tests/stripe/order-initiate-connect.test.js) | Blocks unapproved/inactive/missing business; allows approved+active | Live MongoDB business states | Yes — Tier B |
+| Retrieve-intent safety | [`tests/stripe/checkout-approval-paymentintent-safety.test.js`](../tests/stripe/checkout-approval-paymentintent-safety.test.js) | Sanitized PI, ownership 403, safe Stripe error mapping | Live Stripe retrieve | Yes — Tier B |
+| Response helpers | [`tests/utils/checkout-paymentintent-response.test.js`](../tests/utils/checkout-paymentintent-response.test.js) | Guard + sanitizer unit contracts | HTTP integration | No |
 
 ---
 
@@ -283,7 +293,7 @@ Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_W
 ## How to run
 
 ```bash
-# All automated tests (123)
+# All automated tests (151)
 npm test
 
 # Manual auth smoke (live API + DB)
@@ -299,7 +309,7 @@ node scripts/verify-auth-check-smoke.js
 
 | Evidence type | Source | Automated equivalent |
 | --- | --- | --- |
-| `npm test` 138/138 pass | Pre-merge local/CI | Yes — full suite (see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for prod vs branch) |
+| `npm test` 151/151 pass | Pre-merge local/CI | Yes — full suite (see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for prod vs branch) |
 | Auth smoke script output | `scripts/verify-auth-check-smoke.js` | Partial — live auth/check only |
 | Smoke matrix P0–P6 | [production-smoke-checklist.md](production-smoke-checklist.md) | No — human execution |
 | Webhook unsigned 400 | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) curl | Partial — 9 tests cover handler logic |
@@ -332,9 +342,11 @@ node scripts/verify-auth-check-smoke.js
 | `tests/vendor/vendor-variant-stock.test.js` | 5 | Variant stock PATCH |
 | `tests/vendor/vendor-orders.test.js` | 4 | Vendor order filter + accept guards |
 | `tests/stripe/stripe-webhook-routing-signature.test.js` | 9 | Webhook routing + signatures |
-| `tests/stripe/order-initiate-connect.test.js` | 10 | Connect checkout guards + PI params |
+| `tests/stripe/order-initiate-connect.test.js` | 15 | Connect checkout guards + approval gate |
+| `tests/stripe/checkout-approval-paymentintent-safety.test.js` | 4 | Sanitized retrieve-intent + canonical route |
+| `tests/utils/checkout-paymentintent-response.test.js` | 4 | Checkout guard + PI sanitizer units |
 | `tests/stripe/order-webhook-handlers.test.js` | 5 | Order payment webhook handlers |
 | `tests/marketplace/public-listing-dto.test.js` | 18 | Marketplace DTO normalization |
 | `tests/marketplace/featured-products-response.test.js` | 2 | Featured products wiring |
 | `tests/marketplace/public-search-filters.test.js` | 15 | Search/filter helpers + handler |
-| **Total** | **138** | |
+| **Total** | **151** | |

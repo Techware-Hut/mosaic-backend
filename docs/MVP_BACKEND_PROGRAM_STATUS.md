@@ -1,6 +1,6 @@
 # MVP Backend Program Status
 
-**Last updated:** 2026-06-17 (post-#32 deploy)  
+**Last updated:** 2026-06-17 (issue #42 branch)  
 **Canonical hub** for backend MVP sprint (#26–#35): where Mosaic is today, what is live in production, what is in flight, and what comes next.
 
 For deep technical detail, follow links to issue-specific docs — do not duplicate them here.
@@ -17,7 +17,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | **EB version label** | `mosaic-7f7e2930f931968da6985519cc3fc948aab778ae` |
 | **`main` HEAD** | `7f7e293` |
 | **Open PR** | None |
-| **Automated tests** | **138/138** on `main` |
+| **Automated tests** | **151/151** on `sprint/backend-checkout-approval-paymentintent-safety` (138 on prod `main`) |
 | **Release model** | Controlled issue-by-issue merge → manual GHA EB deploy → tiered prod smoke → evidence in [deploy-verification.md](deploy-verification.md) |
 
 ---
@@ -36,6 +36,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | [#33](https://github.com/Techware-Hut/mosaic-backend/issues/33) | Email notifications | **Not started** | N/A | Audit §10 |
 | [#34](https://github.com/Techware-Hut/mosaic-backend/issues/34) | Admin APIs | **Not started** | N/A | Audit §10 |
 | [#35](https://github.com/Techware-Hut/mosaic-backend/issues/35) | Reviews | **Not started** | N/A | Audit §10 |
+| [#42](https://github.com/Techware-Hut/mosaic-backend/issues/42) | Checkout approval + safe PI | **In progress** (branch) | N/A | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) §#42 |
 
 **Deploy log:** chronological merge/deploy/smoke records → [deploy-verification.md](deploy-verification.md)
 
@@ -51,7 +52,7 @@ Issue #32 complete (merged, deployed). Checkout live smoke **PENDING** `SMOKE_TE
 
 - **#33** Email notifications — order/onboarding/review templates
 - **#41** Payment route hardening (P0 security follow-up from #32 audit)
-- **#42** Checkout approval gate + safe `retrieveIntent` response
+- **#42** Checkout approval gate + safe `retrieveIntent` — **in progress** on `sprint/backend-checkout-approval-paymentintent-safety`
 
 ### Parallel / later
 

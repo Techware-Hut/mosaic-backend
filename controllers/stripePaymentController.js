@@ -1,6 +1,10 @@
 const Stripe = require("stripe");
 const Order = require("../models/Order");
 const { sendOrderPaidEmails } = require("../utils/OrderMail");
+const {
+  sanitizePaymentIntentForClient,
+  sanitizeOrderForPaymentPoll,
+} = require("../utils/paymentIntentResponse");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 exports.stripePaymentWebhook = async (req, res) => {
@@ -117,17 +121,18 @@ exports.stripePaymentWebhook = async (req, res) => {
   }
 };
 
-// ✅ Retrieve payment intent details
+// ✅ Retrieve payment intent details (sanitized for frontend)
 exports.retrieveIntent = async (req, res) => {
   const { id } = req.params;
+  const customerId = req.user?.id || req.user?._id;
 
   try {
-    const paymentIntent = await stripe.paymentIntents.retrieve(id);
-
-    const orders = await Order.find({ paymentId: id }).populate({
-      path: "items.productId",
-      select: "title coverImage", // optional, you can add more fields
-    });
+    const orders = await Order.find({ paymentId: id })
+      .select('userId groupOrderId status paymentStatus totalAmount currency items')
+      .populate({
+        path: "items.productId",
+        select: "title",
+      });
 
     if (!orders || orders.length === 0) {
       return res
@@ -135,17 +140,29 @@ exports.retrieveIntent = async (req, res) => {
         .json({ success: false, message: "No orders found for this payment" });
     }
 
+    const ownsAllOrders = orders.every(
+      (order) => order.userId?.toString() === String(customerId)
+    );
+
+    if (!ownsAllOrders) {
+      return res.status(403).json({
+        success: false,
+        message: "Not allowed to view this payment.",
+      });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(id);
+
     return res.status(200).json({
       success: true,
-      paymentIntent,
-      orders,
+      paymentIntent: sanitizePaymentIntentForClient(paymentIntent),
+      orders: orders.map(sanitizeOrderForPaymentPoll),
     });
   } catch (error) {
     console.error("❌ Failed to retrieve payment intent:", error.message);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch payment information",
-      error: error.message,
     });
   }
 };
