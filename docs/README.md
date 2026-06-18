@@ -11,7 +11,7 @@ Application map: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 | If you are… | Read in this order |
 | --- | --- |
-| **LLM / AI agent** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [LLM_CONTEXT.md](LLM_CONTEXT.md) → [API_SURFACE.md](API_SURFACE.md) → [ARCHITECTURE.md](ARCHITECTURE.md) |
+| **LLM / AI agent** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [LLM_CONTEXT.md](LLM_CONTEXT.md) → [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md) → [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **New backend developer** | [ARCHITECTURE.md](ARCHITECTURE.md) → [SETUP.md](../SETUP.md) → [AUTH_FLOW.md](AUTH_FLOW.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **QA / smoke tester** | [production-smoke-checklist.md](production-smoke-checklist.md) → [TEST_MATRIX.md](TEST_MATRIX.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **Release / deploy owner** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) → [DEPLOYMENT.md](../DEPLOYMENT.md) → [production-proof-pack-template.md](production-proof-pack-template.md) |
@@ -44,7 +44,9 @@ Canonical deep-dives. Prefer these over duplicating detail in chat or new docs.
 | Doc | What it covers |
 | --- | --- |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Repo layout, request lifecycle, route registry by domain, models index, where to look first |
-| [LLM_CONTEXT.md](LLM_CONTEXT.md) | Safe-edit rules and fast navigation for AI assistants |
+| [LLM_CONTEXT.md](LLM_CONTEXT.md) | Safe-edit rules, env names, issue map, and fast navigation for AI assistants |
+| [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md) | Route → controller → model ownership, boundaries, and no-touch zones (issue #50) |
+| [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) | Branch/PR guardrails, before-coding and before-PR checklists for agents |
 | [API_SURFACE.md](API_SURFACE.md) | Full HTTP route map, middleware, auth/role boundaries, smoke and risk notes |
 | [AUTH_FLOW.md](AUTH_FLOW.md) | Login, register, OTP, password reset, JWT, Google OAuth, rate limits |
 | [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) | Vendor onboarding states, admin review, payments, uploads, resubmit |
