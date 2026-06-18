@@ -94,7 +94,9 @@ Full list: [production-env-checklist.md](production-env-checklist.md)
 3. Record version label: `mosaic-<sha>`.
 4. Wait for EB environment recovery.
 
-**Recommendation (future):** Extend GHA post-deploy probe to `/api/health` and `/api/ready`.
+**GHA post-deploy (implemented #21):** `/api/health`, `/api/ready`, CORS OPTIONS+GET on `/api/featured-products` for launch and app origins.
+
+Related docs: [ENV_VAR_INVENTORY.md](ENV_VAR_INVENTORY.md), [PUSH_TO_MAIN_DEPLOY_CRITERIA.md](PUSH_TO_MAIN_DEPLOY_CRITERIA.md), [BACKUP_ROLLBACK_RUNBOOK.md](BACKUP_ROLLBACK_RUNBOOK.md)
 
 ---
 
