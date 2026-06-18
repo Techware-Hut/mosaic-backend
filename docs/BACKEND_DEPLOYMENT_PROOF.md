@@ -1,23 +1,69 @@
 # Backend Deployment Proof — Post-Deploy Release Verification
 
-**Recorded:** 2026-06-18 18:22:36 UTC  
-**Verification branch:** `audit/backend-post-deploy-release-verification`  
 **Production API:** `https://api.mosaicbizhub.com`  
 **Issues:** [#80 CORS](https://github.com/Techware-Hut/mosaic-backend/issues/80) · [#84 Smoke](https://github.com/Techware-Hut/mosaic-backend/issues/84) · [#18 Sentry](https://github.com/Techware-Hut/mosaic-backend/issues/18)
 
 ---
 
-## Release metadata
+## Post-deploy verification (2026-06-18 18:40 UTC)
+
+| Field | Value |
+|-------|-------|
+| Docs merged | PR [#86](https://github.com/Techware-Hut/mosaic-backend/pull/86) → `main` @ `afa56ca` |
+| GHA deploy run | [27781345087](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27781345087) — **success** |
+| Deployed EB version | `mosaic-afa56cab386a73581e71c3a9e4be8b1174d26825` |
+| Deployed commit | `afa56ca` — Merge PR #86 (launch proof docs) + includes CORS code from #85 |
+
+### Live smoke (`./scripts/smoke-backend.ps1`)
+
+| Check | Result |
+|-------|--------|
+| `GET /api/health` | **PASS** (200) |
+| `GET /api/ready` | **PASS** (200) |
+| Public browse routes | **PASS** (200) |
+| Unauth protected routes | **PASS** (401) |
+| CORS preflight (launch.vercel.app) | **PASS** (204) |
+| Authenticated tiers | **BLOCKED** — no `SMOKE_TEST_*` tokens |
+
+**Summary:** PASS=11, FAIL=0, BLOCKED=3
+
+### CORS (OPTIONS `/api/health`, all four launch origins)
+
+| Origin | HTTP | Result |
+|--------|------|--------|
+| `https://mosaic-biz-frontend-launch.vercel.app` | 204 | **PASS** |
+| `https://app.mosaicbizhub.com` | 204 | **PASS** |
+| `https://mosaicbizhub.com` (apex) | 500 | **FAIL** |
+| `https://www.mosaicbizhub.com` | 204 | **PASS** |
+
+**CORS 4/4:** **FAIL** (3/4) — apex still returns 500; likely missing `https://mosaicbizhub.com` in EB `CORS_ORIGINS`.
+
+### Stakeholder summary (post-deploy)
+
+| Gate | Status |
+|------|--------|
+| Code on `main` | **PASS** |
+| EB deploy of latest `main` | **PASS** |
+| Health + readiness | **PASS** |
+| Public API browse | **PASS** |
+| CORS 4/4 | **FAIL** (3/4) |
+| Auth rejection | **PASS** |
+| Full launch sign-off | **NOT READY** — apex CORS + authenticated smoke remain |
+
+---
+
+## Pre-deploy audit (2026-06-18 18:22 UTC) — superseded
+
+Historical record from before redeploy. Kept for audit trail.
 
 | Field | Value |
 |-------|-------|
 | Repo `main` SHA | `5f98461` — Merge PR #85 (CORS allowlist) |
 | Last GHA EB deploy SHA | `7d01011` — 2026-06-18T01:13:55Z |
-| Deploy of `5f98461` confirmed live | **NO** |
+| Deploy of `5f98461` confirmed live | **NO** (at time of audit) |
 | Deploy proxy evidence | `GET /api/health` → **404**; `GET /api/ready` → **404** |
-| Executor | Automated post-deploy verification run |
 
-**Conclusion:** Code is merged to `main`, but **production API behavior matches pre-merge deploy** (`7d01011` era). Full launch sign-off **blocked** until redeploy + env confirmation.
+**Conclusion (historical):** Code was merged to `main`, but production matched pre-merge deploy (`7d01011` era). Resolved by GHA deploy run 27781345087.
 
 ---
 
@@ -105,28 +151,12 @@ No secret values recorded.
 
 ---
 
-## Stakeholder summary
+## Remaining launch blockers (post-deploy)
 
-| Gate | Status |
-|------|--------|
-| Code on `main` | **PASS** |
-| EB deploy of latest `main` | **FAIL** |
-| EB env configured | **BLOCKED / INFER FAIL** |
-| Public API browse | **PASS** |
-| CORS 4/4 | **FAIL** (3/4) |
-| Auth rejection | **PASS** |
-| Email safety (code) | **PASS** |
-| Full launch sign-off | **NOT READY** |
-
----
-
-## Remaining launch blockers
-
-1. **Deploy** `main` @ `5f98461`+ to Elastic Beanstalk (workflow_dispatch)
-2. **Set** `CORS_ORIGINS` and `FRONTEND_URL` on EB before or with deploy
-3. **Confirm** `GET /api/health` → 200 and apex CORS → 204
-4. **Provide** approved smoke test tokens for authenticated tier
-5. **Verify** Sentry dashboard capture (optional debug route — disable after)
+1. **Set** `CORS_ORIGINS` on EB to include apex `https://mosaicbizhub.com` (all four launch origins)
+2. **Redeploy** or restart EB after env update if apex CORS still 500
+3. **Provide** approved smoke test tokens for authenticated tier
+4. **Verify** Sentry dashboard capture (optional debug route — disable after)
 
 ---
 
@@ -134,7 +164,7 @@ No secret values recorded.
 
 - [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md)
 - [`docs/BACKEND_PRODUCTION_SMOKE_PROOF.md`](BACKEND_PRODUCTION_SMOKE_PROOF.md)
-- [`docs/BACKEND_FRONTEND_ROUTE_CONTRACT.md`](BACKEND_FRONTEND_ROUTE_CONTRACT.md) *(on branch `audit/backend-frontend-route-contract`)*
+- [`docs/BACKEND_FRONTEND_ROUTE_CONTRACT.md`](BACKEND_FRONTEND_ROUTE_CONTRACT.md)
 - [`docs/SENTRY_EB_DEPLOY_VERIFICATION.md`](SENTRY_EB_DEPLOY_VERIFICATION.md)
 - [`docs/EB_DEPLOYMENT_READINESS_CHECKLIST.md`](EB_DEPLOYMENT_READINESS_CHECKLIST.md)
 
