@@ -347,6 +347,36 @@ Workflow post-deploy probes: root **200**, unauth auth/check **401**.
 
 ---
 
+## Merged — Issues #33 + #42 on `main` (pre-deploy)
+
+**Commit:** `5810fc3` — PR [#48](https://github.com/Techware-Hut/mosaic-backend/pull/48) email notifications + PR [#49](https://github.com/Techware-Hut/mosaic-backend/pull/49) checkout safety
+
+| Field | Value |
+|-------|-------|
+| #33 scope | Email audit, vendor submission receipt copy, logging hardening, tests, docs |
+| #42 scope | `Business.isApproved`/`isActive` checkout gate; sanitized `retrieveIntent` |
+| Connect architecture | **Unchanged** — destination charges preserved |
+| Webhooks | **Unchanged** |
+| Automated tests | **168/168** on `main` (138 baseline + 30 new) |
+| Evidence docs | [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md), [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) §#42 |
+
+### Planned smoke (post-EB deploy, `SMOKE_TEST_*` only)
+
+| Area | Expected | Status |
+|------|----------|--------|
+| Vendor submit receipt email | `SMOKE_TEST_VENDOR_*` inbox | **PENDING** |
+| Admin finalize approve/reject emails | `SMOKE_TEST_ADMIN_*` + pending app | **PENDING** |
+| Order paid confirmation email | `SMOKE_TEST_CUSTOMER_*` checkout | **PENDING** |
+| Approved vendor checkout | `POST /api/orders/initiate` → 201 + `clientSecret` | **PENDING** |
+| Unapproved vendor checkout | 403 blocked | **PENDING** |
+| `GET /api/orders/retrieve-intent/:id` | Sanitized PI only; 403 for wrong customer | **PENDING** |
+| GHA deploy + health/auth probes | HTTP 200 `/`, HTTP 401 auth/check | **PENDING** deploy |
+| Tier C live charge | Written approval still required | **BLOCKED** |
+
+**Conclusion:** Code merged to `main`. No production deploy claim until manual EB deploy completes and smoke evidence is recorded below.
+
+---
+
 ## Planned — Issue #33 email notification audit (merged PR #48)
 
 **Branch:** merged to `main` via PR #48 (pending EB deploy)
@@ -356,7 +386,7 @@ Workflow post-deploy probes: root **200**, unauth auth/check **401**.
 | Scope | Email audit, vendor submission receipt copy, logging hardening, tests, docs |
 | Runtime changes | Vendor submission email copy; order email failure logs message-only |
 | Stripe/payment | **No changes** |
-| Automated tests | **155/155** on `main` after #48 (138 baseline + 17 new) |
+| Automated tests | **155/155** on `main` after #48 alone (138 baseline + 17 new) |
 | Evidence doc | [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md) |
 
 ### Planned smoke (post-merge deploy)
@@ -370,16 +400,16 @@ Workflow post-deploy probes: root **200**, unauth auth/check **401**.
 
 ---
 
-## Planned — Issue #42 checkout approval gate + safe PaymentIntent response (pre-deploy)
+## Planned — Issue #42 checkout approval gate + safe PaymentIntent response (merged PR #49)
 
-**Branch:** `sprint/backend-checkout-approval-paymentintent-safety` (PR #49, not yet merged/deployed)
+**Branch:** merged to `main` via PR #49 (pending EB deploy)
 
 | Field | Value |
 |-------|-------|
 | Scope | `Business.isApproved`/`isActive` checkout gate; sanitized `retrieveIntent` |
 | Connect architecture | **Unchanged** — destination charges preserved |
 | Webhooks | **Unchanged** |
-| Automated tests | **168/168** combined with #48 (+ 13 new on #49 branch) |
+| Automated tests | **168/168** on `main` (+ 13 new from #49) |
 
 ### Planned smoke (post-merge deploy, `SMOKE_TEST_*` only)
 
@@ -390,4 +420,4 @@ Workflow post-deploy probes: root **200**, unauth auth/check **401**.
 | `GET /api/orders/retrieve-intent/:id` | Sanitized PI only; 403 for wrong customer | **PENDING** |
 | Tier C live charge | Written approval still required | **BLOCKED** |
 
-**Conclusion:** Pre-merge only. No deploy claim until PR merged and EB deploy completed.
+**Conclusion:** Merged to `main`. No deploy claim until EB deploy completed.

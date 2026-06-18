@@ -1,6 +1,6 @@
 # MVP Backend Program Status
 
-**Last updated:** 2026-06-17 (issues #33 + #42 merge prep)  
+**Last updated:** 2026-06-18 (post-#48/#49 merge)  
 **Canonical hub** for backend MVP sprint (#26–#35): where Mosaic is today, what is live in production, what is in flight, and what comes next.
 
 For deep technical detail, follow links to issue-specific docs — do not duplicate them here.
@@ -15,9 +15,9 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | **Production API** | `https://api.mosaicbizhub.com` |
 | **Production deploy SHA** | `7f7e293` — issue #32 Stripe Connect audit docs/tests ([PR #47](https://github.com/Techware-Hut/mosaic-backend/pull/47)); payment runtime unchanged since `2134231` |
 | **EB version label** | `mosaic-7f7e2930f931968da6985519cc3fc948aab778ae` |
-| **`main` HEAD** | `7f7e293` |
+| **`main` HEAD** | `5810fc3` |
 | **Open PR** | None |
-| **Automated tests** | **168/168** on combined #33 + #42 branch (155 on prod `main` after #48) |
+| **Automated tests** | **168/168** on `main` |
 | **Release model** | Controlled issue-by-issue merge → manual GHA EB deploy → tiered prod smoke → evidence in [deploy-verification.md](deploy-verification.md) |
 
 ---
@@ -36,7 +36,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | [#33](https://github.com/Techware-Hut/mosaic-backend/issues/33) | Email notifications | **Merged** (PR #48) | Pending deploy | [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md) |
 | [#34](https://github.com/Techware-Hut/mosaic-backend/issues/34) | Admin APIs | **Not started** | N/A | Audit §10 |
 | [#35](https://github.com/Techware-Hut/mosaic-backend/issues/35) | Reviews | **Not started** | N/A | Audit §10 |
-| [#42](https://github.com/Techware-Hut/mosaic-backend/issues/42) | Checkout approval + safe PI | **In progress** (PR #49) | Pending deploy | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) §#42 |
+| [#42](https://github.com/Techware-Hut/mosaic-backend/issues/42) | Checkout approval + safe PI | **Merged** (PR #49) | Pending deploy | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) §#42 |
 
 **Deploy log:** chronological merge/deploy/smoke records → [deploy-verification.md](deploy-verification.md)
 
@@ -46,18 +46,18 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 
 ### Immediate gate
 
-Issue #32 complete (merged, deployed). Checkout live smoke **PENDING** `SMOKE_TEST_*` accounts — tracked in #27 and follow-ups #41–#43.
+Issues #33 and #42 merged to `main` (`5810fc3`). Next step: manual EB deploy + tiered prod smoke (`SMOKE_TEST_*` accounts) — tracked in #27 and follow-ups #41–#43.
 
 ### Next scheduled work
 
-- **#33** Email notifications — audit + tests + docs (**in progress** on `sprint/backend-email-notifications`)
 - **#41** Payment route hardening (P0 security follow-up from #32 audit)
-- **#42** Checkout approval gate + safe `retrieveIntent` — **in progress** on `sprint/backend-checkout-approval-paymentintent-safety`
+- **#43** Order email timing and webhook retry idempotency
 
 ### Parallel / later
 
 - **#27** — full P0–P6 smoke proof pack ([production-proof-pack-template.md](production-proof-pack-template.md))
-- **#33–#35** — order emails, admin aggregation, reviews tests/DTO audit
+- **#34–#35** — admin aggregation, reviews tests/DTO audit
+- **#18–#23** — post-deploy ops hardening (Sentry, CORS GHA smoke, staging workflow)
 - **Security hardening** — auth on exposed admin/stripe routes (tracked in audit and [DECISION_REGISTER.md](DECISION_REGISTER.md))
 
 Issue dependency diagram: [MVP_BACKEND_API_AUDIT.md](MVP_BACKEND_API_AUDIT.md) §10 (Recommended backend fix order).
