@@ -807,7 +807,7 @@ exports.initiateOrder = async (req, res) => {
         );
       }
     } catch (err) {
-      console.error("Email sending failed:", err);
+      console.error("Email sending failed:", err?.message || err);
     }
 
     return res.status(201).json({
@@ -982,7 +982,7 @@ exports.acceptOrder = async (req, res) => {
         await sendOrderStatusEmail(customerEmail, order._id.toString(), "accepted");
       }
     } catch (e) {
-      console.error("Failed to send acceptance email:", e);
+      console.error("Failed to send acceptance email:", e?.message || e);
     }
 
     res.json({
@@ -1060,7 +1060,7 @@ exports.rejectOrder = async (req, res) => {
         await sendOrderStatusEmail(customerEmail, order._id.toString(), "rejected");
       }
     } catch (e) {
-      console.error("Failed to send rejection email:", e);
+      console.error("Failed to send rejection email:", e?.message || e);
     }
 
     res.json({

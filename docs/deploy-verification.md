@@ -347,16 +347,39 @@ Workflow post-deploy probes: root **200**, unauth auth/check **401**.
 
 ---
 
+## Planned — Issue #33 email notification audit (merged PR #48)
+
+**Branch:** merged to `main` via PR #48 (pending EB deploy)
+
+| Field | Value |
+|-------|-------|
+| Scope | Email audit, vendor submission receipt copy, logging hardening, tests, docs |
+| Runtime changes | Vendor submission email copy; order email failure logs message-only |
+| Stripe/payment | **No changes** |
+| Automated tests | **155/155** on `main` after #48 (138 baseline + 17 new) |
+| Evidence doc | [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md) |
+
+### Planned smoke (post-merge deploy)
+
+| Area | Expected | Status |
+|------|----------|--------|
+| Vendor submit receipt email | `SMOKE_TEST_VENDOR_*` inbox | **PENDING** |
+| Admin finalize approve/reject emails | `SMOKE_TEST_ADMIN_*` + pending app | **PENDING** |
+| Order paid confirmation email | `SMOKE_TEST_CUSTOMER_*` checkout | **PENDING** |
+| Live SMTP inbox proof | Disposable smoke accounts only | **PENDING** |
+
+---
+
 ## Planned — Issue #42 checkout approval gate + safe PaymentIntent response (pre-deploy)
 
-**Branch:** `sprint/backend-checkout-approval-paymentintent-safety` (not yet merged/deployed)
+**Branch:** `sprint/backend-checkout-approval-paymentintent-safety` (PR #49, not yet merged/deployed)
 
 | Field | Value |
 |-------|-------|
 | Scope | `Business.isApproved`/`isActive` checkout gate; sanitized `retrieveIntent` |
 | Connect architecture | **Unchanged** — destination charges preserved |
 | Webhooks | **Unchanged** |
-| Automated tests | **151/151** (138 baseline + 13 new) |
+| Automated tests | **168/168** combined with #48 (+ 13 new on #49 branch) |
 
 ### Planned smoke (post-merge deploy, `SMOKE_TEST_*` only)
 

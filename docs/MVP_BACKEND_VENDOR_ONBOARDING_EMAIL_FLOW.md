@@ -93,7 +93,7 @@ Document checklist (EIN, license, minority proof) is validated at **admin finali
 | Trigger | Template helper | Recipient |
 |---------|-----------------|-----------|
 | Submit success | `sendAdminOnboardingSubmissionEmail` | `ADMIN_EMAIL` |
-| Submit success | `sendVendorSubmissionConfirmationEmail` | Vendor user email |
+| Submit success | `sendVendorSubmissionConfirmationEmail` | Vendor user email — 3–5 business day receipt copy |
 | Finalize approve | `sendVendorApprovedEmail` | Vendor user email |
 | Finalize approve + badge | `sendVendorTrustBadgeAssignedEmail` | Vendor user email |
 | Finalize reject | `sendVendorRejectionEmail` | Vendor user email |
@@ -136,6 +136,7 @@ Secrets and full payloads are never logged.
 |------|------:|----------|
 | [`tests/vendor/vendor-onboarding-validation.test.js`](../tests/vendor/vendor-onboarding-validation.test.js) | 10 | Submit validation rules |
 | [`tests/admin/vendor-onboarding-finalize.test.js`](../tests/admin/vendor-onboarding-finalize.test.js) | 5 | Approve/reject, email graceful failure |
+| [`tests/vendor/vendor-onboarding-submit-email.test.js`](../tests/vendor/vendor-onboarding-submit-email.test.js) | 4 | Submit email flags + graceful failure |
 | Existing vendor/admin tests | 16 | Resubmit, pending queue, middleware |
 
 Full suite at **#30 merge:** **107/107** (`npm test` on production lineage `6cdf587`).  
