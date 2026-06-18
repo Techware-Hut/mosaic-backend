@@ -1,6 +1,6 @@
 # MVP Backend Program Status
 
-**Last updated:** 2026-06-18 (post-#48/#49 merge)  
+**Last updated:** 2026-06-18 (post-#50 merge)  
 **Canonical hub** for backend MVP sprint (#26–#35): where Mosaic is today, what is live in production, what is in flight, and what comes next.
 
 For deep technical detail, follow links to issue-specific docs — do not duplicate them here.
@@ -15,7 +15,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | **Production API** | `https://api.mosaicbizhub.com` |
 | **Production deploy SHA** | `7d01011` — issues #33 + #42 ([PR #48](https://github.com/Techware-Hut/mosaic-backend/pull/48), [PR #49](https://github.com/Techware-Hut/mosaic-backend/pull/49)) |
 | **EB version label** | `mosaic-7d01011c55cb3ea367ff928b4b5fe2c30897d65e` |
-| **`main` HEAD** | `7d01011` |
+| **`main` HEAD** | `21b6595` — issue #50 agent docs ([PR #61](https://github.com/Techware-Hut/mosaic-backend/pull/61)) |
 | **Open PR** | None |
 | **Automated tests** | **168/168** on `main` |
 | **Release model** | Controlled issue-by-issue merge → manual GHA EB deploy → tiered prod smoke → evidence in [deploy-verification.md](deploy-verification.md) |
@@ -42,6 +42,15 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 
 ---
 
+## Phase 2 roadmap (#50–#60)
+
+| Issue | Title | Code status | Evidence |
+| --- | --- | --- | --- |
+| [#50](https://github.com/Techware-Hut/mosaic-backend/issues/50) | Agent onboarding + architecture pack | **Merged** (PR #61) | [LLM_CONTEXT.md](LLM_CONTEXT.md), [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md), [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) |
+| #51–#60 | Platform audit, OpenAPI, fixtures, pagination, indexes, media, validation, logging, jobs, dead-code | **Open** | See [LLM_CONTEXT.md](LLM_CONTEXT.md) issue map |
+
+---
+
 ## Where we are going
 
 ### Immediate gate
@@ -50,6 +59,7 @@ Issues #33 and #42 merged and deployed to production (`7d01011`). GHA health/aut
 
 ### Next scheduled work
 
+- **#55** OpenAPI / API contract docs (next Phase 2 item)
 - **#41** Payment route hardening (P0 security follow-up from #32 audit)
 - **#43** Order email timing and webhook retry idempotency
 
