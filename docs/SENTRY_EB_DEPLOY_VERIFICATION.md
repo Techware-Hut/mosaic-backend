@@ -1,8 +1,8 @@
 # Sentry Elastic Beanstalk Deploy Verification (#18)
 
 **Issue:** [#18 Add Sentry or production error monitoring](https://github.com/Techware-Hut/mosaic-backend/issues/18)  
-**Status:** Code complete on `main`; **EB deploy + event capture pending**  
-**Branch baseline:** `main` @ `fbe3aac`
+**Status:** Code on `main`; **post-deploy probe 2026-06-18** — debug route disabled; dashboard proof **BLOCKED**  
+**Branch baseline:** `main` @ `5f98461`
 
 ---
 
@@ -154,14 +154,31 @@ If Sentry causes boot issues:
 
 ---
 
+## Post-deploy safe probes (2026-06-18 18:22 UTC)
+
+Production: `https://api.mosaicbizhub.com`
+
+| Probe | Result | Notes |
+| --- | --- | --- |
+| `GET /internal/sentry-debug` | **404** | Route not mounted — `ENABLE_SENTRY_DEBUG_ROUTE` not active (launch-safe) |
+| `GET /api/users/auth/check` unauth body | **PASS** | JSON `{"success":false,"message":"Authentication required"}` — no stack trace |
+| Sentry dashboard event | **BLOCKED** | No dashboard access in audit session |
+| EB `SENTRY_*` env names | **BLOCKED** | AWS CLI unavailable |
+
+Do **not** enable debug route for launch sign-off without explicit infra approval.
+
+---
+
 ## #18 acceptance criteria checklist
 
 | Criterion | Status |
 | --- | --- |
-| Sentry initialized with EB env DSN | **Pending** — set on EB |
-| Unhandled errors + 5xx captured | **Code ready** — verify after DSN |
-| Release tagged with EB label/SHA | **Pending** — set `SENTRY_RELEASE` |
-| No secrets committed | **Pass** |
-| Documented in production runbook | **Pass** — [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) |
+| Sentry initialized with EB env DSN | **BLOCKED** — cannot verify without AWS/Sentry access |
+| Unhandled errors + 5xx captured | **Code ready** — verify after DSN + deploy of latest `main` |
+| Release tagged with EB label/SHA | **BLOCKED** — deploy of `5f98461` not confirmed live |
+| Debug route disabled at launch | **PASS** — `/internal/sentry-debug` → 404 |
+| No stack traces in client JSON errors | **PASS** — auth probe |
+| No secrets committed | **PASS** |
+| Documented in production runbook | **PASS** — [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) |
 
-**Blocked proof:** Sentry dashboard access + EB env configuration required from deployment owner.
+**Blocked proof:** Sentry dashboard access + EB env configuration + redeploy of `main` @ `5f98461` required from deployment owner.
