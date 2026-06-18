@@ -347,6 +347,41 @@ Workflow post-deploy probes: root **200**, unauth auth/check **401**.
 
 ---
 
+## Production deploy — Issues #33 + #42 (2026-06-18)
+
+**Commit:** `7d01011` — PR [#48](https://github.com/Techware-Hut/mosaic-backend/pull/48) + PR [#49](https://github.com/Techware-Hut/mosaic-backend/pull/49) + post-merge docs
+
+| Field | Value |
+|-------|-------|
+| GitHub Actions run | https://github.com/Techware-Hut/mosaic-backend/actions/runs/27730217943 |
+| EB version label | `mosaic-7d01011c55cb3ea367ff928b4b5fe2c30897d65e` |
+| EB environment | `mosaic-backend-env` (app: `mosaic-biz-hub-backend`, region: `us-east-1`) |
+| Production API | `https://api.mosaicbizhub.com` |
+| Automated tests (pre-deploy) | **168/168** |
+
+### Post-deploy probes (workflow)
+
+| Check | Result |
+|-------|--------|
+| `GET /` | **PASS** — HTTP 200 |
+| `GET /api/users/auth/check` (unauthenticated) | **PASS** — HTTP 401 |
+
+### Tier smoke (`SMOKE_TEST_*` accounts)
+
+| Area | Expected | Status |
+|------|----------|--------|
+| Vendor submit receipt email | `SMOKE_TEST_VENDOR_*` inbox | **PENDING** |
+| Admin finalize approve/reject emails | `SMOKE_TEST_ADMIN_*` + pending app | **PENDING** |
+| Order paid confirmation email | `SMOKE_TEST_CUSTOMER_*` checkout | **PENDING** |
+| Approved vendor checkout | `POST /api/orders/initiate` → 201 + `clientSecret` | **PENDING** |
+| Unapproved vendor checkout | 403 blocked | **PENDING** |
+| `GET /api/orders/retrieve-intent/:id` | Sanitized PI only; 403 for wrong customer | **PENDING** |
+| Tier C live charge | Written approval still required | **BLOCKED** |
+
+**Conclusion:** **Deploy Go** for #33 + #42 on `7d01011`. GHA health/auth probes pass. Live checkout and email inbox proof **PENDING** `SMOKE_TEST_*` accounts. Follow-ups: #41, #43, expanded #27.
+
+---
+
 ## Merged — Issues #33 + #42 on `main` (pre-deploy)
 
 **Commit:** `5810fc3` — PR [#48](https://github.com/Techware-Hut/mosaic-backend/pull/48) email notifications + PR [#49](https://github.com/Techware-Hut/mosaic-backend/pull/49) checkout safety

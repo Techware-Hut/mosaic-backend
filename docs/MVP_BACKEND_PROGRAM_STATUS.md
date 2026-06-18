@@ -13,9 +13,9 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | --- | --- |
 | **Product** | Mosaic Biz Hub backend — minority-owned business marketplace REST API |
 | **Production API** | `https://api.mosaicbizhub.com` |
-| **Production deploy SHA** | `7f7e293` — issue #32 Stripe Connect audit docs/tests ([PR #47](https://github.com/Techware-Hut/mosaic-backend/pull/47)); payment runtime unchanged since `2134231` |
-| **EB version label** | `mosaic-7f7e2930f931968da6985519cc3fc948aab778ae` |
-| **`main` HEAD** | `5810fc3` |
+| **Production deploy SHA** | `7d01011` — issues #33 + #42 ([PR #48](https://github.com/Techware-Hut/mosaic-backend/pull/48), [PR #49](https://github.com/Techware-Hut/mosaic-backend/pull/49)) |
+| **EB version label** | `mosaic-7d01011c55cb3ea367ff928b4b5fe2c30897d65e` |
+| **`main` HEAD** | `7d01011` |
 | **Open PR** | None |
 | **Automated tests** | **168/168** on `main` |
 | **Release model** | Controlled issue-by-issue merge → manual GHA EB deploy → tiered prod smoke → evidence in [deploy-verification.md](deploy-verification.md) |
@@ -33,10 +33,10 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 | [#30](https://github.com/Techware-Hut/mosaic-backend/issues/30) | Vendor onboarding + email | **Merged** (PR #39) | **Live** (`6cdf587`) | [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md) |
 | [#31](https://github.com/Techware-Hut/mosaic-backend/issues/31) | Vendor self-service APIs | **Merged** (PR #40) | **Live** (`2134231`) | [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) |
 | [#32](https://github.com/Techware-Hut/mosaic-backend/issues/32) | Stripe Connect runtime | **Merged** (PR #47) | **Live** (`7f7e293` docs/tests) | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) |
-| [#33](https://github.com/Techware-Hut/mosaic-backend/issues/33) | Email notifications | **Merged** (PR #48) | Pending deploy | [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md) |
+| [#33](https://github.com/Techware-Hut/mosaic-backend/issues/33) | Email notifications | **Merged** (PR #48) | **Live** (`7d01011`) | [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md) |
 | [#34](https://github.com/Techware-Hut/mosaic-backend/issues/34) | Admin APIs | **Not started** | N/A | Audit §10 |
 | [#35](https://github.com/Techware-Hut/mosaic-backend/issues/35) | Reviews | **Not started** | N/A | Audit §10 |
-| [#42](https://github.com/Techware-Hut/mosaic-backend/issues/42) | Checkout approval + safe PI | **Merged** (PR #49) | Pending deploy | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) §#42 |
+| [#42](https://github.com/Techware-Hut/mosaic-backend/issues/42) | Checkout approval + safe PI | **Merged** (PR #49) | **Live** (`7d01011`) | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) §#42 |
 
 **Deploy log:** chronological merge/deploy/smoke records → [deploy-verification.md](deploy-verification.md)
 
@@ -46,7 +46,7 @@ For deep technical detail, follow links to issue-specific docs — do not duplic
 
 ### Immediate gate
 
-Issues #33 and #42 merged to `main` (`5810fc3`). Next step: manual EB deploy + tiered prod smoke (`SMOKE_TEST_*` accounts) — tracked in #27 and follow-ups #41–#43.
+Issues #33 and #42 merged and deployed to production (`7d01011`). GHA health/auth probes pass. Tiered checkout/email smoke **PENDING** `SMOKE_TEST_*` accounts — tracked in #27 and follow-ups #41–#43.
 
 ### Next scheduled work
 
