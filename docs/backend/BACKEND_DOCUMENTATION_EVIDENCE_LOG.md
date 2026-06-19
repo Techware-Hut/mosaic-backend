@@ -126,7 +126,7 @@ npm test → node --test tests/**/*.test.js
 | Field | Value |
 | --- | --- |
 | Branch | `docs/backend-as-built-documentation-pack` |
-| Commit SHA | _(see git log after commit)_ |
-| PR link | _(see gh pr create output)_ |
+| Commit SHA | `ea27392` |
+| PR link | https://github.com/Techware-Hut/mosaic-backend/pull/94 |
 | Deploy | **Not performed** |
 | Merge | **Not performed** |
