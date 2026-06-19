@@ -104,6 +104,21 @@ try {
 $code = Get-StatusCode -Uri "$Base/api/orders/initiate" -Method POST -Body '{}'
 if ($code -eq 401) { Write-SmokePass "P4.2 POST /api/orders/initiate unauth ($code)" } else { Write-SmokeFail "P4.2 POST /api/orders/initiate ($code, expected 401)" }
 
+$code = Get-StatusCode "$Base/api/products/featured"
+if ($code -eq 404) { Write-SmokePass "P6.0 GET /api/products/featured absent ($code)" } else { Write-SmokeFail "P6.0 GET /api/products/featured ($code, expected 404)" }
+
+$code = Get-StatusCode "$Base/admin/users"
+if ($code -eq 401) { Write-SmokePass "P3.0 GET /admin/users unauth ($code)" } else { Write-SmokeFail "P3.0 GET /admin/users ($code, expected 401)" }
+
+$code = Get-StatusCode "$Base/admin/api/products"
+if ($code -eq 401) { Write-SmokePass "P3.1 GET /admin/api/products unauth ($code)" } else { Write-SmokeFail "P3.1 GET /admin/api/products ($code, expected 401)" }
+
+$code = Get-StatusCode -Uri "$Base/api/payments/create-payment-intent" -Method POST -Body '{}'
+if ($code -eq 401) { Write-SmokePass "P4.3 POST /api/payments/create-payment-intent unauth ($code)" } else { Write-SmokeFail "P4.3 POST /api/payments/create-payment-intent ($code, expected 401)" }
+
+$code = Get-StatusCode "$Base/stripe/account-balance"
+if ($code -eq 401) { Write-SmokePass "P5.0 GET /stripe/account-balance unauth ($code)" } else { Write-SmokeFail "P5.0 GET /stripe/account-balance ($code, expected 401)" }
+
 if ($env:SMOKE_TEST_CUSTOMER_TOKEN) {
     $hdr = @{ Authorization = (Get-AuthHeader $env:SMOKE_TEST_CUSTOMER_TOKEN) }
     $code = Get-StatusCode -Uri "$Base/api/users/auth/check" -Headers $hdr
