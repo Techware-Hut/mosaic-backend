@@ -15,8 +15,8 @@
 | Field | Value |
 | --- | --- |
 | Branch | `test/backend-launch-contract-smoke-guards` |
-| Commit SHA | *(filled at commit time)* |
-| PR link | *(filled when PR opened)* |
+| Commit SHA | `c074888` |
+| PR link | https://github.com/Techware-Hut/mosaic-backend/pull/95 |
 | Deploy | **Not performed** |
 | Merge | **Not performed** |
 
