@@ -34,11 +34,18 @@
 
 ---
 
-## Known gaps (document only — no fix in verification PR)
+## Resolved gaps
+
+| Gap | Location | Resolution | Branch |
+| --- | --- | --- | --- |
+| Unguarded admin products test route | `GET /admin/api/products/test` | **Removed** — debug-only route not used in prod UI or smoke | `fix/backend-guard-admin-products-test-route` (PR #96) |
+
+---
+
+## Known gaps (document only)
 
 | Gap | Location | Severity | Recommended follow-up |
 | --- | --- | --- | --- |
-| Unguarded admin products test route | `GET /admin/api/products/test` | Low | Guard or remove — **approval required** |
 | Public admin category routes | `GET /api/admin/categories` (see API_SURFACE) | Medium | Separate audit PR — **approval required** |
 | Legacy payment route overlap | `/api/payments/create-payment-intent` vs `/api/orders/initiate` | Medium | Frontend migration plan — **no payment logic change without approval** |
 | No global 404 handler | Express default for unknown routes | Low | Document only; alias PRs **not approved** |

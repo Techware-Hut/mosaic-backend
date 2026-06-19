@@ -110,6 +110,7 @@ test('admin product list and featured toggle require authenticate and isAdmin', 
     source,
     /router\.patch\('\/:productId\/featured', authenticate, isAdmin, toggleProductFeatured\)/
   );
+  assert.ok(!source.includes("router.get('/test'"), 'unguarded debug /test route must not exist');
 });
 
 test('isAdmin rejects non-admin users with 403', async () => {

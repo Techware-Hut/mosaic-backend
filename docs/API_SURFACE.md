@@ -438,7 +438,6 @@ Global `router.use(authenticate, isAdmin)` noted as **admin** below.
 
 | Method | Route | Middleware | Controller | Auth/Role | Purpose | Smoke Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/admin/api/products/test` | — | inline | ⚪ Public | Test endpoint | 🟢 |
 | GET | `/admin/api/products/` | `authenticate`, `isAdmin` | `getAllProducts` | admin | All products | 🟡 |
 | PATCH | `/admin/api/products/:productId/featured` | same | `toggleProductFeatured` | admin | Toggle featured | 🟡 |
 
