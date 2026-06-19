@@ -57,15 +57,39 @@ do
   if [ "$code" = "200" ]; then pass "P1 GET $path ($code)"; else fail "P1 GET $path ($code, expected 200)"; fi
 done
 
-CORS_ORIGIN="${FRONTEND_ORIGIN:-https://mosaic-biz-frontend-launch.vercel.app}"
-cors_headers=$(curl -s -D - -o /dev/null -X OPTIONS \
-  -H "Origin: $CORS_ORIGIN" \
-  -H "Access-Control-Request-Method: GET" \
-  "$BASE/api/featured-products")
-if echo "$cors_headers" | grep -qi "access-control-allow-origin: $CORS_ORIGIN"; then
-  pass "P0.4 CORS preflight (Origin=$CORS_ORIGIN)"
+CORS_ORIGINS=(
+  "https://app.mosaicbizhub.com"
+  "https://mosaic-biz-frontend-launch.vercel.app"
+)
+if [ -n "${FRONTEND_ORIGIN:-}" ]; then
+  CORS_ORIGINS=("$FRONTEND_ORIGIN")
+fi
+for CORS_ORIGIN in "${CORS_ORIGINS[@]}"; do
+  cors_headers=$(curl -s -D - -o /dev/null -X OPTIONS \
+    -H "Origin: $CORS_ORIGIN" \
+    -H "Access-Control-Request-Method: GET" \
+    "$BASE/api/featured-products")
+  if echo "$cors_headers" | grep -qi "access-control-allow-origin: $CORS_ORIGIN"; then
+    pass "P0.4 CORS preflight (Origin=$CORS_ORIGIN)"
+  else
+    fail "P0.4 CORS preflight (Origin=$CORS_ORIGIN)"
+  fi
+done
+
+code=$(http_code "$BASE/api/admin/categories")
+if [ "$code" = "200" ]; then
+  pass "NOTE GET /api/admin/categories unauth ($code) — public exposure documented"
 else
-  fail "P0.4 CORS preflight (Origin=$CORS_ORIGIN)"
+  fail "NOTE GET /api/admin/categories ($code, expected 200 on current main)"
+fi
+
+code=$(http_code "$BASE/admin/api/products/test")
+if [ "$code" = "200" ]; then
+  pass "NOTE GET /admin/api/products/test unauth ($code) — debug route pending PR #96 removal"
+elif [ "$code" = "404" ]; then
+  pass "NOTE GET /admin/api/products/test absent ($code) — PR #96 fix deployed"
+else
+  fail "NOTE GET /admin/api/products/test ($code, expected 200 on main or 404 after PR #96)"
 fi
 
 # Optional auth probes
