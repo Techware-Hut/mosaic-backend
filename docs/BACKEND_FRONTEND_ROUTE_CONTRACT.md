@@ -129,7 +129,8 @@ Mount: `/admin/api/products` → [`routes/admin/adminProductRoutes.js`](../route
 |-------|--------|------|------|-----------------|--------|-------|
 | `/admin/api/products` | GET | Yes | admin | Admin product list / featured mgmt | **valid** | Frontend suspect path confirmed |
 | `/admin/api/products/:productId/featured` | PATCH | Yes | admin | Toggle featured flag | **valid** | Sets `Product.isFeatured` for carousel |
-| `/admin/api/products/test` | GET | No | Public | — | **valid** | Debug-only; no auth — do not use in prod UI |
+
+**Removed (2026-06-19):** `GET /admin/api/products/test` — unauthenticated debug route removed in launch hardening fix.
 
 **Wrong prefix:** `GET /api/admin/products` is **missing**. Admin products live under `/admin/api/products`, not `/api/admin/products`.
 
