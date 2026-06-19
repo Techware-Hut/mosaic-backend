@@ -15,9 +15,25 @@ Application map: [ARCHITECTURE.md](ARCHITECTURE.md).
 | **New backend developer** | [ARCHITECTURE.md](ARCHITECTURE.md) → [SETUP.md](../SETUP.md) → [AUTH_FLOW.md](AUTH_FLOW.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **QA / smoke tester** | [BACKEND_FULL_SMOKE_PROOF_PACK.md](BACKEND_FULL_SMOKE_PROOF_PACK.md) → [production-smoke-checklist.md](production-smoke-checklist.md) → [TEST_MATRIX.md](TEST_MATRIX.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **Release / deploy owner** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) → [DEPLOYMENT.md](../DEPLOYMENT.md) → [production-proof-pack-template.md](production-proof-pack-template.md) |
-| **Product / launch reviewer** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [DECISION_REGISTER.md](DECISION_REGISTER.md) → [launch-readiness-report.md](launch-readiness-report.md) |
+| **Product / launch reviewer** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md](backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md) → [DECISION_REGISTER.md](DECISION_REGISTER.md) → [launch-readiness-report.md](launch-readiness-report.md) |
 
 ---
+
+## Launch readiness — as-built evidence pack
+
+**Start here for launch contract reconciliation:** [backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md](backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md)
+
+| Doc | What it covers |
+| --- | --- |
+| [backend/BACKEND_ARCHITECTURE_AS_BUILT.md](backend/BACKEND_ARCHITECTURE_AS_BUILT.md) | Stack, bootstrap, middleware order, integrations |
+| [backend/BACKEND_ROUTE_REGISTRATION.md](backend/BACKEND_ROUTE_REGISTRATION.md) | All registered routes with auth/role/status |
+| [backend/API_CONTRACT_AS_BUILT.md](backend/API_CONTRACT_AS_BUILT.md) | Request/response shapes for frontend reconciliation |
+| [backend/DATA_MODEL_DICTIONARY.md](backend/DATA_MODEL_DICTIONARY.md) | Mongoose models and key fields |
+| [backend/AUTH_CORS_COOKIE_AUDIT.md](backend/AUTH_CORS_COOKIE_AUDIT.md) | Auth, CORS, cookie audit |
+| [backend/STRIPE_PAYMENT_CONNECT_AUDIT.md](backend/STRIPE_PAYMENT_CONNECT_AUDIT.md) | Stripe webhooks, checkout, Connect |
+| [backend/BACKEND_ENVIRONMENT_VARIABLES_NAMES_ONLY.md](backend/BACKEND_ENVIRONMENT_VARIABLES_NAMES_ONLY.md) | Env var names only |
+| [backend/BACKEND_DEPLOYMENT_RUNBOOK_DRAFT.md](backend/BACKEND_DEPLOYMENT_RUNBOOK_DRAFT.md) | Deploy/smoke draft runbook |
+
 
 ## MVP backend sprint (#26–#35)
 
