@@ -91,8 +91,20 @@ if [ -n "${SMOKE_TEST_VENDOR_TOKEN:-}" ]; then
   hdr=$(auth_header "$SMOKE_TEST_VENDOR_TOKEN")
   code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $hdr" "$BASE/api/users/auth/check")
   if [ "$code" = "200" ]; then pass "P2.3 vendor auth/check ($code)"; else fail "P2.3 vendor auth/check ($code)"; fi
+  code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $hdr" "$BASE/api/business/my")
+  if [ "$code" = "200" ]; then pass "P2.5 vendor GET /api/business/my ($code)"; else fail "P2.5 vendor GET /api/business/my ($code, expected 200)"; fi
+  code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $hdr" "$BASE/api/vendor-onboarding/onboarding-data")
+  if [ "$code" = "200" ] || [ "$code" = "404" ]; then
+    pass "P2.6 vendor GET /api/vendor-onboarding/onboarding-data ($code, 404 OK for fresh vendor)"
+  elif [ "$code" = "401" ]; then
+    fail "P2.6 vendor onboarding-data ($code, expected 200 or 404 — not 401)"
+  else
+    fail "P2.6 vendor onboarding-data ($code, expected 200 or 404)"
+  fi
 else
   blocked "P2.3 vendor auth" "SMOKE_TEST_VENDOR_TOKEN not set"
+  blocked "P2.5 vendor business/my" "SMOKE_TEST_VENDOR_TOKEN not set"
+  blocked "P2.6 vendor onboarding-data" "SMOKE_TEST_VENDOR_TOKEN not set"
 fi
 
 if [ -n "${SMOKE_TEST_ADMIN_TOKEN:-}" ]; then
