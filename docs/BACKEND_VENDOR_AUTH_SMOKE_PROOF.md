@@ -17,8 +17,8 @@ No secrets, JWTs, cookies, OTPs, passwords, or env values in this document.
 | Field | Value |
 | --- | --- |
 | Branch | `qa/backend-vendor-auth-smoke-proof` |
-| Commit SHA | *(filled at commit time)* |
-| PR link | *(filled when PR opened)* |
+| Commit SHA | `c84f5ae` |
+| PR link | https://github.com/Techware-Hut/mosaic-backend/pull/97 |
 | Deploy | **Not performed** |
 | Merge | **Not performed** |
 
