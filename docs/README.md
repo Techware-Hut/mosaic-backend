@@ -13,7 +13,7 @@ Application map: [ARCHITECTURE.md](ARCHITECTURE.md).
 | --- | --- |
 | **LLM / AI agent** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [LLM_CONTEXT.md](LLM_CONTEXT.md) → [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md) → [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) → [BACKEND_STABILITY_AGENT_PROMPT.md](BACKEND_STABILITY_AGENT_PROMPT.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **New backend developer** | [ARCHITECTURE.md](ARCHITECTURE.md) → [SETUP.md](../SETUP.md) → [AUTH_FLOW.md](AUTH_FLOW.md) → [API_SURFACE.md](API_SURFACE.md) |
-| **QA / smoke tester** | [BACKEND_FULL_SMOKE_PROOF_PACK.md](BACKEND_FULL_SMOKE_PROOF_PACK.md) → [production-smoke-checklist.md](production-smoke-checklist.md) → [TEST_MATRIX.md](TEST_MATRIX.md) → [API_SURFACE.md](API_SURFACE.md) |
+| **QA / smoke tester** | [BACKEND_VENDOR_AUTH_SMOKE_PROOF.md](BACKEND_VENDOR_AUTH_SMOKE_PROOF.md) → [BACKEND_FULL_SMOKE_PROOF_PACK.md](BACKEND_FULL_SMOKE_PROOF_PACK.md) → [production-smoke-checklist.md](production-smoke-checklist.md) → [TEST_MATRIX.md](TEST_MATRIX.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **Release / deploy owner** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) → [DEPLOYMENT.md](../DEPLOYMENT.md) → [production-proof-pack-template.md](production-proof-pack-template.md) |
 | **Product / launch reviewer** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md](backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md) → [DECISION_REGISTER.md](DECISION_REGISTER.md) → [launch-readiness-report.md](launch-readiness-report.md) |
 

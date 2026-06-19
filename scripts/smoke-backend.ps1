@@ -84,21 +84,45 @@ foreach ($p in $paths) {
     if ($code -eq 200) { Write-SmokePass "P1 GET $p ($code)" } else { Write-SmokeFail "P1 GET $p ($code, expected 200)" }
 }
 
-$corsOrigin = if ($env:FRONTEND_ORIGIN) { $env:FRONTEND_ORIGIN } else { 'https://mosaic-biz-frontend-launch.vercel.app' }
-try {
-    $corsHeaders = @{
-        Origin                         = $corsOrigin
-        'Access-Control-Request-Method' = 'GET'
+$corsOrigins = @(
+    'https://app.mosaicbizhub.com',
+    'https://mosaic-biz-frontend-launch.vercel.app'
+)
+if ($env:FRONTEND_ORIGIN) {
+    $corsOrigins = @($env:FRONTEND_ORIGIN)
+}
+foreach ($corsOrigin in $corsOrigins) {
+    try {
+        $corsHeaders = @{
+            Origin                         = $corsOrigin
+            'Access-Control-Request-Method' = 'GET'
+        }
+        $cors = Invoke-WebRequest -Uri "$Base/api/featured-products" -Method OPTIONS -Headers $corsHeaders -UseBasicParsing -ErrorAction Stop
+        $allowOrigin = $cors.Headers['Access-Control-Allow-Origin']
+        if ($cors.StatusCode -in 200, 204 -and $allowOrigin -eq $corsOrigin) {
+            Write-SmokePass "P0.4 CORS preflight ($($cors.StatusCode), Origin=$corsOrigin)"
+        } else {
+            Write-SmokeFail "P0.4 CORS preflight ($($cors.StatusCode), Allow-Origin=$allowOrigin, expected $corsOrigin)"
+        }
+    } catch {
+        Write-SmokeFail "P0.4 CORS preflight Origin=$corsOrigin - $($_.Exception.Message)"
     }
-    $cors = Invoke-WebRequest -Uri "$Base/api/featured-products" -Method OPTIONS -Headers $corsHeaders -UseBasicParsing -ErrorAction Stop
-    $allowOrigin = $cors.Headers['Access-Control-Allow-Origin']
-    if ($cors.StatusCode -in 200, 204 -and $allowOrigin -eq $corsOrigin) {
-        Write-SmokePass "P0.4 CORS preflight ($($cors.StatusCode), Origin=$corsOrigin)"
-    } else {
-        Write-SmokeFail "P0.4 CORS preflight ($($cors.StatusCode), Allow-Origin=$allowOrigin, expected $corsOrigin)"
-    }
-} catch {
-    Write-SmokeFail "P0.4 CORS preflight - $($_.Exception.Message)"
+}
+
+$code = Get-StatusCode "$Base/api/admin/categories"
+if ($code -eq 200) {
+    Write-SmokePass "NOTE GET /api/admin/categories unauth ($code) - public exposure documented"
+} else {
+    Write-SmokeFail "NOTE GET /api/admin/categories $code - expected 200 on current main"
+}
+
+$code = Get-StatusCode "$Base/admin/api/products/test"
+if ($code -eq 200) {
+    Write-SmokePass "NOTE GET /admin/api/products/test unauth ($code) - debug route pending PR 96 removal"
+} elseif ($code -eq 404) {
+    Write-SmokePass "NOTE GET /admin/api/products/test absent ($code) - PR 96 fix deployed"
+} else {
+    Write-SmokeFail "NOTE GET /admin/api/products/test $code - expected 200 on main or 404 after PR 96"
 }
 
 $code = Get-StatusCode -Uri "$Base/api/orders/initiate" -Method POST -Body '{}'
@@ -139,7 +163,7 @@ if ($env:SMOKE_TEST_VENDOR_TOKEN) {
     if ($code -in 200, 404) {
         Write-SmokePass "P2.6 vendor GET /api/vendor-onboarding/onboarding-data ($code, 404 OK for fresh vendor)"
     } elseif ($code -eq 401) {
-        Write-SmokeFail "P2.6 vendor onboarding-data ($code, expected 200 or 404 — not 401)"
+        Write-SmokeFail "P2.6 vendor onboarding-data $code - expected 200 or 404 not 401"
     } else {
         Write-SmokeFail "P2.6 vendor onboarding-data ($code, expected 200 or 404)"
     }
