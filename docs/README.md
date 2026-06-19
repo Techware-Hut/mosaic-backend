@@ -33,7 +33,8 @@ Application map: [ARCHITECTURE.md](ARCHITECTURE.md).
 | [backend/STRIPE_PAYMENT_CONNECT_AUDIT.md](backend/STRIPE_PAYMENT_CONNECT_AUDIT.md) | Stripe webhooks, checkout, Connect |
 | [backend/BACKEND_ENVIRONMENT_VARIABLES_NAMES_ONLY.md](backend/BACKEND_ENVIRONMENT_VARIABLES_NAMES_ONLY.md) | Env var names only |
 | [backend/BACKEND_DEPLOYMENT_RUNBOOK_DRAFT.md](backend/BACKEND_DEPLOYMENT_RUNBOOK_DRAFT.md) | Deploy/smoke draft runbook |
-
+| [backend/BACKEND_LAUNCH_CONTRACT_VERIFICATION.md](backend/BACKEND_LAUNCH_CONTRACT_VERIFICATION.md) | P0/P1 contract tests and route verification evidence |
+| [backend/BACKEND_P0_P1_RISK_REGISTER.md](backend/BACKEND_P0_P1_RISK_REGISTER.md) | Launch risk register with approval gates |
 
 ## MVP backend sprint (#26–#35)
 

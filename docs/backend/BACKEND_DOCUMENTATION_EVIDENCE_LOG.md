@@ -130,3 +130,46 @@ npm test → node --test tests/**/*.test.js
 | PR link | https://github.com/Techware-Hut/mosaic-backend/pull/94 |
 | Deploy | **Not performed** |
 | Merge | **Not performed** |
+
+---
+
+## Launch contract verification PR (2026-06-19)
+
+**Branch:** `test/backend-launch-contract-smoke-guards`  
+**Purpose:** Automated P0/P1 contract proof from merged as-built docs — tests and smoke extensions only, no business-logic changes.
+
+| File | Purpose |
+| --- | --- |
+| [BACKEND_LAUNCH_CONTRACT_VERIFICATION.md](BACKEND_LAUNCH_CONTRACT_VERIFICATION.md) | Contract matrix, route table, test results |
+| [BACKEND_P0_P1_RISK_REGISTER.md](BACKEND_P0_P1_RISK_REGISTER.md) | Residual risks and stop-for-approval gates |
+| `tests/launch/backend-launch-contract.test.js` | 16 static/unit launch contract tests |
+| `scripts/smoke-backend.ps1` / `.sh` | Extended unauth 401/404 guard checks |
+
+### Commands run (verification PR)
+
+| Command | Exit code | Result |
+| --- | --- | --- |
+| `git fetch origin main && git checkout main && git pull origin main` | 0 | Fast-forward to docs pack |
+| `git checkout -b test/backend-launch-contract-smoke-guards` | 0 | Branch created |
+| `npm test` | 0 | **228 pass**, 0 fail |
+| `npm run test:contract` | 0 | **16 pass**, 0 fail |
+| `npm run smoke:backend` | **Not run** | Requires live `API_BASE_URL` |
+
+### Test delta
+
+```
+Baseline (docs pack): 212 tests
+This PR:              +16 contract tests → 228 total, 0 fail
+```
+
+**Full verification report:** [BACKEND_LAUNCH_CONTRACT_VERIFICATION.md](BACKEND_LAUNCH_CONTRACT_VERIFICATION.md)
+
+### PR metadata (verification PR — fill on merge)
+
+| Field | Value |
+| --- | --- |
+| Branch | `test/backend-launch-contract-smoke-guards` |
+| Commit SHA | *(filled at commit time)* |
+| PR link | *(filled when PR opened)* |
+| Deploy | **Not performed** |
+| Merge | **Not performed** |

@@ -79,6 +79,22 @@ auth_header() {
 code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" "$BASE/api/orders/initiate")
 if [ "$code" = "401" ]; then pass "P4.2 POST /api/orders/initiate unauth ($code)"; else fail "P4.2 POST /api/orders/initiate ($code, expected 401)"; fi
 
+# Launch contract guards (unauthenticated only)
+code=$(http_code "$BASE/api/products/featured")
+if [ "$code" = "404" ]; then pass "P6.0 GET /api/products/featured absent ($code)"; else fail "P6.0 GET /api/products/featured ($code, expected 404)"; fi
+
+code=$(http_code "$BASE/admin/users")
+if [ "$code" = "401" ]; then pass "P3.0 GET /admin/users unauth ($code)"; else fail "P3.0 GET /admin/users ($code, expected 401)"; fi
+
+code=$(http_code "$BASE/admin/api/products")
+if [ "$code" = "401" ]; then pass "P3.1 GET /admin/api/products unauth ($code)"; else fail "P3.1 GET /admin/api/products ($code, expected 401)"; fi
+
+code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" "$BASE/api/payments/create-payment-intent")
+if [ "$code" = "401" ]; then pass "P4.3 POST /api/payments/create-payment-intent unauth ($code)"; else fail "P4.3 POST /api/payments/create-payment-intent ($code, expected 401)"; fi
+
+code=$(http_code "$BASE/stripe/account-balance")
+if [ "$code" = "401" ]; then pass "P5.0 GET /stripe/account-balance unauth ($code)"; else fail "P5.0 GET /stripe/account-balance ($code, expected 401)"; fi
+
 if [ -n "${SMOKE_TEST_CUSTOMER_TOKEN:-}" ]; then
   hdr=$(auth_header "$SMOKE_TEST_CUSTOMER_TOKEN")
   code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $hdr" "$BASE/api/users/auth/check")
