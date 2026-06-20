@@ -680,6 +680,52 @@ exports.patchBusinessProfile = async (req, res) => {
 
 
 
+async function reconcileVendorVerificationPaymentFromStripe(onboarding, userId) {
+  if (onboarding.verificationPayment?.status === 'paid') {
+    return true;
+  }
+
+  const paymentIntentId = onboarding.verificationPayment?.paymentIntentId;
+  if (!paymentIntentId) {
+    return false;
+  }
+
+  let paymentIntent;
+  try {
+    paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  } catch (error) {
+    console.error('Vendor verification payment retrieve failed:', error.message);
+    return false;
+  }
+
+  if (paymentIntent.status !== 'succeeded') {
+    return false;
+  }
+
+  if (paymentIntent.metadata?.type !== 'vendor_verification') {
+    return false;
+  }
+
+  if (paymentIntent.metadata?.userId !== userId.toString()) {
+    return false;
+  }
+
+  if (paymentIntent.id !== paymentIntentId) {
+    return false;
+  }
+
+  onboarding.verificationPayment.status = 'paid';
+  if (!onboarding.verificationPayment.paidAt) {
+    onboarding.verificationPayment.paidAt = new Date();
+  }
+  if (onboarding.status === 'payment_pending') {
+    onboarding.status = 'draft';
+  }
+  await onboarding.save();
+
+  return true;
+}
+
 //payment controllers
 exports.createVerificationPayment = async (req, res) => {
   try {
@@ -934,10 +980,11 @@ if (
     /* ------------------------------
        PAYMENT VALIDATION (MANDATORY)
     ------------------------------ */
-    if (
-      !onboarding.verificationPayment ||
-      onboarding.verificationPayment.status !== "paid"
-    ) {
+    const paymentReady =
+      onboarding.verificationPayment?.status === 'paid' ||
+      (await reconcileVendorVerificationPaymentFromStripe(onboarding, userId));
+
+    if (!paymentReady) {
       return res.status(402).json({
         success: false,
         message: "Verification payment must be completed before submission",
