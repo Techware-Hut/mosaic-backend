@@ -2,11 +2,11 @@
 
 **Purpose:** Automated and smoke-script proof that P0/P1 launch contracts from the merged as-built documentation pack are registered, guarded, and test-ready — without changing payment, auth, webhook, or middleware logic.
 
-**Branch:** `test/backend-launch-contract-smoke-guards`  
+**Branch:** `release/backend-launch-consolidation` (consolidates PRs #95, #96, #97)  
 **Evidence date:** 2026-06-19  
 **Baseline docs:** [BACKEND_ROUTE_REGISTRATION.md](BACKEND_ROUTE_REGISTRATION.md), [API_CONTRACT_AS_BUILT.md](API_CONTRACT_AS_BUILT.md), [AUTH_CORS_COOKIE_AUDIT.md](AUTH_CORS_COOKIE_AUDIT.md), [STRIPE_PAYMENT_CONNECT_AUDIT.md](STRIPE_PAYMENT_CONNECT_AUDIT.md)
 
-**Related:** [BACKEND_P0_P1_RISK_REGISTER.md](BACKEND_P0_P1_RISK_REGISTER.md)
+**Related:** [BACKEND_P0_P1_RISK_REGISTER.md](BACKEND_P0_P1_RISK_REGISTER.md), [BACKEND_VENDOR_AUTH_SMOKE_PROOF.md](../BACKEND_VENDOR_AUTH_SMOKE_PROOF.md)
 
 ---
 
@@ -14,9 +14,10 @@
 
 | Field | Value |
 | --- | --- |
-| Branch | `test/backend-launch-contract-smoke-guards` |
-| Commit SHA | `c074888` |
-| PR link | https://github.com/Techware-Hut/mosaic-backend/pull/95 |
+| Branch | `release/backend-launch-consolidation` |
+| Commit SHA | _(fill on merge)_ |
+| PR link | _(fill on merge)_ |
+| Supersedes | #95, #96, #97 |
 | Deploy | **Not performed** |
 | Merge | **Not performed** |
 
@@ -27,8 +28,7 @@
 | Command | Exit code | Result |
 | --- | --- | --- |
 | `git fetch origin main && git checkout main && git pull origin main` | 0 | Fast-forward to docs pack on main |
-| `git checkout -b test/backend-launch-contract-smoke-guards` | 0 | Branch created |
-| `npm test` | 0 | **228 pass**, 0 fail |
+| `npm test` | 0 | **231 pass**, 0 fail (post-consolidation) |
 | `npm run test:contract` | 0 | **16 pass**, 0 fail |
 | `npm run smoke:backend` | **Not run** | Requires live API (`API_BASE_URL`); see smoke script extensions below |
 
@@ -36,8 +36,8 @@
 
 ```
 npm test → node --test tests/**/*.test.js
-ℹ tests 228
-ℹ pass 228
+ℹ tests 231
+ℹ pass 231
 ℹ fail 0
 
 npm run test:contract → node --test tests/launch/backend-launch-contract.test.js
@@ -46,7 +46,7 @@ npm run test:contract → node --test tests/launch/backend-launch-contract.test.
 ℹ fail 0
 ```
 
-**Delta from docs pack baseline:** +16 contract tests (212 → 228 total).
+**Delta from docs pack baseline:** +19 tests (212 → 231 total).
 
 ---
 
@@ -80,7 +80,7 @@ npm run test:contract → node --test tests/launch/backend-launch-contract.test.
 | Path | Registered | Guarded | Notes |
 | --- | --- | --- | --- |
 | `/admin/users` | **Yes** | **Yes** — `router.use(authenticate, isAdmin)` | Mount: `app.js` → `routes/admin/userRoutes.js` |
-| `/admin/api/products` | **Yes** | **Yes** — per-route `authenticate, isAdmin` on `/` and `/:productId/featured` | Unguarded debug route: `GET /admin/api/products/test` |
+| `/admin/api/products` | **Yes** | **Yes** — per-route `authenticate, isAdmin` on `/` and `/:productId/featured` | Debug route `GET /admin/api/products/test` **removed** in PR #96 |
 | `/stripe/account-session` | **Yes** | **Yes** — `authenticate, isBusinessOwner` | Mounted at `/stripe`, not `/api/stripe` |
 | `/stripe/express-login-link` | **Yes** | **Yes** | same |
 | `/stripe/account-balance` | **Yes** | **Yes** | same |
@@ -97,11 +97,15 @@ npm run test:contract → node --test tests/launch/backend-launch-contract.test.
 | File | Change |
 | --- | --- |
 | `tests/launch/backend-launch-contract.test.js` | **Added** — 16 launch contract tests |
+| `tests/admin/admin-product-routes-guard.test.js` | **Added** — admin product route guard tests |
+| `tests/admin/admin-categories-guard.test.js` | **Added** — admin categories exposure audit |
+| `routes/admin/adminProductRoutes.js` | **Changed** — removed debug `/test` route |
 | `package.json` | **Added** `test:contract` script |
-| `scripts/smoke-backend.ps1` | **Extended** — P3.0, P3.1, P4.3, P5.0, P6.0 unauth checks |
+| `scripts/smoke-backend.ps1` | **Extended** — P3.0, P3.1, P4.3, P5.0, P6.0 unauth checks + dual CORS |
 | `scripts/smoke-backend.sh` | **Extended** — parity with PowerShell script |
 | `docs/backend/BACKEND_LAUNCH_CONTRACT_VERIFICATION.md` | **Added** — this file |
 | `docs/backend/BACKEND_P0_P1_RISK_REGISTER.md` | **Added** — risk register |
+| `docs/BACKEND_VENDOR_AUTH_SMOKE_PROOF.md` | **Added** — vendor auth smoke proof gate |
 | `docs/backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md` | **Updated** — this PR evidence |
 | `docs/README.md` | **Updated** — index links |
 
@@ -113,7 +117,7 @@ npm run test:contract → node --test tests/launch/backend-launch-contract.test.
 - Webhook delivery with production signing secrets
 - AWS S3 uploads, SMTP email delivery
 - Elastic Beanstalk deploy
-- `npm run smoke:backend` against production or local running server (no server started in CI for this PR)
+- Credentialed vendor session smoke (blocked — no test credentials in session)
 - Authenticated admin HTTP response body audit (empty vs data when wrong role)
 - Full manual P0–P6 production smoke checklist
 - Frontend payment redirect URL behavior
@@ -134,12 +138,24 @@ npm run test:contract → node --test tests/launch/backend-launch-contract.test.
 
 ---
 
+## Admin products test route fix (2026-06-19)
+
+| Field | Decision |
+| --- | --- |
+| Route | `GET /admin/api/products/test` |
+| Finding | Public debug endpoint; not referenced by smoke scripts, frontend contract, or production UI |
+| Fix | **Removed** from `routes/admin/adminProductRoutes.js` |
+| Tests | `tests/admin/admin-product-routes-guard.test.js`; launch contract test updated |
+| Branch | `fix/backend-guard-admin-products-test-route` (PR #96) |
+
+---
+
 ## Recommended next PR (requires approval)
 
 | Item | Severity | Action |
 | --- | --- | --- |
-| `GET /admin/api/products/test` unguarded | Low | Guard or remove test route — **stop for approval** |
 | Stale frontend paths `/api/admin/users`, `/api/stripe/*` | Medium | Frontend contract diff only — **no backend aliases without approval** |
 | Legacy `create-payment-intent` overlap | Medium | Document deprecation; migrate frontend to `orders/initiate` — **no payment logic change without approval** |
+| Public `GET /api/admin/categories` | Medium | Guard or document — see vendor auth smoke proof |
 
 **No payment, webhook, auth, CORS, cookie, middleware-order, schema, deploy, or route-alias changes were made in this PR.**
