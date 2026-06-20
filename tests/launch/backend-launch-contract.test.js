@@ -10,6 +10,7 @@ const featuredRoutesPath = path.join(root, 'routes/featuredProductRoutes.js');
 const businessRoutesPath = path.join(root, 'routes/businessRoutes.js');
 const adminUserRoutesPath = path.join(root, 'routes/admin/userRoutes.js');
 const adminProductRoutesPath = path.join(root, 'routes/admin/adminProductRoutes.js');
+const adminOrderRoutesPath = path.join(root, 'routes/admin/adminOrderRoutes.js');
 const orderRoutesPath = path.join(root, 'routes/orderRoutes.js');
 const paymentRoutesPath = path.join(root, 'routes/paymentRoutes.js');
 const connectRoutesPath = path.join(root, 'routes/connectRoutes.js');
@@ -45,6 +46,7 @@ test('app.js mounts launch-critical route prefixes', () => {
     "app.use('/api/business', businessRoutes)",
     "app.use('/admin/users', adminUserRoutes)",
     "app.use('/admin/api/products', adminProductRoutes)",
+    "app.use('/admin/api/orders', adminOrderRoutes)",
     "app.use('/api/payments', paymentRoutes)",
     "app.use('/api/orders', orderRoutes)",
     "app.use('/api/connect', connectRoutes)",
@@ -144,6 +146,17 @@ test('toAdminUser strips sensitive fields from admin list responses', () => {
   assert.equal(sanitized.email, 'admin@example.com');
 });
 
+test('admin order list requires authenticate and isAdmin', () => {
+  const source = readSource(adminOrderRoutesPath);
+
+  assert.match(source, /router\.get\('\/', authenticate, isAdmin, getAllOrdersAdmin\)/);
+});
+
+test('GET /api/orders/admin requires authenticate and isAdmin', () => {
+  const source = readSource(orderRoutesPath);
+  assert.match(source, /router\.get\('\/admin', authenticate, isAdmin, getAllOrdersAdmin\)/);
+});
+
 test('POST /api/orders/initiate requires authenticate and customer role', () => {
   const source = readSource(orderRoutesPath);
   assert.match(source, /router\.post\('\/initiate', authenticate, isCustomer, initiateOrder\)/);
@@ -220,6 +233,7 @@ test('documented launch paths resolve to expected registration status', () => {
   const expectedPresent = [
     { label: '/admin/users', needle: "app.use('/admin/users'" },
     { label: '/admin/api/products', needle: "app.use('/admin/api/products'" },
+    { label: '/admin/api/orders', needle: "app.use('/admin/api/orders'" },
     { label: '/api/orders/initiate', needle: "app.use('/api/orders'" },
     { label: '/api/payments/create-payment-intent', needle: "app.use('/api/payments'" },
     { label: '/stripe/account-session', needle: "router.post('/account-session'" },

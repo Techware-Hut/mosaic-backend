@@ -124,6 +124,8 @@ Mounts: `/api/vendor-onboarding` **and** `/admin/vendor-onboard-verify-stage1` (
 | PUT | `/api/orders/accept/:orderId` | `orderRoutes.js` | `acceptOrder` | JWT | `business_owner` | verified |
 | PUT | `/api/orders/ship/:orderId` | `orderRoutes.js` | `shipOrder` | JWT | `business_owner` | verified |
 | PUT | `/api/orders/deliver/:orderId` | `orderRoutes.js` | `deliverOrder` | JWT | `business_owner` | verified |
+| GET | `/api/orders/admin` | `orderRoutes.js` | `getAllOrdersAdmin` | JWT | `admin` | verified |
+| GET | `/admin/api/orders` | `admin/adminOrderRoutes.js` | `getAllOrdersAdmin` | JWT | `admin` | verified (alias) |
 | POST | `/api/payments/create-payment-intent` | `paymentRoutes.js` | `createPaymentIntent` | JWT + rate limit | `customer` | verified |
 | POST | `/api/stripe/create-checkout-session` | `stripeRoutes.js` | `createCheckoutSession` | JWT | `business_owner` | verified |
 | POST | `/api/connect/:businessId/account-link` | `connectRoutes.js` | `createAccountLink` | JWT | `business_owner` | **verified** |
@@ -164,6 +166,7 @@ All mounted with `express.raw()` before `express.json()` in `app.js`.
 | POST | `/admin/api/business/approve/:id` | `admin/businessRoutes.js` | JWT | admin | verified |
 | GET | `/admin/api/products/` | `admin/adminProductRoutes.js` | JWT | admin | verified |
 | PATCH | `/admin/api/products/:productId/featured` | `admin/adminProductRoutes.js` | JWT | admin | verified |
+| GET | `/admin/api/orders` | `admin/adminOrderRoutes.js` | JWT | admin | verified |
 | GET | `/admin/vendor-onboard-verify-stage1/pending` | `vendorOnboarding.routes.js` | JWT | admin | verified (duplicate prefix) |
 
 ---
