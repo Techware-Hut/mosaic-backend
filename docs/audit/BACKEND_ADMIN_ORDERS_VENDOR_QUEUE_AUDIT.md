@@ -2,6 +2,7 @@
 
 **Repo:** [Techware-Hut/mosaic-backend](https://github.com/Techware-Hut/mosaic-backend)  
 **Branch:** `audit/backend-admin-orders-vendor-queue-blockers`  
+**Audit commit:** `d3c5a22`  
 **Base commit:** `fd59d7fbad6a645327b44656dd3c4000011529f6` (includes PR #101 reconcile fix `d333cbc`)  
 **Evidence date:** 2026-06-20  
 **Production API:** `https://api.mosaicbizhub.com`  
@@ -147,8 +148,9 @@ Excluded by design: `draft`, `payment_pending`, `rejected`, `verified`.
 | Command | Result |
 | --- | --- |
 | `git checkout -b audit/backend-admin-orders-vendor-queue-blockers` | Created from `main` @ `fd59d7f` |
-| `npm test` | See commit — expected 239+ pass |
-| `npm run test:contract` | See commit — expected 16+ pass |
+| `npm test` | **243 pass**, 0 fail |
+| `npm run test:contract` | **18 pass**, 0 fail |
+| `GET /admin/api/orders` prod (pre-deploy) | **404** — expect **401** after EB deploy |
 
 ---
 
