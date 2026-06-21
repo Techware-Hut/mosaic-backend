@@ -134,6 +134,20 @@ Mount: `/admin/api/products` → [`routes/admin/adminProductRoutes.js`](../route
 
 **Wrong prefix:** `GET /api/admin/products` is **missing**. Admin products live under `/admin/api/products`, not `/api/admin/products`.
 
+### Admin orders
+
+Mount: `/admin/api/orders` → [`routes/admin/adminOrderRoutes.js`](../routes/admin/adminOrderRoutes.js).  
+Canonical alternate: `GET /api/orders/admin` → [`routes/orderRoutes.js`](../routes/orderRoutes.js) (same handler).
+
+| Route | Method | Auth | Role | Frontend screen | Status | Notes |
+|-------|--------|------|------|-----------------|--------|-------|
+| `/admin/api/orders` | GET | Yes | admin | Admin order list (`/admin/orders`) | **valid** | Frontend-compatible alias; filters, pagination, summaries |
+| `/api/orders/admin` | GET | Yes | admin | Admin order list (alternate) | **valid** | Canonical backend path; same handler as alias |
+
+**Response shape:** `{ success, message, data, pagination, summary }` — list key is **`data`**, not `orders` (unlike `GET /api/orders/user` and `GET /api/orders/vendor`).
+
+**Wrong prefix:** `GET /api/admin/orders` is **missing**.
+
 ### Other admin mounts (prefix reference)
 
 | Mount prefix | Purpose | Auth |
@@ -224,6 +238,8 @@ Mount: [`routes/stripeRoutes.js`](../routes/stripeRoutes.js).
 |-------|--------|------|------|-----------------|--------|-------|
 | `/api/orders/initiate` | POST | Yes | customer | Checkout / payment start | **valid** | **Primary** — creates Connect destination PaymentIntent |
 | `/api/orders/retrieve-intent/:id` | GET | Yes | Any authenticated | Payment status poll | **valid** | Poll after initiate |
+| `/admin/api/orders` | GET | Yes | admin | Admin order dashboard | **valid** | Alias for admin list; same as `/api/orders/admin` |
+| `/api/orders/admin` | GET | Yes | admin | Admin order dashboard (alternate) | **valid** | Response list key is `data`, not `orders` |
 | `/api/payments/create-payment-intent` | POST | Yes | customer | Legacy PI creation | **valid** | Secondary; order initiate preferred for marketplace checkout |
 
 ### Webhooks — do not call from frontend
