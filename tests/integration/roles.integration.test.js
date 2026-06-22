@@ -84,3 +84,31 @@ test('cross-vendor connect account-link rejects foreign businessId', async () =>
   );
   assert.equal(foreignLink.status, 403);
 });
+
+test('customer receives 403 on privileged admin mutations', async () => {
+  const customerAgent = createAgent(getApp());
+  const { email, password } = await registerAndVerify(customerAgent, {
+    role: 'customer',
+  });
+  await login(customerAgent, email, password);
+
+  const usersRes = await customerAgent.get('/admin/users');
+  assert.equal(usersRes.status, 403);
+
+  const categoryRes = await customerAgent.post('/api/admin/category/product', {
+    name: 'Blocked Category',
+  });
+  assert.equal(categoryRes.status, 403);
+});
+
+test('admin can access mounted admin order and user list routes', async () => {
+  const { email, password } = await createAdminDirect();
+  const adminAgent = createAgent(getApp());
+  await login(adminAgent, email, password);
+
+  const ordersRes = await adminAgent.get('/admin/api/orders');
+  assert.equal(ordersRes.status, 200);
+
+  const usersRes = await adminAgent.get('/admin/users');
+  assert.equal(usersRes.status, 200);
+});
