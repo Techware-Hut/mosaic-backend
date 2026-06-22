@@ -15,6 +15,12 @@ function applyIntegrationEnv(mongoUri) {
   process.env.MONGODB_URI = mongoUri;
   process.env.JWT_SECRET =
     process.env.JWT_SECRET || 'integration-test-jwt-secret-min-32-chars';
+  process.env.GOOGLE_CLIENT_ID =
+    process.env.GOOGLE_CLIENT_ID || 'integration-test-google-client-id';
+  process.env.GOOGLE_CLIENT_SECRET =
+    process.env.GOOGLE_CLIENT_SECRET || 'integration-test-google-client-secret';
+  process.env.API_BASE_URL =
+    process.env.API_BASE_URL || 'http://127.0.0.1:3001';
   process.env.STRIPE_SECRET_KEY =
     process.env.STRIPE_SECRET_KEY || 'sk_test_integration_mock_key_000000000';
   process.env.STRIPE_WEBHOOK_SECRET =

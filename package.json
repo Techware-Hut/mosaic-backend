@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node scripts/run-unit-tests.js",
     "test:contract": "node --test tests/launch/backend-launch-contract.test.js",
-    "test:integration": "node --test --test-concurrency=1 tests/integration/**/*.integration.test.js",
+    "test:integration": "node scripts/run-integration-tests.js",
     "smoke:backend": "node scripts/run-smoke-backend.js",
     "dev": "nodemon index.js",
     "start": "node index.js"

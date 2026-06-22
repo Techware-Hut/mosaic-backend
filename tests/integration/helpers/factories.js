@@ -3,6 +3,9 @@ const mongoose = require('mongoose');
 const User = require('../../../models/User');
 const Business = require('../../../models/Business');
 const Product = require('../../../models/Product');
+const Service = require('../../../models/Service');
+const ServiceCategory = require('../../../models/ServiceCategory');
+const ServiceSubcategory = require('../../../models/ServiceSubcategory');
 const Subscription = require('../../../models/Subscription');
 const SubscriptionPlan = require('../../../models/SubscriptionPlan');
 const VendorOnboarding = require('../../../models/VendorOnboardingStage1');
@@ -142,6 +145,25 @@ async function seedApprovedBusiness(ownerUser, overrides = {}) {
   });
 }
 
+async function seedServiceCategories() {
+  const category = await ServiceCategory.create({
+    name: `Integration Service Category ${Date.now()}`,
+  });
+  const subcategory = await ServiceSubcategory.create({
+    name: `Integration Service Subcategory ${Date.now()}`,
+    category: category._id,
+  });
+
+  return { category, subcategory };
+}
+
+async function seedServiceBusiness(ownerUser, overrides = {}) {
+  return seedApprovedBusiness(ownerUser, {
+    listingType: 'service',
+    ...overrides,
+  });
+}
+
 async function seedPublishedProduct(business, ownerUser) {
   return Product.create({
     title: 'Integration Test Product',
@@ -180,6 +202,8 @@ module.exports = {
   login,
   createAdminDirect,
   seedApprovedBusiness,
+  seedServiceBusiness,
+  seedServiceCategories,
   seedPublishedProduct,
   seedVendorOnboarding,
   uniqueEmail,
