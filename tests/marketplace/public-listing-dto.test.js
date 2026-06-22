@@ -248,3 +248,55 @@ test('normalizeLocation returns null fields when no source data exists', () => {
   assert.equal(card.city, null);
   assert.equal(card.state, null);
 });
+
+test('toPublicListingCard omits oversized media fields from list payloads', () => {
+  const card = toPublicListingCard(
+    {
+      _id: '507f1f77bcf86cd799439011',
+      title: 'Gallery Item',
+      coverImage: 'https://cdn.example.com/cover.jpg',
+      images: [
+        'https://cdn.example.com/cover.jpg',
+        'https://cdn.example.com/b.jpg',
+        'https://cdn.example.com/c.jpg',
+      ],
+      videos: ['https://cdn.example.com/promo.mp4'],
+    },
+    { listingType: 'product' }
+  );
+
+  assert.equal(card.imageUrl, 'https://cdn.example.com/cover.jpg');
+  assert.deepEqual(card.images, ['https://cdn.example.com/cover.jpg']);
+  assert.equal(card.coverImage, 'https://cdn.example.com/cover.jpg');
+  assert.equal(card.videos, undefined);
+});
+
+test('toPublicListingDetail preserves full image gallery on detail payloads', () => {
+  const detail = toPublicListingDetail(
+    {
+      _id: '507f1f77bcf86cd799439011',
+      title: 'Gallery Item',
+      coverImage: 'https://cdn.example.com/cover.jpg',
+      images: [
+        'https://cdn.example.com/cover.jpg',
+        'https://cdn.example.com/b.jpg',
+      ],
+    },
+    { listingType: 'product' }
+  );
+
+  assert.equal(detail.imageUrl, 'https://cdn.example.com/cover.jpg');
+  assert.equal(detail.images.length, 2);
+  assert.equal(detail.images[1], 'https://cdn.example.com/b.jpg');
+});
+
+test('toPublicListingCard returns null imageUrl when no media exists', () => {
+  const card = toPublicListingCard(
+    { _id: '507f1f77bcf86cd799439011', title: 'No media' },
+    { listingType: 'food' }
+  );
+
+  assert.equal(card.image, null);
+  assert.equal(card.imageUrl, null);
+  assert.deepEqual(card.images, []);
+});

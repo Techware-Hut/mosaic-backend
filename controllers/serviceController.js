@@ -13,6 +13,7 @@ const {
   formatOwnerServiceResponse,
   formatValidationErrorResponse,
 } = require('../lib/service/serviceContract');
+const { normalizeImages } = require('../lib/listing/publicListingDto');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -898,6 +899,11 @@ exports.getBusinessServiceById = async (req, res) => {
       };
     });
 
+    const serviceImages = normalizeImages({
+      coverImage: service.coverImage,
+      images: service.images,
+    });
+
     const mappedService = {
       _id: service._id,
       title: service.title || '',
@@ -924,7 +930,9 @@ exports.getBusinessServiceById = async (req, res) => {
         }
         : null,
       coverImage: service.coverImage || '',
-      images: Array.isArray(service.images) ? service.images : [],
+      images: serviceImages.images,
+      image: serviceImages.image,
+      imageUrl: serviceImages.imageUrl,
       location: service.location || '',
       businessHours: mappedBusinessHours,
       bookingToolLink: service.bookingToolLink || '',
