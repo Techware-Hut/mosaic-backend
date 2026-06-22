@@ -223,7 +223,7 @@ This PR:              +16 contract tests → 228 total, 0 fail
 | Field | Value |
 | --- | --- |
 | Branch | `test/backend-isolated-integration-suite` |
-| Commit SHA | *(pending push)* |
+| Commit SHA | `8ddc7369e2cc96830709d69a112d9d7a0c5a2392` |
 | PR link | *(pending)* |
 | Deploy | **Not performed** |
 | Merge | **Not performed** |
