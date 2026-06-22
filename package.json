@@ -4,7 +4,7 @@
   "description": "trusted marketplace",
   "main": "index.js",
   "scripts": {
-    "test": "node --test --test-skip-pattern=integration tests/**/*.test.js",
+    "test": "node scripts/run-unit-tests.js",
     "test:contract": "node --test tests/launch/backend-launch-contract.test.js",
     "test:integration": "node --test --test-concurrency=1 tests/integration/**/*.integration.test.js",
     "smoke:backend": "node scripts/run-smoke-backend.js",
