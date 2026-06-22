@@ -378,12 +378,14 @@ exports.getServiceBySlug = async (req, res) => {
       listingId: service._id,
       listingType: 'service',
     })
-      .populate('userId', 'name profileImage'); // Adjust fields as needed
+      .populate('userId', 'name profileImage');
+
+    const serviceData = service.toObject();
 
     res.status(200).json({
       success: true,
       data: {
-        service,
+        service: toPublicListingDetail(serviceData, { listingType: 'service' }),
         reviews,
       },
     });
