@@ -106,7 +106,7 @@ exports.getServiceBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
 
-    const service = await Service.findOne({ slug })
+    const service = await Service.findOne({ slug, ownerId: req.user._id })
       .populate('categoryId', 'name')
       .populate('subcategoryId', 'name')
       .populate('ownerId', 'name');

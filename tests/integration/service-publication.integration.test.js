@@ -36,11 +36,10 @@ const canonicalChildPayload = {
   services: [{ name: 'Basic Cut' }],
 };
 
-test('service publication flow: draft private, publish public list + detail, unpublish hides public reads', async () => {
-  const agent = createAgent(getApp());
+async function setupVendorWithService(agent, { isPublished = false, businessOverrides = {} } = {}) {
   const vendor = await registerAndVerify(agent, { role: 'business_owner' });
   const user = await User.findOne({ email: vendor.email });
-  const business = await seedServiceBusiness(user);
+  const business = await seedServiceBusiness(user, businessOverrides);
   const { category, subcategory } = await seedServiceCategories();
 
   const loginRes = await login(agent, vendor.email, vendor.password);
@@ -51,6 +50,64 @@ test('service publication flow: draft private, publish public list + detail, unp
     businessId: business._id,
     categoryId: category._id,
     subcategoryId: subcategory._id,
+    isPublished,
+  });
+
+  return {
+    vendor,
+    user,
+    business,
+    category,
+    subcategory,
+    createRes,
+    serviceId: createRes.body?.data?.service?._id
+      ? String(createRes.body.data.service._id)
+      : null,
+    slug: createRes.body?.data?.service?.slug || null,
+  };
+}
+
+function assertPublicSurfacesIncludeService(agent, serviceId, slug) {
+  return (async () => {
+    const publicList = await agent.get('/api/services/list');
+    assert.equal(publicList.status, 200);
+    assert.ok(publicList.body.data.some((entry) => String(entry.id || entry._id) === serviceId));
+
+    const publicDetail = await agent.get(`/api/public/services/${serviceId}`);
+    assert.equal(publicDetail.status, 200);
+
+    if (slug) {
+      const slugDetail = await agent.get(`/api/services/${slug}`);
+      assert.equal(slugDetail.status, 200);
+    }
+
+    const businessServiceDetail = await agent.get(`/api/service/business-service/${serviceId}`);
+    assert.equal(businessServiceDetail.status, 200);
+  })();
+}
+
+function assertPublicSurfacesExcludeService(agent, serviceId, slug) {
+  return (async () => {
+    const publicList = await agent.get('/api/services/list');
+    assert.equal(publicList.status, 200);
+    assert.ok(!publicList.body.data.some((entry) => String(entry.id || entry._id) === serviceId));
+
+    const publicDetail = await agent.get(`/api/public/services/${serviceId}`);
+    assert.equal(publicDetail.status, 404);
+
+    if (slug) {
+      const slugDetail = await agent.get(`/api/services/${slug}`);
+      assert.equal(slugDetail.status, 404);
+    }
+
+    const businessServiceDetail = await agent.get(`/api/service/business-service/${serviceId}`);
+    assert.equal(businessServiceDetail.status, 404);
+  })();
+}
+
+test('service publication flow: draft private, publish public list + detail, unpublish hides public reads', async () => {
+  const agent = createAgent(getApp());
+  const { business, createRes, serviceId, slug } = await setupVendorWithService(agent, {
     isPublished: false,
   });
 
@@ -61,20 +118,18 @@ test('service publication flow: draft private, publish public list + detail, unp
   assert.equal(createRes.body.data.service.services[0].price, 45);
   assert.equal(createRes.body.data.service.services[0].durationMinutes, 60);
 
-  const serviceId = String(createRes.body.data.service._id);
-
   const privateList = await agent.get('/api/private/services/list').query({
     businessId: String(business._id),
   });
   assert.equal(privateList.status, 200, JSON.stringify(privateList.body));
   assert.ok(privateList.body.data.some((entry) => String(entry._id || entry.id) === serviceId));
 
-  const publicListDraft = await agent.get('/api/services/list');
-  assert.equal(publicListDraft.status, 200);
-  assert.ok(!publicListDraft.body.data.some((entry) => String(entry.id || entry._id) === serviceId));
+  const myServicesDraft = await agent.get('/api/service/my-services');
+  assert.equal(myServicesDraft.status, 200);
+  assert.ok(myServicesDraft.body.services.some((entry) => String(entry._id) === serviceId));
+  assert.equal(myServicesDraft.body.publicationByServiceId[serviceId].isPublished, false);
 
-  const publicDetailDraft = await agent.get(`/api/public/services/${serviceId}`);
-  assert.equal(publicDetailDraft.status, 404);
+  await assertPublicSurfacesExcludeService(agent, serviceId, slug);
 
   const publishRes = await agent.put(`/api/service/${serviceId}`).send({ isPublished: true });
   assert.equal(publishRes.status, 200);
@@ -82,26 +137,19 @@ test('service publication flow: draft private, publish public list + detail, unp
   assert.equal(publishRes.body.data.publication.isPublished, true);
   assert.equal(publishRes.body.data.publication.isPubliclyVisible, true);
 
-  const publicListPublished = await agent.get('/api/services/list');
-  assert.equal(publicListPublished.status, 200);
-  assert.ok(publicListPublished.body.data.some((entry) => String(entry.id || entry._id) === serviceId));
-
-  const publicDetailPublished = await agent.get(`/api/public/services/${serviceId}`);
-  assert.equal(publicDetailPublished.status, 200);
-  assert.equal(String(publicDetailPublished.body.data.service.id || publicDetailPublished.body.data.service._id), serviceId);
+  await assertPublicSurfacesIncludeService(agent, serviceId, slug);
 
   const unpublishRes = await agent.put(`/api/service/${serviceId}`).send({ isPublished: false });
   assert.equal(unpublishRes.status, 200);
   assert.equal(unpublishRes.body.data.publication.isPubliclyVisible, false);
 
-  const publicListUnpublished = await agent.get('/api/services/list');
-  assert.ok(!publicListUnpublished.body.data.some((entry) => String(entry.id || entry._id) === serviceId));
-
-  const publicDetailUnpublished = await agent.get(`/api/public/services/${serviceId}`);
-  assert.equal(publicDetailUnpublished.status, 404);
+  await assertPublicSurfacesExcludeService(agent, serviceId, slug);
 
   const republishRes = await agent.put(`/api/service/${serviceId}`).send({ isPublished: true });
   assert.equal(republishRes.status, 200);
+  assert.equal(republishRes.body.data.publication.isPubliclyVisible, true);
+
+  await assertPublicSurfacesIncludeService(agent, serviceId, slug);
 
   const serviceCount = await Service.countDocuments({ businessId: business._id });
   assert.equal(serviceCount, 1);
@@ -109,10 +157,79 @@ test('service publication flow: draft private, publish public list + detail, unp
   const retryCreate = await agent.post('/api/service/').send({
     ...canonicalChildPayload,
     businessId: business._id,
-    categoryId: category._id,
-    subcategoryId: subcategory._id,
+    categoryId: createRes.body.data.service.categoryId,
+    subcategoryId: createRes.body.data.service.subcategoryId,
   });
   assert.equal(retryCreate.status, 409);
+});
+
+test('createService with isPublished true appears on public surfaces immediately', async () => {
+  const agent = createAgent(getApp());
+  const { createRes, serviceId, slug } = await setupVendorWithService(agent, {
+    isPublished: true,
+  });
+
+  assert.equal(createRes.status, 201);
+  assert.equal(createRes.body.data.publication.isPublished, true);
+  assert.equal(createRes.body.data.publication.isPubliclyVisible, true);
+
+  await assertPublicSurfacesIncludeService(agent, serviceId, slug);
+});
+
+test('vendor cannot mutate another vendor service', async () => {
+  const agentA = createAgent(getApp());
+  const agentB = createAgent(getApp());
+
+  const setupA = await setupVendorWithService(agentA, { isPublished: false });
+  assert.equal(setupA.createRes.status, 201);
+
+  const vendorB = await registerAndVerify(agentB, { role: 'business_owner' });
+  await login(agentB, vendorB.email, vendorB.password);
+
+  const mutateRes = await agentB.put(`/api/service/${setupA.serviceId}`).send({ isPublished: true });
+  assert.equal(mutateRes.status, 404);
+
+  const deleteRes = await agentB.delete(`/api/service/delete-service/${setupA.serviceId}`);
+  assert.equal(deleteRes.status, 404);
+
+  const ownerRead = await agentA.get(`/api/service/${setupA.serviceId}`);
+  assert.equal(ownerRead.status, 200);
+  assert.equal(ownerRead.body.data.publication.isPublished, false);
+});
+
+test('published service on inactive business is hidden from public surfaces', async () => {
+  const agent = createAgent(getApp());
+  const { serviceId, slug } = await setupVendorWithService(agent, {
+    isPublished: true,
+    businessOverrides: { isActive: false },
+  });
+
+  const ownerRead = await agent.get(`/api/service/${serviceId}`);
+  assert.equal(ownerRead.status, 200);
+  assert.equal(ownerRead.body.data.publication.isPublished, true);
+  assert.equal(ownerRead.body.data.publication.isPubliclyVisible, false);
+  assert.equal(ownerRead.body.data.publication.visibilityReason, 'BUSINESS_INACTIVE');
+
+  await assertPublicSurfacesExcludeService(agent, serviceId, slug);
+});
+
+test('private service slug route returns only owner-owned services', async () => {
+  const agentA = createAgent(getApp());
+  const agentB = createAgent(getApp());
+
+  const setupA = await setupVendorWithService(agentA, { isPublished: false });
+  assert.equal(setupA.createRes.status, 201);
+  assert.ok(setupA.slug);
+
+  const ownerSlug = await agentA.get(`/api/private/services/${setupA.slug}`);
+  assert.equal(ownerSlug.status, 200);
+  assert.equal(String(ownerSlug.body.data.service._id), setupA.serviceId);
+
+  const vendorB = await registerAndVerify(agentB, { role: 'business_owner' });
+  await login(agentB, vendorB.email, vendorB.password);
+
+  const otherOwnerSlug = await agentB.get(`/api/private/services/${setupA.slug}`);
+  assert.equal(otherOwnerSlug.status, 404);
 });
 
 test('createService rejects missing child price and duration with field errors', async () => {
