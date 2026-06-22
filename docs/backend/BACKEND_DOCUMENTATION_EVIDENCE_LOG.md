@@ -173,3 +173,57 @@ This PR:              +16 contract tests → 228 total, 0 fail
 | PR link | https://github.com/Techware-Hut/mosaic-backend/pull/95 |
 | Deploy | **Not performed** |
 | Merge | **Not performed** |
+
+---
+
+## Issue #172 — Isolated integration test suite (2026-06-21)
+
+**Branch:** `test/backend-isolated-integration-suite`  
+**Base:** `main` @ `80df57008f33c03df8c0a590efa8d573813ff070`
+
+### Commands run
+
+| Command | Exit code | Result |
+| --- | --- | --- |
+| `npm test` | 0 | **284 pass**, 0 fail (integration excluded via `--test-skip-pattern`) |
+| `npm run test:contract` | 0 | **18 pass**, 0 fail |
+| `npm run test:integration` | 0 | **26 pass**, 0 fail |
+
+### Deliverables
+
+| Path | Purpose |
+| --- | --- |
+| `tests/integration/setup/harness.js` | MongoMemoryServer bootstrap, env, app import |
+| `tests/integration/helpers/` | HTTP client, factories, Stripe/mailer stubs, OTP capture |
+| `tests/integration/*.integration.test.js` | Auth, roles, vendor onboarding, marketplace, commerce, Connect |
+| `docs/backend/BACKEND_INTEGRATION_TEST_RUNBOOK.md` | Runbook + CI notes |
+| `.github/workflows/ci.yml` | Added contract + integration steps |
+| `routes/userRoutes.js` | Skip auth rate limiters when `NODE_ENV=test` |
+
+### Isolation method
+
+- `mongodb-memory-server` — ephemeral URI injected before `require('app')`
+- Collection wipe between tests; memory server stopped per test file process
+- No production/staging/dev Atlas connections
+
+### External stubs
+
+- Stripe (`providerStubs.js`) — dynamic failure toggle for Connect error path
+- Mailer (`providerStubs.js` + `otpCapture.js`) — OTP fixture capture
+- Dummy AWS/Cloudinary env names only
+
+### Known gaps
+
+- `GET /api/connect/:businessId/status` does not enforce business ownership (cross-vendor test uses `account-link` POST instead)
+- Vendor onboarding admin verify step not HTTP-exercised when checklist pre-seeded (finalize-only path covered)
+- WellcomeMailer/Nodemailer may log credential warnings on submit/finalize; emails are not sent in integration runs
+
+### PR metadata (fill on open)
+
+| Field | Value |
+| --- | --- |
+| Branch | `test/backend-isolated-integration-suite` |
+| Commit SHA | *(pending push)* |
+| PR link | *(pending)* |
+| Deploy | **Not performed** |
+| Merge | **Not performed** |
