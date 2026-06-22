@@ -23,6 +23,7 @@
 | GET | `/` | `app.js` inline | inline | Public | — | verified |
 | GET | `/api/health` | `healthRoutes.js` | inline | Public | — | verified |
 | GET | `/api/ready` | `healthRoutes.js` | inline | Public | — | verified |
+| GET | `/api/build-info` | `healthRoutes.js` | inline | Public | — | verified |
 | GET | `/internal/sentry-debug` | `app.js` | throws test error | Public | — | verified (env-gated) |
 
 ---

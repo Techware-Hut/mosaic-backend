@@ -219,6 +219,8 @@ test('health routes are mounted under /api with /health and /ready handlers', ()
   assert.ok(appSource.includes("app.use('/api', healthRoutes)"));
   assert.ok(healthSource.includes("router.get('/health'"));
   assert.ok(healthSource.includes("router.get('/ready'"));
+  assert.ok(healthSource.includes("router.get('/build-info'"));
+  assert.ok(healthSource.includes('getPublicReleaseInfo'));
 });
 
 test('app.js defines public GET / root handler', () => {

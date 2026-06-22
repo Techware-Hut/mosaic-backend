@@ -69,6 +69,36 @@ if ($code -eq 200) { Write-SmokePass "P0.2 GET /api/health ($code)" } else { Wri
 $code = Get-StatusCode "$Base/api/ready"
 if ($code -eq 200) { Write-SmokePass "P0.3 GET /api/ready ($code)" } else { Write-SmokeFail "P0.3 GET /api/ready ($code, expected 200)" }
 
+function Test-ReleaseIdentity([string]$Path) {
+    try {
+        $response = Invoke-WebRequest -Uri "$Base$Path" -UseBasicParsing -ErrorAction Stop
+        $json = $response.Content | ConvertFrom-Json
+        if (-not $json.release) { return $false }
+        foreach ($field in @('commit', 'environment', 'deploymentVersion')) {
+            if (-not $json.release.$field) { return $false }
+        }
+        $serialized = ($json.release | ConvertTo-Json -Compress).ToLower()
+        foreach ($bad in @('sk_live_', 'sk_test_', 'whsec_', 'sentry_dsn', 'mongodb', 'password', 'secret')) {
+            if ($serialized.Contains($bad)) { return $false }
+        }
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+if (Test-ReleaseIdentity '/api/health') {
+    Write-SmokePass 'P0.5 GET /api/health release identity'
+} else {
+    Write-SmokeFail 'P0.5 GET /api/health release identity missing or unsafe'
+}
+
+if (Test-ReleaseIdentity '/api/build-info') {
+    Write-SmokePass 'P0.6 GET /api/build-info release identity'
+} else {
+    Write-SmokeFail 'P0.6 GET /api/build-info release identity missing or unsafe'
+}
+
 $code = Get-StatusCode "$Base/api/users/auth/check"
 if ($code -eq 401) { Write-SmokePass "P2.1 GET /api/users/auth/check unauth ($code)" } else { Write-SmokeFail "P2.1 GET /api/users/auth/check ($code, expected 401)" }
 
