@@ -357,14 +357,23 @@ exports.getServiceBySlug = async (req, res) => {
     const { slug } = req.params;
 
     const service = await Service.findOne({ slug, isPublished: true })
-      .populate('categories.categoryId', 'name')
-      .populate('ownerId', 'businessName');
+      .populate('categoryId', 'name')
+      .populate('subcategoryId', 'name')
+      .populate('ownerId', 'name');
 
     if (!service) {
       return res.status(404).json({ success: false, message: 'Service not found' });
     }
 
-    // 👉 Fetch related reviews
+    const visibleBusiness = await Business.findOne({
+      _id: service.businessId,
+      isActive: true,
+    }).select('_id').lean();
+
+    if (!visibleBusiness) {
+      return res.status(404).json({ success: false, message: 'Service not found' });
+    }
+
     const reviews = await Review.find({
       listingId: service._id,
       listingType: 'service',
@@ -410,6 +419,13 @@ exports.getServiceById = async (req, res) => {
       });
 
     if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: 'Service not found',
+      });
+    }
+
+    if (service.isPublished !== true) {
       return res.status(404).json({
         success: false,
         message: 'Service not found',
