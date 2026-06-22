@@ -1,4 +1,12 @@
 const Product = require('../../models/Product');
+const {
+  ADMIN_AUDIT_ACTIONS,
+  ADMIN_AUDIT_TARGET_TYPES,
+} = require('../../utils/audit/actionRegistry');
+const {
+  recordAdminAuditSuccess,
+  buildFieldChangeSummary,
+} = require('../../services/adminAuditService');
 
 // Toggle product featured status
 exports.toggleProductFeatured = async (req, res) => {
@@ -25,8 +33,22 @@ exports.toggleProductFeatured = async (req, res) => {
       nextFeaturedValue = !existingProduct.isFeatured;
     }
 
+    const previousFeatured = existingProduct.isFeatured;
     existingProduct.isFeatured = nextFeaturedValue;
     await existingProduct.save();
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: nextFeaturedValue
+        ? ADMIN_AUDIT_ACTIONS.PRODUCT_FEATURE
+        : ADMIN_AUDIT_ACTIONS.PRODUCT_UNFEATURE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.PRODUCT,
+      targetId: existingProduct._id,
+      changeSummary: buildFieldChangeSummary(
+        { isFeatured: previousFeatured },
+        { isFeatured: existingProduct.isFeatured },
+        ['isFeatured']
+      ),
+    });
 
     res.status(200).json({
       message: `Product ${nextFeaturedValue ? 'featured' : 'unfeatured'} successfully`,

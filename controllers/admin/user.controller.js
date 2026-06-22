@@ -2,6 +2,15 @@ const User = require("../../models/User");
 const bcrypt = require("bcryptjs");
 const { validationResult } = require("express-validator");
 const toAdminUser = require("../../utils/toAdminUser");
+const {
+  ADMIN_AUDIT_ACTIONS,
+  ADMIN_AUDIT_TARGET_TYPES,
+} = require("../../utils/audit/actionRegistry");
+const {
+  recordAdminAuditSuccess,
+  recordAdminAuditFailure,
+  buildFieldChangeSummary,
+} = require("../../services/adminAuditService");
 
 // POST /admin/users/admins
 exports.createAdminUser = async (req, res) => {
@@ -146,6 +155,17 @@ exports.deleteUserByAdmin = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.USER_SOFT_DELETE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.USER,
+      targetId: user._id,
+      changeSummary: buildFieldChangeSummary(
+        { isDeleted: false },
+        { isDeleted: true },
+        ["isDeleted"]
+      ),
+    });
+
     res.status(200).json({
       success: true,
       message: "User soft deleted successfully",
@@ -167,8 +187,22 @@ exports.toggleBlockUser = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
+    const wasBlocked = user.isBlocked;
     user.isBlocked = !user.isBlocked;
     await user.save();
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: user.isBlocked
+        ? ADMIN_AUDIT_ACTIONS.USER_BLOCK
+        : ADMIN_AUDIT_ACTIONS.USER_UNBLOCK,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.USER,
+      targetId: user._id,
+      changeSummary: buildFieldChangeSummary(
+        { isBlocked: wasBlocked },
+        { isBlocked: user.isBlocked },
+        ["isBlocked"]
+      ),
+    });
 
     res.status(200).json({
       success: true,

@@ -2,6 +2,14 @@ const Stripe = require('stripe');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const SubscriptionPlan = require('../models/SubscriptionPlan');
 const { ensurePlanPrice } = require('../helpers/stripePlan');
+const {
+  ADMIN_AUDIT_ACTIONS,
+  ADMIN_AUDIT_TARGET_TYPES,
+} = require('../utils/audit/actionRegistry');
+const {
+  recordAdminAuditSuccess,
+  buildFieldChangeSummary,
+} = require('../services/adminAuditService');
 
 exports.createSubscriptionPlan = async (req, res) => {
   try {
@@ -45,6 +53,17 @@ exports.createSubscriptionPlan = async (req, res) => {
     // Create Stripe Product+Price (and save IDs back)
     await ensurePlanPrice(plan);
 
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.SUBSCRIPTION_PLAN_CREATE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.SUBSCRIPTION_PLAN,
+      targetId: plan._id,
+      changeSummary: buildFieldChangeSummary(
+        {},
+        { name: plan.name, price: plan.price, durationInDays: plan.durationInDays },
+        ['name', 'price', 'durationInDays']
+      ),
+    });
+
     return res.status(201).json({
       message: 'Subscription plan created successfully',
       plan,
@@ -76,6 +95,12 @@ exports.updateSubscriptionPlan = async (req, res) => {
 
     const plan = await SubscriptionPlan.findById(id);
     if (!plan) return res.status(404).json({ message: 'Plan not found' });
+
+    const beforeSummary = {
+      name: plan.name,
+      price: plan.price,
+      durationInDays: plan.durationInDays,
+    };
 
     // Apply simple fields
     if (name) plan.name = name;
@@ -126,6 +151,21 @@ exports.updateSubscriptionPlan = async (req, res) => {
     }
 
     await plan.save();
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.SUBSCRIPTION_PLAN_UPDATE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.SUBSCRIPTION_PLAN,
+      targetId: plan._id,
+      changeSummary: buildFieldChangeSummary(
+        beforeSummary,
+        {
+          name: plan.name,
+          price: plan.price,
+          durationInDays: plan.durationInDays,
+        },
+        ['name', 'price', 'durationInDays']
+      ),
+    });
 
     return res.status(200).json({
       message: 'Subscription plan updated successfully',
