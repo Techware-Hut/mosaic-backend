@@ -2,6 +2,7 @@
 const Stripe = require('stripe');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const Business = require('../models/Business');
+const { getReturnAndRefreshUrls } = require('../lib/connect/connectUrls');
 
 function normalizeCapabilityStatus(status) {
   return typeof status === 'string' ? status.toLowerCase() : 'inactive';
@@ -14,29 +15,6 @@ function getTransferCapabilityStatus(account) {
     normalizeCapabilityStatus(capabilities?.stripe_balance?.stripe_transfers) ||
     'inactive'
   );
-}
-
-/** Build RETURN/REFRESH URLs with businessId appended */
-function buildUrl(base, businessId) {
-  const url = new URL(base);
-  url.searchParams.set('businessId', businessId);
-  return url.toString();
-}
-
-function getReturnAndRefreshUrls(businessId) {
-  // Option A: FRONTEND_URL + path
-  const frontend = process.env.FRONTEND_URL; // e.g. https://app.mosaicbizhub.com
-  const returnPath = process.env.CONNECT_RETURN_PATH || '/partners/connect/return';
-  const refreshPath = process.env.CONNECT_REFRESH_PATH || '/partners/connect/refresh';
-
-  // Option B: Full URLs provided directly
-  const returnBase = process.env.CONNECT_RETURN_URL || `${frontend}${returnPath}`;
-  const refreshBase = process.env.CONNECT_REFRESH_URL || `${frontend}${refreshPath}`;
-
-  return {
-    returnUrl: buildUrl(returnBase, businessId),
-    refreshUrl: buildUrl(refreshBase, businessId),
-  };
 }
 
 /**

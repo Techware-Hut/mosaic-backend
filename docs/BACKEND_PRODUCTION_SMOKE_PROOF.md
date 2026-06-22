@@ -1,176 +1,142 @@
-# Backend Production Smoke Proof — Auth, Checkout, Order, Email
+# Backend Production Smoke Proof
 
 **Issue:** [#84 Backend production smoke proof for domain/API/auth](https://github.com/Techware-Hut/mosaic-backend/issues/84)  
-**Recorded:** 2026-06-18 19:10:36 UTC (final verification — CORS 4/4 PASS)  
-**Repo `main` commit:** `4c77bf6` (docs); EB runtime @ `afa56ca`  
-**Production API:** `https://api.mosaicbizhub.com`
-
----
-
-## Deploy status
-
-| Field | Value |
-|-------|-------|
-| `main` HEAD | `4c77bf6` |
-| EB deployed SHA | `afa56ca` — GHA run [27781345087](https://github.com/Techware-Hut/mosaic-backend/actions/runs/27781345087) |
-| Live deploy confirmed | **YES** — `/api/health` + `/api/ready` return **200** |
-| EB env names verified | **PASS** (inferred) — CORS 4/4 after release-owner env apply |
+**Branch:** `release/backend-post-merge-production-stabilization`  
+**Frontend batch:** [mosaic-biz-frontend-launch#188](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/188)  
+**Recorded:** 2026-06-22 UTC  
+**Production API:** `https://api.mosaicbizhub.com`  
+**Production release:** `403d68e` / `mosaic-403d68e`  
+**Repo `main` HEAD:** `0af8803` (51 commits ahead of production)
 
 No secrets in this document.
 
 ---
 
-## Local validation (2026-06-18 18:53 UTC)
+## Deploy status
 
-| Check | Result |
-|-------|--------|
-| `npm test` | **PASS** — 196/196 (re-run during #80 resolution) |
-| `node -c app.js` | **PASS** |
-
-### Email / order safety (unit tests + code)
-
-| Finding | Result |
-|---------|--------|
-| No pre-payment emails in `initiateOrder` | **PASS** — `order-email-safety.test.js` |
-| Duplicate paid confirmation guard | **PASS** — `paidConfirmationEmailSentAt` in `stripePaymentController.js` |
-| Webhook idempotency | **PASS** — `order-webhook-handlers.test.js` |
-| Route protection on `POST /api/orders/initiate` | **PASS** — `payment-route-protection.test.js` |
+| Field | Value | Result |
+|-------|-------|--------|
+| Live API reachable | yes | **Passed** |
+| Release identity on health/build-info | yes | **Passed** |
+| Production matches `main` | no — stale | **Failed** |
+| Post-merge code on production | no | **Failed** — redeploy required |
 
 ---
 
-## Production — public endpoints
+## Smoke script
 
-| Endpoint | HTTP | Expected | Result |
-|----------|------|----------|--------|
-| `GET /` | 200 | 200 | **PASS** |
-| `GET /api/health` | 200 | 200 | **PASS** |
-| `GET /api/ready` | 200 | 200 | **PASS** |
-| `GET /api/featured-products` | 200 | 200 | **PASS** |
-| `GET /api/products/list?limit=5` | 200 | 200 | **PASS** |
-| `GET /api/services/list?limit=5` | 200 | 200 | **PASS** |
-| `GET /api/food/list?limit=5` | 200 | 200 | **PASS** |
-| `GET /api/public/search?keyword=test&limit=5` | 200 | 200 | **PASS** |
-| `GET /api/categories` | 200 | 200 | **PASS** |
-| `GET /api/ranked?limit=5` | 200 | 200 | **PASS** |
+```powershell
+./scripts/smoke-backend.ps1 -ApiBaseUrl https://api.mosaicbizhub.com
+```
 
-Smoke script (`./scripts/smoke-backend.ps1`): **PASS=11 FAIL=0 SKIP=1 BLOCKED=3**
-
-Note: `/api/products/ranked` returns **404** — canonical ranked route is **`GET /api/ranked`** (see [`routes/publicListing.js`](../routes/publicListing.js)).
+**Summary:** PASS=24 FAIL=0 SKIP=2 BLOCKED=5
 
 ---
 
-## Production — CORS credentials
+## Public endpoints
 
-See [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md). Summary: **4/4 PASS** (2026-06-18 19:10 UTC) — all allowlisted origins return 204 + exact ACAO + credentials.
-
----
-
-## Production — unauth protected routes
-
-| Route | Method | HTTP | Stack leak | Result |
-|-------|--------|------|------------|--------|
-| `/api/users/auth/check` | GET | 401 | No | **PASS** |
-| `/api/business/my` | GET | 401 | No | **PASS** |
-| `/api/vendor-onboarding/onboarding-data` | GET | 401 | No | **PASS** |
-| `/api/orders/initiate` | POST | 401 | No | **PASS** |
-| `/api/connect/:id/account-link` | POST | 401 | No | **PASS** |
-| `/stripe/account-session` | POST | 401 | No | **PASS** |
-| `/admin/users` | GET | 401 | No | **PASS** |
-| `/api/admin/categories` | GET | 200 | No | **NOTE** — no auth middleware on route |
-
-Unauth body example: `{"success":false,"message":"Authentication required"}` — no stack trace.
+| Probe | HTTP | Expected | Result |
+|-------|------|----------|--------|
+| `GET /` | 200 | 200 | **Passed** |
+| `GET /api/health` | 200 | 200 | **Passed** |
+| `GET /api/ready` | 200 | 200 | **Passed** |
+| `GET /api/build-info` | 200 | 200 | **Passed** |
+| Release identity (health) | present | commit/env/version | **Passed** |
+| `X-Request-Id` on health | present | header set | **Passed** |
+| `GET /api/featured-products` | 200 | 200 | **Passed** |
+| `GET /api/products/list?limit=5` | 200 | 200 | **Passed** |
+| `GET /api/public/search?keyword=test&limit=5` | 200 | 200 | **Passed** |
+| `GET /api/services/list?limit=5` | 200 | 200 | **Passed** |
+| `GET /api/food/list?limit=5` | 200 | 200 | **Passed** |
+| `GET /api/products/featured` | 404 | 404 (canonical is `/api/featured-products`) | **Passed** |
 
 ---
 
-## Authenticated smoke — BLOCKED
+## CORS (see [CORS_PRODUCTION_SMOKE_PROOF.md](CORS_PRODUCTION_SMOKE_PROOF.md))
 
-| Check | Status |
-|-------|--------|
-| `SMOKE_TEST_CUSTOMER_TOKEN` | Not set |
-| `SMOKE_TEST_VENDOR_TOKEN` | Not set |
-| `SMOKE_TEST_ADMIN_TOKEN` | Not set |
-| Customer/vendor/admin auth/check | **BLOCKED** |
-| Vendor `GET /api/business/my` (P2.5) | **BLOCKED** — needs vendor token |
-| Vendor `GET /api/vendor-onboarding/onboarding-data` (P2.6) | **BLOCKED** — needs vendor token |
-| Credentialed vendor login + cookie chain (P2.7) | **PASS** — see [`docs/VENDOR_LOGIN_SESSION_AUDIT.md`](VENDOR_LOGIN_SESSION_AUDIT.md) |
-| Role protection (403 probes) | **BLOCKED** |
-| Checkout initiation | **BLOCKED** — no tokens; no live payment tests per policy |
+| Origin | Result |
+|--------|--------|
+| `https://app.mosaicbizhub.com` | **Passed** |
+| `https://mosaic-biz-frontend-launch.vercel.app` | **Passed** |
 
 ---
 
-## Vendor login session proof (issue #81)
+## Auth guards (unauthenticated)
 
-**Audit doc:** [`docs/VENDOR_LOGIN_SESSION_AUDIT.md`](VENDOR_LOGIN_SESSION_AUDIT.md)  
-**Script:** [`scripts/vendor-login-session-proof.ps1`](../scripts/vendor-login-session-proof.ps1)
-
-### Public probes (2026-06-18, no credentials)
-
-| Probe | HTTP | Result |
+| Route | HTTP | Result |
 |-------|------|--------|
-| CORS preflight `OPTIONS /api/users/login` (`Origin: https://app.mosaicbizhub.com`) | 204 | **PASS** |
-| `GET /api/users/auth/check` unauth | 401 | **PASS** |
-
-### Credentialed vendor login (release owner)
-
-Set `SMOKE_TEST_VENDOR_EMAIL` + `SMOKE_TEST_VENDOR_PASSWORD` (or `SMOKE_TEST_VENDOR_TOKEN`) locally — never commit.
-
-| Step | Expected |
-|------|----------|
-| `POST /api/users/login` | **200**; body includes `user.role: business_owner`, `isOtpVerified: true`; token value redacted in logs |
-| `Set-Cookie` | `token` (HttpOnly, Secure, SameSite=None, Domain=.mosaicbizhub.com, Path=/), `user_session`, `user_gender` |
-| Cookie `GET /api/users/auth/check` | **200** `loggedIn: true` |
-| `GET /api/business/my` | **200** (empty businesses OK) |
-| `GET /api/vendor-onboarding/onboarding-data` | **404** for fresh vendor — authenticated missing-data response, **not 401** |
-
-**Recorded 2026-06-18 (redacted):** All credentialed steps **PASS** via [`scripts/vendor-login-session-proof.ps1`](../scripts/vendor-login-session-proof.ps1). Hand off to frontend [#142](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/142).
-
-**Root cause (code audit):** Backend login/cookies are role-agnostic. Credentialed prod proof confirms backend chain works; separate-login kick-out from `app.mosaicbizhub.com` is **not explained by backend vendor login branching** — investigate frontend credentialed fetch, role string (`business_owner` vs `vendor`), and 404 handling on onboarding-data.
-
-**Backend hardening (this branch):** `cookieHelper.js` omits empty `COOKIE_DOMAIN` and normalizes `COOKIE_SAMESITE` casing.
-
-**Unit tests:** `vendor-login-session.test.js`, `cookie-helper-prod-options.test.js` — `npm test` **212/212 PASS**.
+| `GET /api/users/auth/check` | 401 | **Passed** |
+| `POST /api/orders/initiate` | 401 | **Passed** |
+| Error envelope (no stack trace) | safe body | **Passed** |
+| `POST /api/payments/create-payment-intent` | 401 | **Passed** |
+| `POST /api/connect/:id/account-link` | 401 | **Passed** |
+| `GET /admin/users` | 401 | **Passed** |
+| `GET /admin/api/products` | 401 | **Passed** |
+| `GET /stripe/account-balance` | 401 | **Passed** |
 
 ---
 
-## Sentry (safe probes)
+## Admin / noted exposures
+
+| Route | HTTP | Result |
+|-------|------|--------|
+| `GET /api/admin/categories` | 200 unauth | **Noted** — documented public taxonomy |
+| `GET /admin/api/products/test` | 404 | **Passed** — debug route absent |
+
+---
+
+## Authenticated probes
+
+| Probe | Result |
+|-------|--------|
+| Customer auth/check | **Blocked** — no token |
+| Vendor auth/check | **Blocked** — no token |
+| Vendor `GET /api/business/my` | **Blocked** |
+| Vendor onboarding-data | **Blocked** |
+| Admin auth/check | **Blocked** |
+| Product detail by ID | **Skipped** — no product fixture ID |
+| Vendor profile by business ID | **Skipped** — no business fixture ID |
+| Service publication smoke | **Blocked** — run `scripts/service-publication-smoke.ps1` with vendor env vars post-deploy |
+
+---
+
+## Sentry
 
 | Check | Result |
 |-------|--------|
-| `GET /internal/sentry-debug` | **404** — debug route disabled (launch-safe) |
-| Unauth error body stack leak | **PASS** — no stack in JSON |
-| Sentry dashboard event capture | **BLOCKED** — no dashboard access; debug route not enabled |
-| EB `SENTRY_*` env names | **BLOCKED** — AWS CLI unavailable |
+| Init when `SENTRY_DSN` set | **Passed** (code review — [`instrument.js`](../instrument.js)) |
+| Release tags match build-info | **Not Tested** live — requires Sentry project access |
+| Live verification event | **Blocked** — controlled event not sent |
+| Public debug-error route | **Passed** — none added |
 
 ---
 
-## Acceptance criteria
+## Local test suite (branch evidence)
 
-| Criterion | Result |
-|-----------|--------|
-| npm test passes | **PASS** |
-| Public browse routes | **PASS** |
-| Health/readiness on prod | **PASS** |
-| Protected routes reject unauth (no 500) | **PASS** |
-| CORS credentials (4 origins) | **PASS** |
-| No pre-payment email regression | **PASS** (unit tests) |
-| No duplicate paid email risk | **PASS** (unit tests + code) |
-| Authenticated checkout on prod | **BLOCKED** |
-| Vendor login session audit (#81) | **PASS** — public probes, unit tests (212/212), credentialed prod cookie chain |
+Run at PR time — see PR body for counts.
+
+| Command | Purpose |
+|---------|---------|
+| `npm test` | Unit tests |
+| `npm run test:contract` | Launch contract |
+| `npm run test:integration` | Integration |
+| `node --test tests/connect/connect-urls.test.js` | Connect URL alignment |
 
 ---
 
-## Remaining blockers
+## Launch-readiness verdict
 
-1. ~~CORS 4/4 on production~~ — **RESOLVED** (2026-06-18)
-2. Provide approved smoke test tokens for auth/checkout tier — see [`docs/BACKEND_NEXT_LAUNCH_HARDENING_BATCH.md`](BACKEND_NEXT_LAUNCH_HARDENING_BATCH.md) Batch A; vendor credentialed login proof via [`scripts/vendor-login-session-proof.ps1`](../scripts/vendor-login-session-proof.ps1)
-3. Sentry dashboard proof — **BLOCKED** until release owner verifies — Batch B
+**Not safe to deploy for frontend #188 validation** until:
+
+1. Production EB deploy matches `main` (`0af8803` or later).
+2. `/api/health` release.commit matches deployed SHA.
+3. Post-deploy smoke re-run (this script + optional auth tokens).
+4. EB drift items in [EB_ENVIRONMENT_DRIFT_AUDIT.md](EB_ENVIRONMENT_DRIFT_AUDIT.md) resolved.
+
+Current production passes **public** smoke on stale runtime but lacks post-merge backend features (service publication contract, admin auth matrix, etc.).
 
 ---
 
-## References
+## Rollback
 
-- [`scripts/smoke-backend.ps1`](../scripts/smoke-backend.ps1)
-- [`docs/BACKEND_DEPLOYMENT_PROOF.md`](BACKEND_DEPLOYMENT_PROOF.md)
-- [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md)
-- [`docs/VENDOR_LOGIN_SESSION_AUDIT.md`](VENDOR_LOGIN_SESSION_AUDIT.md)
-- [`scripts/vendor-login-session-proof.ps1`](../scripts/vendor-login-session-proof.ps1)
+EB application version `mosaic-403d68e` + matching release identity env vars.
