@@ -9,7 +9,8 @@ param(
     [string]$VendorToken,
     [string]$AdminToken,
     [string]$ProductId,
-    [string]$FrontendOrigin
+    [string]$FrontendOrigin,
+    [string]$BusinessId
 )
 
 if ($CustomerToken) { $env:SMOKE_TEST_CUSTOMER_TOKEN = $CustomerToken }
@@ -17,6 +18,7 @@ if ($VendorToken) { $env:SMOKE_TEST_VENDOR_TOKEN = $VendorToken }
 if ($AdminToken) { $env:SMOKE_TEST_ADMIN_TOKEN = $AdminToken }
 if ($ProductId) { $env:SMOKE_TEST_PRODUCT_ID = $ProductId }
 if ($FrontendOrigin) { $env:FRONTEND_ORIGIN = $FrontendOrigin }
+if ($BusinessId) { $env:SMOKE_TEST_BUSINESS_ID = $BusinessId }
 
 $Base = $ApiBaseUrl.TrimEnd('/')
 $Pass = 0
@@ -99,6 +101,18 @@ if (Test-ReleaseIdentity '/api/build-info') {
     Write-SmokeFail 'P0.6 GET /api/build-info release identity missing or unsafe'
 }
 
+try {
+    $healthResp = Invoke-WebRequest -Uri "$Base/api/health" -UseBasicParsing -ErrorAction Stop
+    $requestId = $healthResp.Headers['X-Request-Id']
+    if ($requestId) {
+        Write-SmokePass "P0.7 GET /api/health X-Request-Id present"
+    } else {
+        Write-SmokeFail 'P0.7 GET /api/health missing X-Request-Id header'
+    }
+} catch {
+    Write-SmokeFail "P0.7 GET /api/health X-Request-Id check - $($_.Exception.Message)"
+}
+
 $code = Get-StatusCode "$Base/api/users/auth/check"
 if ($code -eq 401) { Write-SmokePass "P2.1 GET /api/users/auth/check unauth ($code)" } else { Write-SmokeFail "P2.1 GET /api/users/auth/check ($code, expected 401)" }
 
@@ -129,8 +143,12 @@ foreach ($corsOrigin in $corsOrigins) {
         }
         $cors = Invoke-WebRequest -Uri "$Base/api/featured-products" -Method OPTIONS -Headers $corsHeaders -UseBasicParsing -ErrorAction Stop
         $allowOrigin = $cors.Headers['Access-Control-Allow-Origin']
-        if ($cors.StatusCode -in 200, 204 -and $allowOrigin -eq $corsOrigin) {
-            Write-SmokePass "P0.4 CORS preflight ($($cors.StatusCode), Origin=$corsOrigin)"
+        $allowCreds = $cors.Headers['Access-Control-Allow-Credentials']
+        $corsOk = $cors.StatusCode -in 200, 204 -and $allowOrigin -eq $corsOrigin
+        if ($corsOk -and ($allowCreds -eq 'true' -or $allowCreds -eq $true)) {
+            Write-SmokePass "P0.4 CORS preflight ($($cors.StatusCode), Origin=$corsOrigin, credentials=true)"
+        } elseif ($corsOk) {
+            Write-SmokeFail "P0.4 CORS preflight ($($cors.StatusCode), Origin=$corsOrigin, missing Allow-Credentials)"
         } else {
             Write-SmokeFail "P0.4 CORS preflight ($($cors.StatusCode), Allow-Origin=$allowOrigin, expected $corsOrigin)"
         }
@@ -157,6 +175,27 @@ if ($code -eq 200) {
 
 $code = Get-StatusCode -Uri "$Base/api/orders/initiate" -Method POST -Body '{}'
 if ($code -eq 401) { Write-SmokePass "P4.2 POST /api/orders/initiate unauth ($code)" } else { Write-SmokeFail "P4.2 POST /api/orders/initiate ($code, expected 401)" }
+
+try {
+    $errResp = Invoke-WebRequest -Uri "$Base/api/orders/initiate" -Method POST -Body '{}' -UseBasicParsing -ErrorAction Stop
+    Write-SmokeFail 'P4.2b POST /api/orders/initiate should not return 2xx unauth'
+} catch {
+    if ($_.Exception.Response) {
+        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+        $body = $reader.ReadToEnd()
+        $reader.Close()
+        if ($body -match 'stack|at Object\.|node_modules') {
+            Write-SmokeFail 'P4.2b error envelope leaks stack trace'
+        } else {
+            Write-SmokePass 'P4.2b unauth error envelope safe (no stack trace)'
+        }
+    } else {
+        Write-SmokeFail "P4.2b error envelope check - $($_.Exception.Message)"
+    }
+}
+
+$code = Get-StatusCode -Uri "$Base/api/connect/000000000000000000000000/account-link" -Method POST -Body '{}'
+if ($code -eq 401) { Write-SmokePass "P5.1 POST /api/connect/:id/account-link unauth ($code)" } else { Write-SmokeFail "P5.1 POST /api/connect/:id/account-link ($code, expected 401)" }
 
 $code = Get-StatusCode "$Base/api/products/featured"
 if ($code -eq 404) { Write-SmokePass "P6.0 GET /api/products/featured absent ($code)" } else { Write-SmokeFail "P6.0 GET /api/products/featured ($code, expected 404)" }
@@ -216,6 +255,17 @@ if ($env:SMOKE_TEST_PRODUCT_ID) {
     if ($code -eq 200) { Write-SmokePass "P1 product detail ($code)" } else { Write-SmokeFail "P1 product detail ($code)" }
 } else {
     Write-SmokeSkip 'P1 product detail' 'SMOKE_TEST_PRODUCT_ID not set'
+}
+
+if ($env:SMOKE_TEST_BUSINESS_ID) {
+    $code = Get-StatusCode "$Base/api/public/product/vendor-profile/$($env:SMOKE_TEST_BUSINESS_ID)"
+    if ($code -in 200, 404) {
+        Write-SmokePass "P1 vendor profile ($code, 404 OK if business inactive/unpublished)"
+    } else {
+        Write-SmokeFail "P1 vendor profile ($code, expected 200 or 404)"
+    }
+} else {
+    Write-SmokeSkip 'P1 vendor profile' 'SMOKE_TEST_BUSINESS_ID not set'
 }
 
 Write-Host ''
