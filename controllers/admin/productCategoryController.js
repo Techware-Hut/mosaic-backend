@@ -1,6 +1,14 @@
 const ProductCategory = require('../../models/ProductCategory');
 const ProductSubcategory = require('../../models/ProductSubcategory');
 const deleteCloudinaryFile = require('../../utils/deleteCloudinaryFile');
+const {
+  ADMIN_AUDIT_ACTIONS,
+  ADMIN_AUDIT_TARGET_TYPES,
+} = require('../../utils/audit/actionRegistry');
+const {
+  recordAdminAuditSuccess,
+  buildFieldChangeSummary,
+} = require('../../services/adminAuditService');
 
 // ✅ Create Product Category
 exports.createProductCategory = async (req, res) => {
@@ -19,6 +27,14 @@ exports.createProductCategory = async (req, res) => {
     });
 
     await category.save();
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.CATEGORY_CREATE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.CATEGORY,
+      targetId: category._id,
+      changeSummary: buildFieldChangeSummary({}, { name: category.name }, ['name']),
+    });
+
     return res.status(201).json({ success: true, data: category });
   } catch (err) {
     console.error('Create Product Category Error:', err);
@@ -36,11 +52,20 @@ exports.updateProductCategory = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Category not found' });
     }
 
+    const beforeName = category.name;
     category.name = name || category.name;
     category.description = description || category.description;
     category.img = img || category.img;
 
     await category.save();
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.CATEGORY_UPDATE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.CATEGORY,
+      targetId: category._id,
+      changeSummary: buildFieldChangeSummary({ name: beforeName }, { name: category.name }, ['name']),
+    });
+
     return res.status(200).json({ success: true, data: category });
   } catch (err) {
     console.error('Update Product Category Error:', err);
@@ -66,6 +91,13 @@ exports.deleteProductCategory = async (req, res) => {
 
     // Finally, delete the category itself
     await category.deleteOne();
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.CATEGORY_DELETE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.CATEGORY,
+      targetId: category._id,
+      changeSummary: buildFieldChangeSummary({ name: category.name }, {}, ['name']),
+    });
 
     return res.status(200).json({ success: true, message: 'Category and related subcategories deleted successfully' });
   } catch (err) {

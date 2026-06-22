@@ -1,4 +1,9 @@
 const Sentry = require('@sentry/node');
+const {
+  getReleaseEnvironment,
+  getSentryRelease,
+  getSentryTags,
+} = require('./utils/releaseIdentity');
 
 const SENSITIVE_KEYS = [
   'password',
@@ -56,8 +61,8 @@ function isSentryEnabled() {
 if (isSentryEnabled()) {
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
-    environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development',
-    release: process.env.SENTRY_RELEASE,
+    environment: getReleaseEnvironment(),
+    release: getSentryRelease(),
     enabled: true,
     sendDefaultPii: false,
     tracesSampleRate: parseSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE, 0),
@@ -75,6 +80,11 @@ if (isSentryEnabled()) {
       return event;
     },
   });
+
+  const tags = getSentryTags();
+  for (const [key, value] of Object.entries(tags)) {
+    Sentry.setTag(key, value);
+  }
 }
 
 module.exports = Sentry;

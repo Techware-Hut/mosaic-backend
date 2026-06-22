@@ -1,6 +1,15 @@
 // controllers/businessController.js
 const Business = require("../../models/Business");
 const { sendBusinessStatusEmail } = require("../../utils/approvalMail");
+const {
+  ADMIN_AUDIT_ACTIONS,
+  ADMIN_AUDIT_TARGET_TYPES,
+} = require("../../utils/audit/actionRegistry");
+const {
+  recordAdminAuditSuccess,
+  recordAdminAuditFailure,
+  buildFieldChangeSummary,
+} = require("../../services/adminAuditService");
 
 const parseBoolean = (value) => {
   if (value === true || value === "true" || value === 1 || value === "1") return true;
@@ -86,11 +95,24 @@ exports.toggleBusinessStatus = async (req, res) => {
     }
 
     const nextIsApproved = !business.isApproved;
+    const previousIsApproved = business.isApproved;
+    const previousIsActive = business.isActive;
 
     // ✅ Only allow toggling to APPROVED if onboardingStatus === 'completed'
     if (nextIsApproved) {
       const onboarding = String(business.onboardingStatus || "").toLowerCase();
       if (onboarding !== "completed") {
+        await recordAdminAuditFailure(req, {
+          actionCode: ADMIN_AUDIT_ACTIONS.BUSINESS_APPROVE,
+          targetType: ADMIN_AUDIT_TARGET_TYPES.BUSINESS,
+          targetId: business._id,
+          note: "Cannot approve this business until onboarding is completed.",
+          changeSummary: buildFieldChangeSummary(
+            {},
+            { onboardingStatus: business.onboardingStatus || null },
+            ["onboardingStatus"]
+          ),
+        });
         return res.status(400).json({
           success: false,
           message: "Cannot approve this business until onboarding is completed.",
@@ -138,6 +160,20 @@ exports.toggleBusinessStatus = async (req, res) => {
       // don't fail API due to email issues
     }
     // ---------------------------------------------------------
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: nextIsApproved
+        ? ADMIN_AUDIT_ACTIONS.BUSINESS_APPROVE
+        : ADMIN_AUDIT_ACTIONS.BUSINESS_DISAPPROVE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.BUSINESS,
+      targetId: business._id,
+      changeSummary: buildFieldChangeSummary(
+        { isApproved: previousIsApproved, isActive: previousIsActive },
+        { isApproved: business.isApproved, isActive: business.isActive },
+        ["isApproved", "isActive"]
+      ),
+      note: !nextIsApproved ? req.body?.reason || req.body?.adminNote || null : null,
+    });
 
     return res.status(200).json({
       success: true,
@@ -219,6 +255,20 @@ exports.patchBusinessActivationStatus = async (req, res) => {
         console.error("Email send failed (patchBusinessActivationStatus):", mailErr);
       }
     }
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: nextIsActive
+        ? ADMIN_AUDIT_ACTIONS.BUSINESS_ACTIVATE
+        : ADMIN_AUDIT_ACTIONS.BUSINESS_DEACTIVATE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.BUSINESS,
+      targetId: business._id,
+      changeSummary: buildFieldChangeSummary(
+        { isActive: previousIsActive },
+        { isActive: business.isActive },
+        ["isActive"]
+      ),
+      note: remark || null,
+    });
 
     return res.status(200).json({
       success: true,

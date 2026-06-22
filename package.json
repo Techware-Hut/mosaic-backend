@@ -4,8 +4,9 @@
   "description": "trusted marketplace",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/**/*.test.js",
+    "test": "node --test --test-skip-pattern=integration tests/**/*.test.js",
     "test:contract": "node --test tests/launch/backend-launch-contract.test.js",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/**/*.integration.test.js",
     "smoke:backend": "node scripts/run-smoke-backend.js",
     "dev": "nodemon index.js",
     "start": "node index.js"
@@ -45,6 +46,8 @@
     "xss-clean": "^0.1.4"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "mongodb-memory-server": "^11.2.0",
+    "nodemon": "^3.1.10",
+    "supertest": "^7.2.2"
   }
 }

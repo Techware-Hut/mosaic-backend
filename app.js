@@ -40,6 +40,7 @@ const foodSubcategoryRoutes = require('./routes/admin/foodSubcategoryRoutes');
 const adminBusinessRoutes = require('./routes/admin/businessRoutes')
 const adminProductRoutes = require('./routes/admin/adminProductRoutes')
 const adminOrderRoutes = require('./routes/admin/adminOrderRoutes')
+const adminAuditRoutes = require('./routes/admin/adminAuditRoutes')
 const vendorOnboardVerifyStage1Routes= require("./routes/vendorOnboarding.routes")
 
 
@@ -86,6 +87,7 @@ const enquiryRoutes = require('./routes/enquiryRoutes');
 const mongoSanitize = require('express-mongo-sanitize');
 const { clean: xssClean } = require('xss-clean/lib/xss');
 const sentryHttpCapture = require('./middlewares/sentryHttpCapture');
+const requestIdMiddleware = require('./middlewares/requestId');
 const { isSentryEnabled } = require('./instrument');
 const { getAllowedOrigins } = require('./utils/corsOrigins');
 
@@ -93,6 +95,7 @@ const app = express();
 
 const allowedOrigins = getAllowedOrigins();
 app.set('trust proxy', 1);
+app.use(requestIdMiddleware);
 app.use(sentryHttpCapture);
 app.use(cors({
   origin: function (origin, callback) {
@@ -185,6 +188,7 @@ app.use('/admin/api/business', adminBusinessRoutes);
 app.use('/api/admin/business', adminBusinessRoutes);
 app.use('/admin/api/products', adminProductRoutes);
 app.use('/admin/api/orders', adminOrderRoutes);
+app.use('/admin/api/audit-events', adminAuditRoutes);
 app.use('/api/business-profile', businessProfileRoutes);
 app.use('/api/admin/category/product', productCategoryRoutes);
 app.use('/api/admin/category/product-subcategory', productSubcategoryRoutes);

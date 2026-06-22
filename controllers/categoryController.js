@@ -7,6 +7,15 @@ const FoodSubcategory = require('../models/FoodSubcategory');
 const CategoryRequest = require('../models/CategoryRequest');
 const Product = require('../models/Product');
 const Service = require('../models/Service');
+const {
+  ADMIN_AUDIT_ACTIONS,
+  ADMIN_AUDIT_TARGET_TYPES,
+} = require('../utils/audit/actionRegistry');
+const {
+  recordAdminAuditSuccess,
+  recordAdminAuditFailure,
+  buildFieldChangeSummary,
+} = require('../services/adminAuditService');
 
 const CATEGORY_MODEL_MAP = {
   product: {
@@ -527,6 +536,17 @@ const approveCategoryRequest = async (req, res) => {
       .populate('approvedCategory')
       .populate('approvedSubcategory');
 
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.CATEGORY_REQUEST_APPROVE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.CATEGORY_REQUEST,
+      targetId: categoryRequest._id,
+      changeSummary: buildFieldChangeSummary(
+        { status: 'pending' },
+        { status: categoryRequest.status },
+        ['status']
+      ),
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Category request approved successfully',
@@ -568,6 +588,7 @@ const rejectCategoryRequest = async (req, res) => {
     }
 
     const { rejectionReason } = req.body;
+    const previousStatus = categoryRequest.status;
 
     categoryRequest.status = 'rejected';
     categoryRequest.rejectedBy = req.user._id;
@@ -584,6 +605,18 @@ const rejectCategoryRequest = async (req, res) => {
       .populate('rejectedBy', 'name email')
       .populate('approvedCategory')
       .populate('approvedSubcategory');
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.CATEGORY_REQUEST_REJECT,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.CATEGORY_REQUEST,
+      targetId: categoryRequest._id,
+      changeSummary: buildFieldChangeSummary(
+        { status: previousStatus },
+        { status: 'rejected' },
+        ['status']
+      ),
+      note: categoryRequest.rejectionReason || null,
+    });
 
     return res.status(200).json({
       success: true,

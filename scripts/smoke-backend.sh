@@ -41,6 +41,36 @@ if [ "$code" = "200" ]; then pass "P0.2 GET /api/health ($code)"; else fail "P0.
 code=$(http_code "$BASE/api/ready")
 if [ "$code" = "200" ]; then pass "P0.3 GET /api/ready ($code)"; else fail "P0.3 GET /api/ready ($code, expected 200)"; fi
 
+release_identity_ok() {
+  local path="$1"
+  local body
+  body=$(curl -s "$BASE$path")
+  node -e "
+    const payload = JSON.parse(process.argv[1]);
+    const release = payload.release;
+    if (!release) process.exit(1);
+    for (const key of ['commit', 'environment', 'deploymentVersion']) {
+      if (!release[key]) process.exit(1);
+    }
+    const serialized = JSON.stringify(release).toLowerCase();
+    for (const bad of ['sk_live_', 'sk_test_', 'whsec_', 'sentry_dsn', 'mongodb', 'password', 'secret']) {
+      if (serialized.includes(bad)) process.exit(1);
+    }
+  " "$body"
+}
+
+if release_identity_ok "/api/health"; then
+  pass "P0.5 GET /api/health release identity"
+else
+  fail "P0.5 GET /api/health release identity missing or unsafe"
+fi
+
+if release_identity_ok "/api/build-info"; then
+  pass "P0.6 GET /api/build-info release identity"
+else
+  fail "P0.6 GET /api/build-info release identity missing or unsafe"
+fi
+
 # P2.1 Unauthenticated auth check
 code=$(http_code "$BASE/api/users/auth/check")
 if [ "$code" = "401" ]; then pass "P2.1 GET /api/users/auth/check unauth ($code)"; else fail "P2.1 GET /api/users/auth/check ($code, expected 401)"; fi

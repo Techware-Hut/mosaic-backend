@@ -86,7 +86,7 @@ Use [`../production-smoke-checklist.md`](../production-smoke-checklist.md) tiers
 
 | Tier | Examples |
 | --- | --- |
-| P0 | `GET /`, `GET /api/health`, `GET /api/ready` |
+| P0 | `GET /`, `GET /api/health`, `GET /api/ready`, `GET /api/build-info`, release identity on health/build-info |
 | P1 | Auth check 401/200, CORS preflight |
 | P4 | Stripe webhook negative tests (unsigned → 400) |
 | P6 | Public search, featured products |
@@ -98,6 +98,8 @@ Wrapper: `npm run smoke:backend` → `scripts/smoke-backend.ps1` / `.sh`
 ## Rollback
 
 See [`../../DEPLOYMENT.md`](../../DEPLOYMENT.md) — EB version rollback via AWS console or redeploy prior version label.
+
+After rollback, realign release identity env vars (`RELEASE_COMMIT_SHA`, `RELEASE_ENVIRONMENT`, `DEPLOYMENT_VERSION_LABEL`, `SENTRY_RELEASE`) to the restored EB version label and verify `/api/health` → `release.deploymentVersion`. Details: [BACKEND_RELEASE_IDENTITY.md](BACKEND_RELEASE_IDENTITY.md).
 
 ---
 

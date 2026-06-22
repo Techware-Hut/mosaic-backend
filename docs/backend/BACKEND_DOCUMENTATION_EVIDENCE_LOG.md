@@ -173,3 +173,117 @@ This PR:              +16 contract tests → 228 total, 0 fail
 | PR link | https://github.com/Techware-Hut/mosaic-backend/pull/95 |
 | Deploy | **Not performed** |
 | Merge | **Not performed** |
+
+---
+
+## Issue #171 — Backend release identity and Sentry tagging (2026-06-21)
+
+**Branch:** `chore/backend-release-identity-sentry`  
+**Base:** `main` @ `80df57008f33c03df8c0a590efa8d573813ff070`
+
+### Commands run
+
+| Command | Exit code | Result |
+| --- | --- | --- |
+| `npm test` | 0 | **265 pass**, 0 fail |
+| `npm run test:contract` | 0 | **18 pass**, 0 fail |
+| `npm run smoke:backend` (local `http://127.0.0.1:3099`) | 0 | **21 pass**, 0 fail |
+
+### Environment variable names (values not logged)
+
+- `RELEASE_COMMIT_SHA`
+- `RELEASE_ENVIRONMENT`
+- `DEPLOYMENT_VERSION_LABEL`
+- `SENTRY_RELEASE` (existing, aligned with deployment label)
+- `SENTRY_ENVIRONMENT` (existing fallback)
+
+See [BACKEND_RELEASE_IDENTITY.md](BACKEND_RELEASE_IDENTITY.md).
+
+### PR metadata
+
+| Field | Value |
+| --- | --- |
+| Branch | `chore/backend-release-identity-sentry` |
+| Commit SHA | `51a03b4` |
+| PR link | https://github.com/Techware-Hut/mosaic-backend/pull/105 |
+| Deploy | **Not performed** |
+| Merge | **Not performed** |
+
+---
+
+## Issue #172 — Isolated integration test suite (2026-06-21)
+
+**Branch:** `test/backend-isolated-integration-suite`  
+**Base:** `main` @ `80df57008f33c03df8c0a590efa8d573813ff070`
+
+### Commands run
+
+| Command | Exit code | Result |
+| --- | --- | --- |
+| `npm test` | 0 | **284 pass**, 0 fail (integration excluded via `--test-skip-pattern`) |
+| `npm run test:contract` | 0 | **18 pass**, 0 fail |
+| `npm run test:integration` | 0 | **26 pass**, 0 fail |
+
+### Deliverables
+
+| Path | Purpose |
+| --- | --- |
+| `tests/integration/setup/harness.js` | MongoMemoryServer bootstrap, env, app import |
+| `tests/integration/helpers/` | HTTP client, factories, Stripe/mailer stubs, OTP capture |
+| `tests/integration/*.integration.test.js` | Auth, roles, vendor onboarding, marketplace, commerce, Connect |
+| `docs/backend/BACKEND_INTEGRATION_TEST_RUNBOOK.md` | Runbook + CI notes |
+| `.github/workflows/ci.yml` | Added contract + integration steps |
+| `routes/userRoutes.js` | Skip auth rate limiters when `NODE_ENV=test` |
+
+### Isolation method
+
+- `mongodb-memory-server` — ephemeral URI injected before `require('app')`
+- Collection wipe between tests; memory server stopped per test file process
+- No production/staging/dev Atlas connections
+
+### External stubs
+
+- Stripe (`providerStubs.js`) — dynamic failure toggle for Connect error path
+- Mailer (`providerStubs.js` + `otpCapture.js`) — OTP fixture capture
+- Dummy AWS/Cloudinary env names only
+
+### Known gaps
+
+- `GET /api/connect/:businessId/status` does not enforce business ownership (cross-vendor test uses `account-link` POST instead)
+- Vendor onboarding admin verify step not HTTP-exercised when checklist pre-seeded (finalize-only path covered)
+- WellcomeMailer/Nodemailer may log credential warnings on submit/finalize; emails are not sent in integration runs
+
+### PR metadata
+
+| Field | Value |
+| --- | --- |
+| Branch | `test/backend-isolated-integration-suite` |
+| Commit SHA | `9108b53` |
+| PR link | https://github.com/Techware-Hut/mosaic-backend/pull/104 |
+| Deploy | **Not performed** |
+| Merge | **Not performed** |
+
+---
+
+## Issue #168 — Refund/return/dispute as-built audit (2026-06-21)
+
+**Branch:** `audit/backend-refund-dispute-as-built`  
+**Commit SHA:** `b1161f1`  
+**PR link:** https://github.com/Techware-Hut/mosaic-backend/pull/106  
+**Scope:** Audit/docs/tests only — no payment logic changes.
+
+---
+
+## Issue #169 — Admin audit trail Phase 1 (2026-06-21)
+
+**Branch:** `feat/backend-admin-audit-trail-phase1`  
+**Commit SHA:** `1921692`  
+**Scope:** Immutable admin audit events + read API; no payment/approval authority changes.
+
+---
+
+## Launch consolidation (2026-06-22)
+
+**Branch:** `release/launch-consolidation-june-2026`  
+**Merges:** #104, #105, #106, #169 into `main` for launch push.
+

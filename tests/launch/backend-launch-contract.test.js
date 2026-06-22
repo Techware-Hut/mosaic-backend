@@ -219,6 +219,8 @@ test('health routes are mounted under /api with /health and /ready handlers', ()
   assert.ok(appSource.includes("app.use('/api', healthRoutes)"));
   assert.ok(healthSource.includes("router.get('/health'"));
   assert.ok(healthSource.includes("router.get('/ready'"));
+  assert.ok(healthSource.includes("router.get('/build-info'"));
+  assert.ok(healthSource.includes('getPublicReleaseInfo'));
 });
 
 test('app.js defines public GET / root handler', () => {
@@ -256,4 +258,23 @@ test('documented launch paths resolve to expected registration status', () => {
   for (const needle of expectedAbsent) {
     assert.ok(!appSource.includes(needle), `${needle} should not be registered`);
   }
+});
+
+test('admin audit read API is mounted and guarded', () => {
+  const appSource = readSource(appPath);
+  const auditRoutesPath = path.join(root, 'routes/admin/adminAuditRoutes.js');
+  const auditSource = readSource(auditRoutesPath);
+
+  assert.ok(appSource.includes("app.use('/admin/api/audit-events', adminAuditRoutes)"));
+  assert.ok(auditSource.includes('router.use(authenticate, isAdmin)'));
+  assert.ok(!auditSource.match(/router\.(post|put|patch|delete)/));
+});
+
+test('request ID middleware is applied before route handlers', () => {
+  const appSource = readSource(appPath);
+  const requestIdx = appSource.indexOf('app.use(requestIdMiddleware)');
+  const healthIdx = appSource.indexOf("app.use('/api', healthRoutes)");
+
+  assert.ok(requestIdx > -1, 'requestIdMiddleware should be registered');
+  assert.ok(requestIdx < healthIdx, 'requestIdMiddleware should run before API routes');
 });
