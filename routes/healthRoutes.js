@@ -1,5 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const { getPublicReleaseInfo } = require('../utils/releaseIdentity');
 
 const router = express.Router();
 const SERVICE_NAME = 'mosaic-backend';
@@ -10,6 +11,7 @@ router.get('/health', (_req, res) => {
     service: SERVICE_NAME,
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    release: getPublicReleaseInfo(),
   });
 });
 
@@ -20,6 +22,15 @@ router.get('/ready', (_req, res) => {
     status: connected ? 'ready' : 'not_ready',
     database: connected ? 'connected' : 'disconnected',
     timestamp: new Date().toISOString(),
+    release: getPublicReleaseInfo(),
+  });
+});
+
+router.get('/build-info', (_req, res) => {
+  res.status(200).json({
+    service: SERVICE_NAME,
+    timestamp: new Date().toISOString(),
+    release: getPublicReleaseInfo(),
   });
 });
 

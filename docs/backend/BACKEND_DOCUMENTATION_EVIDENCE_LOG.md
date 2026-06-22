@@ -173,3 +173,38 @@ This PR:              +16 contract tests → 228 total, 0 fail
 | PR link | https://github.com/Techware-Hut/mosaic-backend/pull/95 |
 | Deploy | **Not performed** |
 | Merge | **Not performed** |
+
+---
+
+## Issue #171 — Backend release identity and Sentry tagging (2026-06-21)
+
+**Branch:** `chore/backend-release-identity-sentry`  
+**Base:** `main` @ `80df57008f33c03df8c0a590efa8d573813ff070`
+
+### Commands run
+
+| Command | Exit code | Result |
+| --- | --- | --- |
+| `npm test` | 0 | **265 pass**, 0 fail |
+| `npm run test:contract` | 0 | **18 pass**, 0 fail |
+| `npm run smoke:backend` (local `http://127.0.0.1:3099`) | 0 | **21 pass**, 0 fail |
+
+### Environment variable names (values not logged)
+
+- `RELEASE_COMMIT_SHA`
+- `RELEASE_ENVIRONMENT`
+- `DEPLOYMENT_VERSION_LABEL`
+- `SENTRY_RELEASE` (existing, aligned with deployment label)
+- `SENTRY_ENVIRONMENT` (existing fallback)
+
+See [BACKEND_RELEASE_IDENTITY.md](BACKEND_RELEASE_IDENTITY.md).
+
+### PR metadata
+
+| Field | Value |
+| --- | --- |
+| Branch | `chore/backend-release-identity-sentry` |
+| Commit SHA | *(pending push)* |
+| PR link | *(pending)* |
+| Deploy | **Not performed** |
+| Merge | **Not performed** |

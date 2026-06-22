@@ -1,5 +1,6 @@
 const Sentry = require('../instrument');
 const { isSentryEnabled } = require('../instrument');
+const { getSentryTags } = require('../utils/releaseIdentity');
 
 /**
  * Reports HTTP 5xx responses to Sentry when controllers return errors
@@ -15,6 +16,7 @@ function sentryHttpCapture(req, res, next) {
       Sentry.captureMessage(`HTTP ${res.statusCode} ${req.method} ${req.originalUrl}`, {
         level: 'error',
         tags: {
+          ...getSentryTags(),
           method: req.method,
           path: req.originalUrl,
           status_code: String(res.statusCode),

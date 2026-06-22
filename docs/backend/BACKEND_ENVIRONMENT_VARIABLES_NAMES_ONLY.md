@@ -159,6 +159,18 @@
 
 ---
 
+## Release identity (recommended for EB production)
+
+| Variable | Class |
+| --- | --- |
+| `RELEASE_COMMIT_SHA` | recommended |
+| `RELEASE_ENVIRONMENT` | recommended |
+| `DEPLOYMENT_VERSION_LABEL` | recommended |
+
+See [BACKEND_RELEASE_IDENTITY.md](BACKEND_RELEASE_IDENTITY.md).
+
+---
+
 ## CI / GitHub Actions (not app runtime)
 
 Set in workflows only — see [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml), [`.github/workflows/deploy-eb-production.yml`](../../.github/workflows/deploy-eb-production.yml):
