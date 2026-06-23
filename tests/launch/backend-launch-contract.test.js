@@ -150,6 +150,7 @@ test('admin order list requires authenticate and isAdmin', () => {
   const source = readSource(adminOrderRoutesPath);
 
   assert.match(source, /router\.get\('\/', authenticate, isAdmin, getAllOrdersAdmin\)/);
+  assert.match(source, /router\.get\('\/summary', authenticate, isAdmin, getAdminSalesSummary\)/);
 });
 
 test('GET /api/orders/admin requires authenticate and isAdmin', () => {
