@@ -8,6 +8,9 @@ const ProductSubcategory = require('../models/ProductSubcategory');
 const Product = require('../models/Product');
 const Business = require('../models/Business');
 const { toPublicListingCard } = require('../lib/listing/publicListingDto');
+const {
+  publicMarketplaceBusinessFilter,
+} = require('../lib/marketplace/businessEligibility');
 
 // tiny helper: clip a number into a safe range (with default)
 const clip = (n, lo, hi, d) => {
@@ -17,9 +20,9 @@ const clip = (n, lo, hi, d) => {
 };
 
 async function getVisibleBusinessIds() {
-  const businesses = await Business.find({
-    isActive: true,
-  })
+  const businesses = await Business.find(
+    publicMarketplaceBusinessFilter()
+  )
     .select('_id')
     .lean();
 
@@ -121,6 +124,7 @@ async function listProductsRanked(req, res) {
         $match: {
           'business.listingType': listingType,
           'business.isActive': true,
+          'business.isApproved': true,
         }
       });
     }
@@ -130,6 +134,7 @@ async function listProductsRanked(req, res) {
       pipeline.push({
         $match: {
           'business.isActive': true,
+          'business.isApproved': true,
           $or: [
             { 'business.address.city': new RegExp(location, 'i') },
             { 'business.address.state': new RegExp(location, 'i') }
@@ -151,6 +156,7 @@ async function listProductsRanked(req, res) {
       pipeline.push({
         $match: {
           'business.isActive': true,
+          'business.isApproved': true,
           'minorityTypeData.name': new RegExp(minority.replace('-', ' '), 'i')
         }
       });

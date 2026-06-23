@@ -27,6 +27,7 @@ function loadRankedController(options = {}) {
   const {
     visibleBusinessIds = ['507f1f77bcf86cd799439014'],
     capturedFindQuery = { value: null },
+    capturedBusinessFindQuery = { value: null },
   } = options;
 
   const chain = {
@@ -57,11 +58,14 @@ function loadRankedController(options = {}) {
   };
 
   const Business = {
-    find: () => ({
+    find: (query) => {
+      capturedBusinessFindQuery.value = query;
+      return {
       select: () => ({
         lean: async () => visibleBusinessIds.map((id) => ({ _id: id })),
       }),
-    }),
+    };
+    },
   };
 
   const originalLoad = Module._load;
@@ -75,11 +79,11 @@ function loadRankedController(options = {}) {
   delete require.cache[controllerPath];
   const loaded = require(controllerPath);
   Module._load = originalLoad;
-  return { controller: loaded, capturedFindQuery };
+  return { controller: loaded, capturedFindQuery, capturedBusinessFindQuery };
 }
 
-test('listProductsRanked requires published products on simple path', async () => {
-  const { controller, capturedFindQuery } = loadRankedController();
+test('listProductsRanked requires published products from approved active businesses on simple path', async () => {
+  const { controller, capturedFindQuery, capturedBusinessFindQuery } = loadRankedController();
   const res = mockResponse();
 
   await controller.listProductsRanked({ query: { page: 1, pageSize: 24 } }, res);
@@ -87,5 +91,7 @@ test('listProductsRanked requires published products on simple path', async () =
   assert.ok(capturedFindQuery.value);
   assert.equal(capturedFindQuery.value.isDeleted, false);
   assert.equal(capturedFindQuery.value.isPublished, true);
+  assert.equal(capturedBusinessFindQuery.value.isApproved, true);
+  assert.equal(capturedBusinessFindQuery.value.isActive, true);
   assert.ok(Array.isArray(capturedFindQuery.value.businessId.$in));
 });

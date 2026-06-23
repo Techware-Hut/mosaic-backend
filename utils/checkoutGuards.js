@@ -1,28 +1,13 @@
-/**
- * Business eligibility checks for customer checkout (Connect destination charge).
- */
+const {
+  getPublicMarketplaceBusinessBlock,
+} = require('../lib/marketplace/businessEligibility');
 
 function getBusinessCheckoutBlock(business) {
-  if (!business) {
-    return {
-      status: 404,
-      message: 'Vendor business not found.',
-    };
-  }
-
-  if (business.isApproved === false) {
-    return {
-      status: 403,
-      message: 'This vendor is not approved for checkout.',
-    };
-  }
-
-  if (business.isActive === false) {
-    return {
-      status: 403,
-      message: 'This vendor is temporarily unavailable for checkout.',
-    };
-  }
+  const marketplaceBlock = getPublicMarketplaceBusinessBlock(business, {
+    ineligibleMessage:
+      'This vendor is not approved and active for checkout.',
+  });
+  if (marketplaceBlock) return marketplaceBlock;
 
   if (!business.stripeConnectAccountId) {
     return {

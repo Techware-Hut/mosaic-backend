@@ -1,11 +1,16 @@
 const Product = require('../models/Product');
 const Business = require('../models/Business');
 const { toPublicListingCard } = require('../lib/listing/publicListingDto');
+const {
+  publicMarketplaceBusinessFilter,
+} = require('../lib/marketplace/businessEligibility');
 
 const FEATURED_MAX_LIMIT = 50;
 
 async function getVisibleBusinessIds() {
-  const businesses = await Business.find({ isActive: true }).select('_id').lean();
+  const businesses = await Business.find(
+    publicMarketplaceBusinessFilter()
+  ).select('_id').lean();
   return businesses.map((business) => business._id);
 }
 

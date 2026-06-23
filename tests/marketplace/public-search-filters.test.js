@@ -45,7 +45,7 @@ test('resolveBusinessIdsForMinorityType returns null for empty input', async () 
   assert.equal(result, null);
 });
 
-test('resolveBusinessIdsByLocation applies city and state in a single query', async () => {
+test('resolveBusinessIdsByLocation applies city and state with approved active business scope', async () => {
   const id = '507f1f77bcf86cd799439012';
   let capturedFilter = null;
   const filters = loadFiltersWithMocks({
@@ -63,6 +63,7 @@ test('resolveBusinessIdsByLocation applies city and state in a single query', as
   assert.equal(result.length, 1);
   assert.equal(String(result[0]), id);
   assert.equal(capturedFilter.isActive, true);
+  assert.equal(capturedFilter.isApproved, true);
   assert.equal(capturedFilter.$and.length, 2);
 });
 
@@ -392,7 +393,7 @@ test('searchPublicListings preserves backward compatible response shape', async 
   assert.ok(Array.isArray(res.body.data.foods));
 });
 
-test('searchPublicListings defaults to active business scope when no filters', async () => {
+test('searchPublicListings defaults to approved active business scope when no filters', async () => {
   const activeBusinessId = '507f1f77bcf86cd799439011';
   let productFindFilter = null;
 
@@ -411,7 +412,7 @@ test('searchPublicListings defaults to active business scope when no filters', a
     if (String(request).includes('models/Business')) {
       return wrapModelFind({
         find: async (filter) => {
-          if (filter?.isActive === true) {
+          if (filter?.isActive === true && filter?.isApproved === true) {
             return [{ _id: activeBusinessId }];
           }
           return [];

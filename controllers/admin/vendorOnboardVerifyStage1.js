@@ -24,7 +24,7 @@ const PENDING_REVIEW_STATUSES = Object.freeze(['submitted']);
 
 exports.PENDING_REVIEW_STATUSES = PENDING_REVIEW_STATUSES;
 
-const syncBusinessPoints = async (application, badge) => {
+const syncBusinessPoints = async (application, badge, options = {}) => {
   const ownerId = application.userId?._id || application.userId;
   const update = {
     points: application.totalVerificationPoints,
@@ -32,6 +32,10 @@ const syncBusinessPoints = async (application, badge) => {
 
   if (badge !== undefined) {
     update.badge = badge;
+  }
+
+  if (options.isApproved !== undefined) {
+    update.isApproved = options.isApproved;
   }
 
   await Business.findOneAndUpdate(
@@ -590,7 +594,9 @@ exports.finalizeVerification = async (req, res) => {
     await application.save();
 
     // ✅ Sync business
-    await syncBusinessPoints(application, badge);
+    await syncBusinessPoints(application, badge, {
+      isApproved: application.status === 'verified',
+    });
 
     const vendorEmail = application.userId?.email;
     const vendorName = application.userId?.name;

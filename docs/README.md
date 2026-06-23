@@ -7,6 +7,22 @@ Application map: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
+## Active Documentation
+
+Use this section before trusting older sprint, audit, or proof-pack docs.
+
+| Tier | Docs | Use for |
+| --- | --- | --- |
+| **Source of truth** | [PLATFORM_OPERATING_MODEL.md](PLATFORM_OPERATING_MODEL.md), [MARKETPLACE_VENDOR_ELIGIBILITY.md](MARKETPLACE_VENDOR_ELIGIBILITY.md) | How the platform is supposed to work |
+| **Living** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md), [BACKEND_ROADMAP_ISSUES.md](BACKEND_ROADMAP_ISSUES.md) | Current ship state and next work |
+| **Reference** | [ARCHITECTURE.md](ARCHITECTURE.md), [API_SURFACE.md](API_SURFACE.md), [AUTH_FLOW.md](AUTH_FLOW.md), [PAYMENT_FLOW.md](PAYMENT_FLOW.md), [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) | Day-to-day development |
+| **Deep indexes** | [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md), [backend/BACKEND_ROUTE_REGISTRATION.md](backend/BACKEND_ROUTE_REGISTRATION.md), [backend/API_CONTRACT_AS_BUILT.md](backend/API_CONTRACT_AS_BUILT.md) | Route/API-level detail |
+| **Archive / evidence** | Proof packs, smoke docs, dated audits | Audit trail only; check source-of-truth and living docs before relying on them |
+
+Practical rule: if a behavior is not in the active source-of-truth docs, verify it against code and runtime before treating an older evidence doc as current.
+
+---
+
 ## Read first (by role)
 
 | If you are… | Read in this order |

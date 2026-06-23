@@ -10,6 +10,9 @@ const {
   recordAdminAuditFailure,
   buildFieldChangeSummary,
 } = require("../../services/adminAuditService");
+const {
+  isPublicMarketplaceBusiness,
+} = require("../../lib/marketplace/businessEligibility");
 
 const parseBoolean = (value) => {
   if (value === true || value === "true" || value === 1 || value === "1") return true;
@@ -94,7 +97,7 @@ exports.toggleBusinessStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: "Business not found." });
     }
 
-    const nextIsApproved = !business.isApproved;
+    const nextIsApproved = true;
     const previousIsApproved = business.isApproved;
     const previousIsActive = business.isActive;
 
@@ -127,7 +130,7 @@ exports.toggleBusinessStatus = async (req, res) => {
 
     await business.save();
 
-    const statusText = nextIsApproved ? "approved and activated" : "disapproved and deactivated";
+    const statusText = "approved and activated";
 
     // ---- Email to both owner and business email (deduped) ----
     try {
@@ -179,6 +182,7 @@ exports.toggleBusinessStatus = async (req, res) => {
       success: true,
       message: `Business has been ${statusText} successfully.`,
       data: business,
+      publicMarketplaceEligible: isPublicMarketplaceBusiness(business),
     });
   } catch (error) {
     console.error(error);
@@ -270,10 +274,16 @@ exports.patchBusinessActivationStatus = async (req, res) => {
       note: remark || null,
     });
 
+    const publicMarketplaceEligible = isPublicMarketplaceBusiness(business);
+    const activationMessage = nextIsActive && !publicMarketplaceEligible
+      ? "Business has been activated, but it will remain hidden until it is approved."
+      : `Business has been ${nextIsActive ? "activated" : "deactivated"} successfully.`;
+
     return res.status(200).json({
       success: true,
-      message: `Business has been ${nextIsActive ? "activated" : "deactivated"} successfully.`,
+      message: activationMessage,
       data: business,
+      publicMarketplaceEligible,
     });
   } catch (error) {
     console.error(error);

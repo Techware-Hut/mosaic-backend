@@ -26,6 +26,25 @@ test('getBusinessCheckoutBlock blocks unapproved business', () => {
     stripeConnectAccountId: 'acct_test',
   });
   assert.equal(block.status, 403);
+  assert.match(block.message, /approved and active/i);
+});
+
+test('getBusinessCheckoutBlock blocks inactive business', () => {
+  const block = getBusinessCheckoutBlock({
+    isApproved: true,
+    isActive: false,
+    stripeConnectAccountId: 'acct_test',
+  });
+  assert.equal(block.status, 403);
+  assert.match(block.message, /approved and active/i);
+});
+
+test('getBusinessCheckoutBlock requires explicit approval and activation', () => {
+  const block = getBusinessCheckoutBlock({
+    stripeConnectAccountId: 'acct_test',
+  });
+  assert.equal(block.status, 403);
+  assert.match(block.message, /approved and active/i);
 });
 
 test('sanitizePaymentIntentForClient strips sensitive Stripe fields', () => {

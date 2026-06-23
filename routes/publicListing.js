@@ -30,7 +30,7 @@ router.get('/food/list', getAllFood);
 
 
 
-// GET /api/products/ranked?categoryId=&subcategoryId=&page=1&pageSize=24&maxPerVendor=3
+// GET /api/ranked?categoryId=&subcategoryId=&page=1&pageSize=24&maxPerVendor=3
 router.get('/ranked', listProductsRanked);
 router.get('/:id/similar', attachSimilarQuery , listProductsRanked)
 
