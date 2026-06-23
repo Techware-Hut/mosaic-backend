@@ -1,6 +1,18 @@
 // controllers/businessController.js
 const Business = require("../../models/Business");
 const { sendBusinessStatusEmail } = require("../../utils/approvalMail");
+const {
+  ADMIN_AUDIT_ACTIONS,
+  ADMIN_AUDIT_TARGET_TYPES,
+} = require("../../utils/audit/actionRegistry");
+const {
+  recordAdminAuditSuccess,
+  recordAdminAuditFailure,
+  buildFieldChangeSummary,
+} = require("../../services/adminAuditService");
+const {
+  isPublicMarketplaceBusiness,
+} = require("../../lib/marketplace/businessEligibility");
 
 const parseBoolean = (value) => {
   if (value === true || value === "true" || value === 1 || value === "1") return true;
@@ -85,12 +97,25 @@ exports.toggleBusinessStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: "Business not found." });
     }
 
-    const nextIsApproved = !business.isApproved;
+    const nextIsApproved = true;
+    const previousIsApproved = business.isApproved;
+    const previousIsActive = business.isActive;
 
     // ✅ Only allow toggling to APPROVED if onboardingStatus === 'completed'
     if (nextIsApproved) {
       const onboarding = String(business.onboardingStatus || "").toLowerCase();
       if (onboarding !== "completed") {
+        await recordAdminAuditFailure(req, {
+          actionCode: ADMIN_AUDIT_ACTIONS.BUSINESS_APPROVE,
+          targetType: ADMIN_AUDIT_TARGET_TYPES.BUSINESS,
+          targetId: business._id,
+          note: "Cannot approve this business until onboarding is completed.",
+          changeSummary: buildFieldChangeSummary(
+            {},
+            { onboardingStatus: business.onboardingStatus || null },
+            ["onboardingStatus"]
+          ),
+        });
         return res.status(400).json({
           success: false,
           message: "Cannot approve this business until onboarding is completed.",
@@ -105,7 +130,7 @@ exports.toggleBusinessStatus = async (req, res) => {
 
     await business.save();
 
-    const statusText = nextIsApproved ? "approved and activated" : "disapproved and deactivated";
+    const statusText = "approved and activated";
 
     // ---- Email to both owner and business email (deduped) ----
     try {
@@ -139,10 +164,25 @@ exports.toggleBusinessStatus = async (req, res) => {
     }
     // ---------------------------------------------------------
 
+    await recordAdminAuditSuccess(req, {
+      actionCode: nextIsApproved
+        ? ADMIN_AUDIT_ACTIONS.BUSINESS_APPROVE
+        : ADMIN_AUDIT_ACTIONS.BUSINESS_DISAPPROVE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.BUSINESS,
+      targetId: business._id,
+      changeSummary: buildFieldChangeSummary(
+        { isApproved: previousIsApproved, isActive: previousIsActive },
+        { isApproved: business.isApproved, isActive: business.isActive },
+        ["isApproved", "isActive"]
+      ),
+      note: !nextIsApproved ? req.body?.reason || req.body?.adminNote || null : null,
+    });
+
     return res.status(200).json({
       success: true,
       message: `Business has been ${statusText} successfully.`,
       data: business,
+      publicMarketplaceEligible: isPublicMarketplaceBusiness(business),
     });
   } catch (error) {
     console.error(error);
@@ -220,10 +260,30 @@ exports.patchBusinessActivationStatus = async (req, res) => {
       }
     }
 
+    await recordAdminAuditSuccess(req, {
+      actionCode: nextIsActive
+        ? ADMIN_AUDIT_ACTIONS.BUSINESS_ACTIVATE
+        : ADMIN_AUDIT_ACTIONS.BUSINESS_DEACTIVATE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.BUSINESS,
+      targetId: business._id,
+      changeSummary: buildFieldChangeSummary(
+        { isActive: previousIsActive },
+        { isActive: business.isActive },
+        ["isActive"]
+      ),
+      note: remark || null,
+    });
+
+    const publicMarketplaceEligible = isPublicMarketplaceBusiness(business);
+    const activationMessage = nextIsActive && !publicMarketplaceEligible
+      ? "Business has been activated, but it will remain hidden until it is approved."
+      : `Business has been ${nextIsActive ? "activated" : "deactivated"} successfully.`;
+
     return res.status(200).json({
       success: true,
-      message: `Business has been ${nextIsActive ? "activated" : "deactivated"} successfully.`,
+      message: activationMessage,
       data: business,
+      publicMarketplaceEligible,
     });
   } catch (error) {
     console.error(error);

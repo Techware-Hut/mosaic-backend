@@ -7,17 +7,50 @@ Application map: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
+## Active Documentation
+
+Use this section before trusting older sprint, audit, or proof-pack docs.
+
+| Tier | Docs | Use for |
+| --- | --- | --- |
+| **Source of truth** | [PLATFORM_OPERATING_MODEL.md](PLATFORM_OPERATING_MODEL.md), [MARKETPLACE_VENDOR_ELIGIBILITY.md](MARKETPLACE_VENDOR_ELIGIBILITY.md) | How the platform is supposed to work |
+| **Living** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md), [BACKEND_ROADMAP_ISSUES.md](BACKEND_ROADMAP_ISSUES.md) | Current ship state and next work |
+| **Reference** | [ARCHITECTURE.md](ARCHITECTURE.md), [API_SURFACE.md](API_SURFACE.md), [AUTH_FLOW.md](AUTH_FLOW.md), [PAYMENT_FLOW.md](PAYMENT_FLOW.md), [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) | Day-to-day development |
+| **Deep indexes** | [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md), [backend/BACKEND_ROUTE_REGISTRATION.md](backend/BACKEND_ROUTE_REGISTRATION.md), [backend/API_CONTRACT_AS_BUILT.md](backend/API_CONTRACT_AS_BUILT.md) | Route/API-level detail |
+| **Archive / evidence** | Proof packs, smoke docs, dated audits | Audit trail only; check source-of-truth and living docs before relying on them |
+
+Practical rule: if a behavior is not in the active source-of-truth docs, verify it against code and runtime before treating an older evidence doc as current.
+
+---
+
 ## Read first (by role)
 
 | If you are… | Read in this order |
 | --- | --- |
 | **LLM / AI agent** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [LLM_CONTEXT.md](LLM_CONTEXT.md) → [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md) → [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) → [BACKEND_STABILITY_AGENT_PROMPT.md](BACKEND_STABILITY_AGENT_PROMPT.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **New backend developer** | [ARCHITECTURE.md](ARCHITECTURE.md) → [SETUP.md](../SETUP.md) → [AUTH_FLOW.md](AUTH_FLOW.md) → [API_SURFACE.md](API_SURFACE.md) |
-| **QA / smoke tester** | [BACKEND_FULL_SMOKE_PROOF_PACK.md](BACKEND_FULL_SMOKE_PROOF_PACK.md) → [production-smoke-checklist.md](production-smoke-checklist.md) → [TEST_MATRIX.md](TEST_MATRIX.md) → [API_SURFACE.md](API_SURFACE.md) |
+| **QA / smoke tester** | [BACKEND_VENDOR_AUTH_SMOKE_PROOF.md](BACKEND_VENDOR_AUTH_SMOKE_PROOF.md) → [BACKEND_FULL_SMOKE_PROOF_PACK.md](BACKEND_FULL_SMOKE_PROOF_PACK.md) → [production-smoke-checklist.md](production-smoke-checklist.md) → [TEST_MATRIX.md](TEST_MATRIX.md) → [API_SURFACE.md](API_SURFACE.md) |
 | **Release / deploy owner** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) → [DEPLOYMENT.md](../DEPLOYMENT.md) → [production-proof-pack-template.md](production-proof-pack-template.md) |
-| **Product / launch reviewer** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [DECISION_REGISTER.md](DECISION_REGISTER.md) → [launch-readiness-report.md](launch-readiness-report.md) |
+| **Product / launch reviewer** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) → [backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md](backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md) → [DECISION_REGISTER.md](DECISION_REGISTER.md) → [launch-readiness-report.md](launch-readiness-report.md) |
 
 ---
+
+## Launch readiness — as-built evidence pack
+
+**Start here for launch contract reconciliation:** [backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md](backend/BACKEND_DOCUMENTATION_EVIDENCE_LOG.md)
+
+| Doc | What it covers |
+| --- | --- |
+| [backend/BACKEND_ARCHITECTURE_AS_BUILT.md](backend/BACKEND_ARCHITECTURE_AS_BUILT.md) | Stack, bootstrap, middleware order, integrations |
+| [backend/BACKEND_ROUTE_REGISTRATION.md](backend/BACKEND_ROUTE_REGISTRATION.md) | All registered routes with auth/role/status |
+| [backend/API_CONTRACT_AS_BUILT.md](backend/API_CONTRACT_AS_BUILT.md) | Request/response shapes for frontend reconciliation |
+| [backend/DATA_MODEL_DICTIONARY.md](backend/DATA_MODEL_DICTIONARY.md) | Mongoose models and key fields |
+| [backend/AUTH_CORS_COOKIE_AUDIT.md](backend/AUTH_CORS_COOKIE_AUDIT.md) | Auth, CORS, cookie audit |
+| [backend/STRIPE_PAYMENT_CONNECT_AUDIT.md](backend/STRIPE_PAYMENT_CONNECT_AUDIT.md) | Stripe webhooks, checkout, Connect |
+| [backend/BACKEND_ENVIRONMENT_VARIABLES_NAMES_ONLY.md](backend/BACKEND_ENVIRONMENT_VARIABLES_NAMES_ONLY.md) | Env var names only |
+| [backend/BACKEND_DEPLOYMENT_RUNBOOK_DRAFT.md](backend/BACKEND_DEPLOYMENT_RUNBOOK_DRAFT.md) | Deploy/smoke draft runbook |
+| [backend/BACKEND_LAUNCH_CONTRACT_VERIFICATION.md](backend/BACKEND_LAUNCH_CONTRACT_VERIFICATION.md) | P0/P1 contract tests and route verification evidence |
+| [backend/BACKEND_P0_P1_RISK_REGISTER.md](backend/BACKEND_P0_P1_RISK_REGISTER.md) | Launch risk register with approval gates |
 
 ## MVP backend sprint (#26–#35)
 

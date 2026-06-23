@@ -105,4 +105,17 @@ No centralized Zod/Joi schema layer — incremental express-validator on sensiti
 
 ## Issue #57 status
 
-**Partial progress** — inventory + Express 5 sanitization + 1 MB JSON limit documented and applied. Global/public throttling and full validation matrix remain open.
+**Batch 5 update (2026-06-22):** Core inventory complete; Express 5 sanitization + 1 MB JSON limit applied and tested.
+
+| Item | Status |
+| --- | --- |
+| Rate limiter inventory (auth, OAuth, payment) | **Done** |
+| Stripe webhook raw body ordering | **Done** — [`tests/security/payload-safety.test.js`](../tests/security/payload-safety.test.js) |
+| JSON body 1 MB cap | **Done** |
+| Mongo sanitize + XSS (body/params only) | **Done** |
+| Public GET throttling | **Deferred** — CDN/WAF (ops) |
+| Global authenticated rate limit | **Deferred** |
+| Helmet CSP/HSTS | **Deferred** — production EB review |
+| Oversized payload integration test | **Deferred** — source contract tests sufficient for launch |
+
+See also [`docs/ADMIN_AUTHORIZATION_MATRIX.md`](ADMIN_AUTHORIZATION_MATRIX.md) for admin mutation guard coverage (#66).

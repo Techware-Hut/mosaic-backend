@@ -97,7 +97,7 @@ Maps backend features to automated tests (`npm test`), manual smoke checks, and 
 | Upload handler MIME gate | same | `getStage1UploadUrl` returns 400 for unsafe MIME | File content validation (magic bytes) | Yes — P2.6 |
 | Upload auth | same | Upload route blocked without auth; blocks non-vendor | `requireVerifiedVendor` OTP gate live | Yes — P2.6 |
 | documentType allowlist | — | *(tested in controller, not every type)* | All 7 `documentType` values end-to-end | Yes — P2.6 |
-| S3 upload completion | — | *(no automated test)* | Client PUT to presigned URL succeeds | Yes — human |
+| S3 upload completion | — | *(no automated test)* | Client PUT to presigned URL succeeds | Yes — human; live CORS proof in [`S3_UPLOAD_CORS.md`](S3_UPLOAD_CORS.md) (**PASS** 2026-06-19) |
 
 ---
 

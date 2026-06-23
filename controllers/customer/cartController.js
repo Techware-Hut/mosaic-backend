@@ -13,6 +13,10 @@ const {
     buildTaxAwareAmounts,
     extractTaxFromInclusiveAmount,
 } = require('../../utils/vendorTax');
+const {
+    getPublicMarketplaceBusinessBlock,
+    isPublicMarketplaceBusiness,
+} = require('../../lib/marketplace/businessEligibility');
 
 const toNum = (value) => {
     if (value && typeof value === 'object' && value.$numberDecimal != null) {
@@ -263,6 +267,18 @@ const addItemToCart = async (req, res) => {
 
         // Determine business via product (safer)
         const businessId = product.businessId;
+        const business = await Business.findById(businessId)
+            .select('isApproved isActive businessName')
+            .lean();
+        const marketplaceBlock = getPublicMarketplaceBusinessBlock(business, {
+            ineligibleMessage:
+                'This vendor is not approved and active for the public marketplace.',
+        });
+        if (marketplaceBlock) {
+            return res.status(marketplaceBlock.status).json({
+                message: marketplaceBlock.message,
+            });
+        }
 
         // Find or create user's cart
         let cart = await Cart.findOne({ userId: req.user._id });
@@ -366,13 +382,30 @@ const getCart = async (req, res) => {
             });
         }
 
-        const businessDoc = cart.businessId
-            ? await Business.findById(cart.businessId)
-                .select('businessName slug shippingSettings taxSettings owner')
+        const cartBusinessIds = [...new Set(
+            [
+                cart.businessId,
+                ...(Array.isArray(cart.items) ? cart.items.map((item) => item.businessId) : []),
+            ]
+                .filter(Boolean)
+                .map(String)
+        )];
+
+        const businesses = cartBusinessIds.length
+            ? await Business.find({ _id: { $in: cartBusinessIds } })
+                .select('businessName slug shippingSettings taxSettings owner isApproved isActive')
                 .lean()
+            : [];
+
+        const businessById = new Map(
+            businesses.map((business) => [String(business._id), business])
+        );
+        const businessDoc = cart.businessId
+            ? businessById.get(String(cart.businessId)) || null
             : null;
 
-        const invalidItems = []; // To track invalid items removed from the cart
+        const invalidItems = [];
+        const removedItems = [];
 
         // Map the cart items to include only the necessary data for the frontend
         const cartItems = cart.items.map(cartItem => {
@@ -383,13 +416,37 @@ const getCart = async (req, res) => {
             if (!product || !variant) {
                 // If the product or variant is invalid, remove the cart item
                 invalidItems.push(cartItem._id);  // Track the invalid item
+                removedItems.push({
+                    cartItemId: cartItem._id,
+                    productId: cartItem.productId?._id || cartItem.productId || null,
+                    reason: 'unavailable_listing',
+                });
                 return null; // Return null to exclude this item from the response
+            }
+
+            const itemBusiness = businessById.get(String(cartItem.businessId || cart.businessId));
+            if (!isPublicMarketplaceBusiness(itemBusiness)) {
+                invalidItems.push(cartItem._id);
+                removedItems.push({
+                    cartItemId: cartItem._id,
+                    productId: product._id,
+                    businessId: cartItem.businessId,
+                    reason: 'ineligible_vendor',
+                    message: 'Vendor is not approved and active for the public marketplace.',
+                });
+                return null;
             }
 
             const selectedVariant = resolveVariantSelection(variant, cartItem.variant);
             if (!selectedVariant) {
                 // If size not found in the variant, remove the cart item
                 invalidItems.push(cartItem._id);
+                removedItems.push({
+                    cartItemId: cartItem._id,
+                    productId: product._id,
+                    businessId: cartItem.businessId,
+                    reason: 'unavailable_variant_selection',
+                });
                 return null; // Exclude this item from the response
             }
 
@@ -463,12 +520,21 @@ const getCart = async (req, res) => {
             };
         });
 
+        const items = cartItems.filter(item => item !== null);
+        const totalItems = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+
         // Remove invalid items from the cart
         if (invalidItems.length > 0) {
             await CartItem.deleteMany({ _id: { $in: invalidItems } });  // Remove invalid items
+            await Cart.updateOne(
+                { _id: cart._id },
+                {
+                    $pull: { items: { $in: invalidItems } },
+                    $set: { totalItems },
+                }
+            );
         }
 
-        const items = cartItems.filter(item => item !== null);
         const pricing = await buildCartPricing({
             cartDoc: cart,
             items,
@@ -476,11 +542,21 @@ const getCart = async (req, res) => {
             businessDoc,
         });
 
+        const removedForIneligibleVendor = removedItems.some(
+            (item) => item.reason === 'ineligible_vendor'
+        );
+
         return res.status(200).json({
-            message: invalidItems.length > 0 ? 'Some items were removed from the cart as they were unpublished or deleted.' : 'Cart retrieved successfully',
+            message: invalidItems.length > 0
+                ? (removedForIneligibleVendor
+                    ? 'Some items were removed from the cart because their vendor is no longer approved and active.'
+                    : 'Some items were removed from the cart as they were unpublished or deleted.')
+                : 'Cart retrieved successfully',
             cart: {
                 ...cart.toObject(),
                 items,  // Filter out the null values (removed items)
+                totalItems,
+                removedItems,
                 pricing,
             },
         });

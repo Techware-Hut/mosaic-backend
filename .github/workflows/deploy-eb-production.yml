@@ -120,7 +120,7 @@ jobs:
 
       - name: Post-deploy readiness probe
         run: |
-          for path in /api/health /api/ready; do
+          for path in /api/health /api/ready /api/build-info; do
             status=$(curl -s -o /dev/null -w "%{http_code}" "${PRODUCTION_API_URL}${path}")
             echo "${path}: HTTP $status"
             if [ "$status" != "200" ]; then
@@ -128,6 +128,14 @@ jobs:
               exit 1
             fi
           done
+          curl -s "${PRODUCTION_API_URL}/api/health" | node -e "
+            const payload = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            if (!payload.release?.commit || !payload.release?.environment || !payload.release?.deploymentVersion) {
+              console.error('Missing release identity on /api/health');
+              process.exit(1);
+            }
+            console.log('Release identity present on /api/health');
+          "
 
       - name: Post-deploy CORS probe
         env:

@@ -26,7 +26,7 @@ exports.getAllPrivateServicesForBusiness = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Business ID is required' });
     }
 
-    const filters = { businessId: businessId, ownerId: req.user.id }; // Filter by businessId and ownerId
+    const filters = { businessId: businessId, ownerId: req.user._id };
 
     // Search filter
     if (search) {
@@ -44,7 +44,7 @@ exports.getAllPrivateServicesForBusiness = async (req, res) => {
     if (categorySlug) {
       const category = await ServiceCategory.findOne({ slug: categorySlug });
       if (category) {
-        filters['categories.categoryId'] = category._id;
+        filters.categoryId = category._id;
       } else {
         return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
       }
@@ -106,9 +106,10 @@ exports.getServiceBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
 
-    const service = await Service.findOne({ slug })
-      .populate('categories.categoryId', 'name')
-      .populate('ownerId', 'businessName');
+    const service = await Service.findOne({ slug, ownerId: req.user._id })
+      .populate('categoryId', 'name')
+      .populate('subcategoryId', 'name')
+      .populate('ownerId', 'name');
 
     if (!service) {
       return res.status(404).json({ success: false, message: 'Service not found' });

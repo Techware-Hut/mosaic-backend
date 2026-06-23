@@ -16,6 +16,29 @@ const { syncBusinessFromOnboarding } = require('../utils/syncBusinessFromOnboard
 const { validateStage1Payload } = require('../utils/vendorOnboardingValidation');
 const { deliverVendorOnboardingEmails } = require('../utils/vendorOnboardingEmailDelivery');
 
+function logVendorOnboardingEvent(endpoint, req, onboarding, { httpStatus, category, message }) {
+  const payload = {
+    endpoint,
+    userId: req?.user?._id ? String(req.user._id) : undefined,
+    applicationId: onboarding?.applicationId || undefined,
+    onboardingStatus: onboarding?.status || undefined,
+    paymentStatus: onboarding?.verificationPayment?.status || 'not_started',
+    httpStatus,
+    category,
+  };
+
+  const requestId = req?.headers?.['x-request-id'];
+  if (requestId) {
+    payload.requestId = requestId;
+  }
+
+  if (message) {
+    payload.message = message;
+  }
+
+  console.info('[vendor-onboarding]', JSON.stringify(payload));
+}
+
 const isNonEmptyString = (value) =>
   typeof value === 'string' && value.trim().length > 0;
 
@@ -680,6 +703,52 @@ exports.patchBusinessProfile = async (req, res) => {
 
 
 
+async function reconcileVendorVerificationPaymentFromStripe(onboarding, userId) {
+  if (onboarding.verificationPayment?.status === 'paid') {
+    return true;
+  }
+
+  const paymentIntentId = onboarding.verificationPayment?.paymentIntentId;
+  if (!paymentIntentId) {
+    return false;
+  }
+
+  let paymentIntent;
+  try {
+    paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  } catch (error) {
+    console.error('Vendor verification payment retrieve failed:', error.message);
+    return false;
+  }
+
+  if (paymentIntent.status !== 'succeeded') {
+    return false;
+  }
+
+  if (paymentIntent.metadata?.type !== 'vendor_verification') {
+    return false;
+  }
+
+  if (paymentIntent.metadata?.userId !== userId.toString()) {
+    return false;
+  }
+
+  if (paymentIntent.id !== paymentIntentId) {
+    return false;
+  }
+
+  onboarding.verificationPayment.status = 'paid';
+  if (!onboarding.verificationPayment.paidAt) {
+    onboarding.verificationPayment.paidAt = new Date();
+  }
+  if (onboarding.status === 'payment_pending') {
+    onboarding.status = 'draft';
+  }
+  await onboarding.save();
+
+  return true;
+}
+
 //payment controllers
 exports.createVerificationPayment = async (req, res) => {
   try {
@@ -857,10 +926,19 @@ exports.getPaymentStatus = async (req, res) => {
     const onboarding = await VendorOnboarding.findOne({ userId });
     
     if (!onboarding) {
+      logVendorOnboardingEvent('GET /stage1/payment-status', req, null, {
+        httpStatus: 404,
+        category: 'not_found',
+        message: 'Onboarding record not found',
+      });
       return res.status(404).json({
         success: false,
         message: "Onboarding record not found"
       });
+    }
+
+    if (onboarding.verificationPayment?.status !== 'paid') {
+      await reconcileVendorVerificationPaymentFromStripe(onboarding, userId);
     }
 
     const paymentData = {
@@ -872,6 +950,11 @@ exports.getPaymentStatus = async (req, res) => {
       canSubmit: onboarding.verificationPayment?.status === 'paid'
     };
 
+    logVendorOnboardingEvent('GET /stage1/payment-status', req, onboarding, {
+      httpStatus: 200,
+      category: 'success',
+    });
+
     return res.status(200).json({
       success: true,
       data: paymentData
@@ -879,6 +962,11 @@ exports.getPaymentStatus = async (req, res) => {
 
   } catch (error) {
     console.error("Get payment status error:", error);
+    logVendorOnboardingEvent('GET /stage1/payment-status', req, null, {
+      httpStatus: 500,
+      category: 'internal',
+      message: error.message,
+    });
     return res.status(500).json({
       success: false,
       message: "Failed to get payment status"
@@ -901,6 +989,11 @@ exports.submitForReview = async (req, res) => {
        BASIC EXISTENCE CHECK
     ------------------------------ */
     if (!onboarding) {
+      logVendorOnboardingEvent('POST /submit', req, null, {
+        httpStatus: 404,
+        category: 'not_found',
+        message: 'Onboarding record not found',
+      });
       return res.status(404).json({
         success: false,
         message: "save Draft before submitting for review",
@@ -912,6 +1005,11 @@ exports.submitForReview = async (req, res) => {
     ------------------------------ */
 // ✅ If already submitted → return success (no error)
 if (onboarding.status === "submitted") {
+  logVendorOnboardingEvent('POST /submit', req, onboarding, {
+    httpStatus: 200,
+    category: 'success',
+    message: 'Idempotent resubmit',
+  });
   return res.status(200).json({
     success: true,
     message: "Application submitted successfully",
@@ -925,6 +1023,11 @@ if (
   onboarding.status !== 'payment_pending' &&
   onboarding.status !== 'rejected'
 ) {
+  logVendorOnboardingEvent('POST /submit', req, onboarding, {
+    httpStatus: 400,
+    category: 'status_lock',
+    message: 'Onboarding cannot be submitted at this stage',
+  });
   return res.status(400).json({
     success: false,
     message: "Onboarding cannot be submitted at this stage",
@@ -934,10 +1037,16 @@ if (
     /* ------------------------------
        PAYMENT VALIDATION (MANDATORY)
     ------------------------------ */
-    if (
-      !onboarding.verificationPayment ||
-      onboarding.verificationPayment.status !== "paid"
-    ) {
+    const paymentReady =
+      onboarding.verificationPayment?.status === 'paid' ||
+      (await reconcileVendorVerificationPaymentFromStripe(onboarding, userId));
+
+    if (!paymentReady) {
+      logVendorOnboardingEvent('POST /submit', req, onboarding, {
+        httpStatus: 402,
+        category: 'payment_required',
+        message: 'Verification payment must be completed before submission',
+      });
       return res.status(402).json({
         success: false,
         message: "Verification payment must be completed before submission",
@@ -950,6 +1059,11 @@ if (
     const validationErrors = validateStage1Payload(onboarding.toObject());
 
     if (validationErrors.length > 0) {
+      logVendorOnboardingEvent('POST /submit', req, onboarding, {
+        httpStatus: 400,
+        category: 'validation',
+        message: 'Validation failed',
+      });
       return res.status(400).json({
         success: false,
         message: "Validation failed",
@@ -992,6 +1106,11 @@ if (
       },
     ]);
 
+    logVendorOnboardingEvent('POST /submit', req, onboarding, {
+      httpStatus: 200,
+      category: 'success',
+    });
+
     return res.status(200).json({
       success: true,
       message: "Stage 1 submitted successfully for admin verification",
@@ -1001,6 +1120,11 @@ if (
     });
   } catch (error) {
     console.error("Stage-1 submit error:", error);
+    logVendorOnboardingEvent('POST /submit', req, null, {
+      httpStatus: 500,
+      category: 'internal',
+      message: error.message,
+    });
     return res.status(500).json({
       success: false,
       message: "Stage 1 submission failed",

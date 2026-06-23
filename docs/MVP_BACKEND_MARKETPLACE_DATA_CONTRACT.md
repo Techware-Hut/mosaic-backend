@@ -36,7 +36,7 @@ These fields are added to responses where source data exists. Missing values are
 | `description` | string \| null | full description |
 | `shortDescription` | string \| null | truncated from description (~160 chars) |
 | `image` / `imageUrl` | string \| null | `coverImage` → `images[0]` → vendor `logo` |
-| `images` | string[] | `[]` when none |
+| `images` | string[] | Card/list: primary image only (`[]` when none). Detail: full deduped gallery |
 | `price` | number \| null | `null` when missing (not coerced to 0) |
 | `priceLabel` / `displayPrice` | string | `"Contact for price"` when price is null; else `$X.XX` |
 | `vendorId` / `businessId` | string \| null | from populated or raw business ref |
@@ -55,6 +55,15 @@ These fields are added to responses where source data exists. Missing values are
 | `contact` | object \| null | `{ email, phone }` when available |
 | `detailPath` | string \| null | frontend routing hint |
 | `createdAt` / `updatedAt` | ISO date | passed through when present on raw doc |
+
+### Card vs detail media
+
+| Response | `images[]` | Omitted from cards |
+|----------|------------|-------------------|
+| List/card (`toPublicListingCard`) | Primary image only (0 or 1 entry) | `videos` and other non-whitelisted raw doc fields |
+| Detail (`toPublicListingDetail`) | Full deduped gallery | — |
+
+Cards still pass through whitelisted legacy keys (`_id`, `coverImage`, `categoryId`, etc.) for backward compatibility with #28.
 
 ---
 

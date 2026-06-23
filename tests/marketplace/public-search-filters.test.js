@@ -16,6 +16,75 @@ const {
   buildFlexibleMatchRegex,
 } = require(filtersPath);
 
+test('parsePublicSearchQuery leaves keyword empty when absent', () => {
+  const parsed = parsePublicSearchQuery({});
+  assert.equal(parsed.keyword, '');
+  assert.equal(parsed.city, '');
+  assert.equal(parsed.state, '');
+});
+
+test('parsePublicSearchQuery defaults invalid listingType to all', () => {
+  const parsed = parsePublicSearchQuery({ listingType: 'invalid-type' });
+  assert.equal(parsed.listingType, 'all');
+});
+
+test('parsePublicSearchQuery preserves city and state filters', () => {
+  const parsed = parsePublicSearchQuery({ city: ' Austin ', state: ' TX ' });
+  assert.equal(parsed.city, 'Austin');
+  assert.equal(parsed.state, 'TX');
+});
+
+test('resolveBusinessIdsForMinorityType returns null for empty input', async () => {
+  const filters = loadFiltersWithMocks({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: { find: async () => [] },
+  });
+
+  const result = await filters.resolveBusinessIdsForMinorityType('');
+  assert.equal(result, null);
+});
+
+test('resolveBusinessIdsByLocation applies city and state with approved active business scope', async () => {
+  const id = '507f1f77bcf86cd799439012';
+  let capturedFilter = null;
+  const filters = loadFiltersWithMocks({
+    Business: {
+      find: async (filter) => {
+        capturedFilter = filter;
+        return [{ _id: id }];
+      },
+    },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: { find: async () => [] },
+  });
+
+  const result = await filters.resolveBusinessIdsByLocation({ city: 'Austin', state: 'TX' });
+  assert.equal(result.length, 1);
+  assert.equal(String(result[0]), id);
+  assert.equal(capturedFilter.isActive, true);
+  assert.equal(capturedFilter.isApproved, true);
+  assert.equal(capturedFilter.$and.length, 2);
+});
+
+test('searchPublicListings returns empty data for unknown categorySlug', async () => {
+  const controller = loadSearchController({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+    ProductCategory: { findOne: async () => null },
+    ServiceCategory: { findOne: async () => null },
+    FoodCategory: { findOne: async () => null },
+  });
+
+  const res = mockResponse();
+  await controller.searchPublicListings({ query: { categorySlug: 'does-not-exist' } }, res);
+
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.totals.all, 0);
+  assert.deepEqual(res.body.data, { products: [], services: [], foods: [] });
+});
+
 test('parsePublicSearchQuery normalizes search alias and clamps limit', () => {
   const parsed = parsePublicSearchQuery({ search: ' hats ', limit: '999', page: '0' });
   assert.equal(parsed.keyword, 'hats');
@@ -324,7 +393,7 @@ test('searchPublicListings preserves backward compatible response shape', async 
   assert.ok(Array.isArray(res.body.data.foods));
 });
 
-test('searchPublicListings defaults to active business scope when no filters', async () => {
+test('searchPublicListings defaults to approved active business scope when no filters', async () => {
   const activeBusinessId = '507f1f77bcf86cd799439011';
   let productFindFilter = null;
 
@@ -343,7 +412,7 @@ test('searchPublicListings defaults to active business scope when no filters', a
     if (String(request).includes('models/Business')) {
       return wrapModelFind({
         find: async (filter) => {
-          if (filter?.isActive === true) {
+          if (filter?.isActive === true && filter?.isApproved === true) {
             return [{ _id: activeBusinessId }];
           }
           return [];

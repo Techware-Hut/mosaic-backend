@@ -12,7 +12,8 @@ Set these in the Elastic Beanstalk environment configuration (or secret manager 
 |----------|-------|
 | `MONGODB_URI` | Production MongoDB (`config/Db.js`) |
 | `JWT_SECRET` | Auth signing |
-| `FRONTEND_URL` | CORS + redirects; required by `authController.js` |
+| `FRONTEND_URL` | CORS fallback + redirects; required by `authController.js` |
+| `CORS_ORIGINS` | Comma-separated explicit browser origins for CORS (recommended in production). When unset, falls back to `FRONTEND_URL` plus legacy defaults (`app`, `www`, launch Vercel). See [`utils/corsOrigins.js`](../utils/corsOrigins.js). |
 | `GOOGLE_CLIENT_ID` | Module load throws if missing (`authController.js`) |
 | `GOOGLE_CLIENT_SECRET` | Same |
 | `API_BASE_URL` | Public production API base for OAuth callback (e.g. `https://api.mosaicbizhub.com`) |

@@ -7,6 +7,15 @@ const {
   sendVendorTrustBadgeAssignedEmail
 } = require('../../utils/WellcomeMailer');
 const { deliverVendorOnboardingEmails } = require('../../utils/vendorOnboardingEmailDelivery');
+const {
+  ADMIN_AUDIT_ACTIONS,
+  ADMIN_AUDIT_TARGET_TYPES,
+} = require('../../utils/audit/actionRegistry');
+const {
+  recordAdminAuditSuccess,
+  recordAdminAuditFailure,
+  buildFieldChangeSummary,
+} = require('../../services/adminAuditService');
 
 // Admin pending queue contains only applications that have completed vendor
 // submission and are waiting for stage-1 review. Rejected resubmissions re-enter
@@ -15,7 +24,7 @@ const PENDING_REVIEW_STATUSES = Object.freeze(['submitted']);
 
 exports.PENDING_REVIEW_STATUSES = PENDING_REVIEW_STATUSES;
 
-const syncBusinessPoints = async (application, badge) => {
+const syncBusinessPoints = async (application, badge, options = {}) => {
   const ownerId = application.userId?._id || application.userId;
   const update = {
     points: application.totalVerificationPoints,
@@ -23,6 +32,10 @@ const syncBusinessPoints = async (application, badge) => {
 
   if (badge !== undefined) {
     update.badge = badge;
+  }
+
+  if (options.isApproved !== undefined) {
+    update.isApproved = options.isApproved;
   }
 
   await Business.findOneAndUpdate(
@@ -157,6 +170,12 @@ exports.verifyAndAllocatePoints = async (req, res) => {
     ];
 
     if (!validVerificationTypes.includes(verificationType)) {
+      await recordAdminAuditFailure(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_VERIFY_ITEM,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: applicationId,
+        note: 'Invalid verificationType',
+      });
       return res.status(400).json({
         success: false,
         message: 'Invalid verificationType'
@@ -166,6 +185,12 @@ exports.verifyAndAllocatePoints = async (req, res) => {
     const application = await VendorOnboarding.findOne({ applicationId });
     
     if (!application) {
+      await recordAdminAuditFailure(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_VERIFY_ITEM,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: applicationId,
+        note: 'Application not found',
+      });
       return res.status(404).json({
         success: false,
         message: 'Application not found'
@@ -178,9 +203,23 @@ exports.verifyAndAllocatePoints = async (req, res) => {
     if (verificationType === 'minority-proof' && !hasMinorityProofDocuments) {
       const autoAddedPoints = await autoVerifyMinorityDocsIfMissing(application);
 
+      await recordAdminAuditSuccess(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_VERIFY_ITEM,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: application.applicationId,
+        changeSummary: buildFieldChangeSummary(
+          {},
+          {
+            verificationType: 'minority-proof',
+            isVerified: true,
+            totalVerificationPoints: application.totalVerificationPoints,
+          },
+          ['verificationType', 'isVerified', 'totalVerificationPoints']
+        ),
+        note: 'Auto-verified minority proof',
+      });
+
       return res.status(200).json({
-        success: true,
-        message: 'Minority proof not uploaded. Auto-verified with 10 points.',
         data: {
           totalPoints: application.totalVerificationPoints,
           pointsAdded: autoAddedPoints,
@@ -319,6 +358,17 @@ exports.verifyAndAllocatePoints = async (req, res) => {
     }
 
     if (missingField) {
+      await recordAdminAuditFailure(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_VERIFY_ITEM,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: application.applicationId,
+        note: `${missingField} is missing and cannot be verified`,
+        changeSummary: buildFieldChangeSummary(
+          {},
+          { verificationType, isVerified: Boolean(isVerified), missingField },
+          ['verificationType', 'isVerified', 'missingField']
+        ),
+      });
       return res.status(400).json({
         success: false,
         message: `${missingField} is missing and cannot be verified`
@@ -380,6 +430,17 @@ exports.verifyAndAllocatePoints = async (req, res) => {
 
     // Return error if already verified
     if (alreadyVerified) {
+      await recordAdminAuditFailure(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_VERIFY_ITEM,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: application.applicationId,
+        note: `${verificationType} is already verified`,
+        changeSummary: buildFieldChangeSummary(
+          {},
+          { verificationType, isVerified: Boolean(isVerified) },
+          ['verificationType', 'isVerified']
+        ),
+      });
       return res.status(400).json({
         success: false,
         message: `${verificationType} is already verified`,
@@ -392,12 +453,31 @@ exports.verifyAndAllocatePoints = async (req, res) => {
     }
 
     // Update points
+    const previousPoints = application.totalVerificationPoints - pointsToAdd;
     application.totalVerificationPoints += pointsToAdd;
 
     await application.save();
 
     // Keep Business points in sync with stage-1 onboarding points
     await syncBusinessPoints(application);
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_VERIFY_ITEM,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+      targetId: application.applicationId,
+      changeSummary: buildFieldChangeSummary(
+        {
+          totalVerificationPoints: previousPoints,
+        },
+        {
+          totalVerificationPoints: application.totalVerificationPoints,
+          verificationType,
+          isVerified: Boolean(isVerified),
+          pointsAdded: pointsToAdd,
+        },
+        ['totalVerificationPoints', 'verificationType', 'isVerified', 'pointsAdded']
+      ),
+    });
 
     return res.status(200).json({
       success: true,
@@ -431,6 +511,12 @@ exports.finalizeVerification = async (req, res) => {
       .populate('userId', 'name email');
 
     if (!application) {
+      await recordAdminAuditFailure(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_FINALIZE_FAILED,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: applicationId,
+        note: 'Application not found',
+      });
       return res.status(404).json({
         success: false,
         message: 'Application not found'
@@ -438,6 +524,17 @@ exports.finalizeVerification = async (req, res) => {
     }
 
     if (application.status !== 'submitted') {
+      await recordAdminAuditFailure(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_FINALIZE_FAILED,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: application.applicationId,
+        note: 'Application must be in submitted status to finalize',
+        changeSummary: buildFieldChangeSummary(
+          {},
+          { status: application.status },
+          ['status']
+        ),
+      });
       return res.status(400).json({
         success: false,
         message: 'Application must be in submitted status to finalize',
@@ -474,6 +571,7 @@ exports.finalizeVerification = async (req, res) => {
     }
 
     const rejectionReason = ` ${missingRequiredDocuments.join(', ')}.`;
+    const previousStatus = 'submitted';
 
     // ✅ Badge logic (kept as-is)
     const totalPoints = application.totalVerificationPoints;
@@ -496,7 +594,9 @@ exports.finalizeVerification = async (req, res) => {
     await application.save();
 
     // ✅ Sync business
-    await syncBusinessPoints(application, badge);
+    await syncBusinessPoints(application, badge, {
+      isApproved: application.status === 'verified',
+    });
 
     const vendorEmail = application.userId?.email;
     const vendorName = application.userId?.name;
@@ -527,6 +627,17 @@ exports.finalizeVerification = async (req, res) => {
 
       const emailDelivery = await deliverVendorOnboardingEmails(emailJobs);
 
+      await recordAdminAuditSuccess(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_FINALIZE_APPROVED,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: application.applicationId,
+        changeSummary: buildFieldChangeSummary(
+          { status: previousStatus },
+          { status: application.status, badge },
+          ['status', 'badge']
+        ),
+      });
+
       return res.status(200).json({
         success: true,
         message: 'Application approved successfully',
@@ -553,9 +664,19 @@ exports.finalizeVerification = async (req, res) => {
         },
       ]);
 
+      await recordAdminAuditSuccess(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_FINALIZE_REJECTED,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: application.applicationId,
+        changeSummary: buildFieldChangeSummary(
+          { status: previousStatus },
+          { status: application.status, badge },
+          ['status', 'badge']
+        ),
+        note: rejectionReason.trim(),
+      });
+
       return res.status(200).json({
-        success: true,
-        message: 'Application rejected due to missing required documents',
         data: {
           status: 'rejected',
           badge,

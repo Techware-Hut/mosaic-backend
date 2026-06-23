@@ -39,6 +39,8 @@ const foodCategoryRoutes = require('./routes/admin/foodCategoryRoutes')
 const foodSubcategoryRoutes = require('./routes/admin/foodSubcategoryRoutes');
 const adminBusinessRoutes = require('./routes/admin/businessRoutes')
 const adminProductRoutes = require('./routes/admin/adminProductRoutes')
+const adminOrderRoutes = require('./routes/admin/adminOrderRoutes')
+const adminAuditRoutes = require('./routes/admin/adminAuditRoutes')
 const vendorOnboardVerifyStage1Routes= require("./routes/vendorOnboarding.routes")
 
 
@@ -85,26 +87,15 @@ const enquiryRoutes = require('./routes/enquiryRoutes');
 const mongoSanitize = require('express-mongo-sanitize');
 const { clean: xssClean } = require('xss-clean/lib/xss');
 const sentryHttpCapture = require('./middlewares/sentryHttpCapture');
+const requestIdMiddleware = require('./middlewares/requestId');
 const { isSentryEnabled } = require('./instrument');
+const { getAllowedOrigins } = require('./utils/corsOrigins');
 
 const app = express();
 
-const allowedOrigins = Array.from(
-  new Set([
-    'https://www.mosaicbizhub.com',
-    'https://app.mosaicbizhub.com',
-    'https://mosaic-biz-frontend-launch.vercel.app',
-    'http://localhost:3000',
-    'http://localhost:8081',
-    'https://app.minorityownedbusiness.info',
-    'http://192.168.1.50:3000',
-    'exp://192.168.0.104:8081',
-    'exp://192.168.0.104:3000',
-    'exp://192.168.0.104:3001',
-    process.env.FRONTEND_URL,
-  ].filter(Boolean))
-);
+const allowedOrigins = getAllowedOrigins();
 app.set('trust proxy', 1);
+app.use(requestIdMiddleware);
 app.use(sentryHttpCapture);
 app.use(cors({
   origin: function (origin, callback) {
@@ -196,6 +187,8 @@ app.use('/admin/api/blogs', blogRoutes);
 app.use('/admin/api/business', adminBusinessRoutes);
 app.use('/api/admin/business', adminBusinessRoutes);
 app.use('/admin/api/products', adminProductRoutes);
+app.use('/admin/api/orders', adminOrderRoutes);
+app.use('/admin/api/audit-events', adminAuditRoutes);
 app.use('/api/business-profile', businessProfileRoutes);
 app.use('/api/admin/category/product', productCategoryRoutes);
 app.use('/api/admin/category/product-subcategory', productSubcategoryRoutes);

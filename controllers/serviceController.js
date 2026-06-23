@@ -4,6 +4,16 @@ const Subscription = require('../models/Subscription');
 const SubscriptionPlan = require('../models/SubscriptionPlan');
 const PendingImage = require('../models/PendingImage');
 const deleteCloudinaryFile = require('../utils/deleteCloudinaryFile');
+const {
+  normalizeChildServices,
+  normalizeServicePayload,
+  validateChildServices,
+  validatePublishRequest,
+  getMinimumChildServicePrice,
+  formatOwnerServiceResponse,
+  formatValidationErrorResponse,
+} = require('../lib/service/serviceContract');
+const { normalizeImages } = require('../lib/listing/publicListingDto');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -35,62 +45,6 @@ const getOwnerChildServiceCount = async (ownerId, excludeServiceId = null) => {
   return services.reduce((sum, item) => (
     sum + (Array.isArray(item.services) ? item.services.length : 0)
   ), 0);
-};
-
-const parseDurationMinutes = (value) => {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-    return value;
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-
-    const numericValue = Number(trimmed);
-    if (Number.isFinite(numericValue) && numericValue > 0) {
-      return numericValue;
-    }
-
-    const matched = trimmed.match(/(\d+(?:\.\d+)?)/);
-    if (matched) {
-      const parsed = Number(matched[1]);
-      if (Number.isFinite(parsed) && parsed > 0) {
-        return parsed;
-      }
-    }
-  }
-
-  return null;
-};
-
-const normalizeChildService = (item = {}) => {
-  const normalizedImages = Array.isArray(item.images)
-    ? item.images.filter(Boolean)
-    : [];
-  const fallbackImage = item.image || item.imagePath || item.path || normalizedImages[0] || '';
-  const durationMinutes = parseDurationMinutes(item.durationMinutes ?? item.duration);
-  const price = Number(item.price);
-
-  return {
-    name: item.name ? String(item.name).trim() : '',
-    description: item.description ? String(item.description).trim() : '',
-    image: fallbackImage,
-    images: normalizedImages.length ? normalizedImages : (fallbackImage ? [fallbackImage] : []),
-    durationMinutes,
-    price: Number.isFinite(price) && price >= 0 ? price : 0
-  };
-};
-
-const normalizeChildServices = (childServices = []) => {
-  return childServices.map(normalizeChildService);
-};
-
-const getMinimumChildServicePrice = (childServices = [], fallbackPrice = 0) => {
-  const prices = childServices
-    .map((item) => Number(item.price))
-    .filter((price) => Number.isFinite(price) && price >= 0);
-
-  return prices.length > 0 ? Math.min(...prices) : fallbackPrice;
 };
 
 // Create parent service with minimal details
@@ -221,27 +175,46 @@ exports.createService = async (req, res) => {
       subcategoryId,
       businessId,
       bookingToolLink,
-      services,
       coverImage,
       images,
       businessHours,
       location,
-      isPublished,
     } = req.body;
 
     const userId = req.user._id;
+    const payload = normalizeServicePayload(req.body);
+    const { title, description, isPublished, normalizedServices, parentPrice, parentDuration } = payload;
 
-    // 🛡️ Step 1: Verify ownership
     const business = await Business.findOne({ _id: businessId, owner: userId });
     if (!business)
       return res.status(403).json({ error: 'You do not own this business.' });
 
-    //   return res.status(400).json({ error: 'Business is not approved yet.' });
+    const existingParentService = await Service.findOne({
+      businessId,
+      ownerId: userId,
+    }).select('_id title isPublished');
 
-    // if (business.listingType !== 'service')
-    //   return res.status(400).json({ error: 'This business is not allowed to list services.' });
+    if (existingParentService) {
+      return res.status(409).json({
+        success: false,
+        error: 'A service listing already exists for this business. Use PUT /api/service/:id to update or publish it.',
+        existingServiceId: existingParentService._id,
+        fieldErrors: {
+          businessId: 'Service listing already exists for this business.',
+        },
+      });
+    }
 
-    // 📅 Step 2: Subscription check
+    const childValidation = validateChildServices(normalizedServices);
+    if (!childValidation.ok) {
+      return res.status(400).json(formatValidationErrorResponse(childValidation.fieldErrors));
+    }
+
+    const publishValidation = validatePublishRequest({ isPublished, normalizedServices });
+    if (!publishValidation.ok) {
+      return res.status(400).json(formatValidationErrorResponse(publishValidation.fieldErrors));
+    }
+
     const subscription = await Subscription.findOne({
       userId,
       status: 'active',
@@ -254,17 +227,6 @@ exports.createService = async (req, res) => {
     const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
     const serviceLimit = subscriptionPlan?.limits?.serviceListings || 0;
     const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
-
-    // ------------------------
-    // Step 3: Determine default parent price from child services
-    // ------------------------
-    const normalizedServices = Array.isArray(services) ? normalizeChildServices(services) : [];
-    const invalidDurationService = normalizedServices.find((item) => !item.durationMinutes);
-    if (invalidDurationService) {
-      return res.status(400).json({
-        error: 'Each child service must include a valid duration or durationMinutes value.'
-      });
-    }
 
     const currentChildServiceCount = await getOwnerChildServiceCount(userId);
     if (currentChildServiceCount + normalizedServices.length > serviceLimit) {
@@ -279,16 +241,11 @@ exports.createService = async (req, res) => {
       });
     }
 
-    const defaultPrice = getMinimumChildServicePrice(normalizedServices, 0);
-
-    // ------------------------
-    // Step 4: Save service with defaults
-    // ------------------------
     const service = new Service({
-      title: 'Service',
-      description: '',
-      price: defaultPrice, // <-- Set parent price as minimum of children
-      duration: '',
+      title,
+      description,
+      price: parentPrice,
+      duration: parentDuration,
 
       categoryId,
       subcategoryId,
@@ -297,7 +254,7 @@ exports.createService = async (req, res) => {
       services: normalizedServices,
       coverImage: coverImage || '',
       images: images || [],
-      isPublished: isPublished || false,
+      isPublished,
       businessHours: businessHours || [],
       location: location?.address || '',
 
@@ -319,7 +276,6 @@ exports.createService = async (req, res) => {
 
     await service.save();
 
-    // Clean up pending images
     const usedImages = [coverImage, ...(images || [])].filter(Boolean);
     if (usedImages.length > 0) {
       await PendingImage.deleteMany({ url: { $in: usedImages } });
@@ -328,16 +284,14 @@ exports.createService = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    res.status(201).json({
-      message: 'Service created successfully.',
-      service,
-    });
+    return res.status(201).json(
+      formatOwnerServiceResponse(service, business, 'Service created successfully.')
+    );
 
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
 
-    // Clean up uploaded images on error
     const usedImages = [req.body.coverImage, ...(req.body.images || [])].filter(Boolean);
     for (const image of usedImages) {
       await deleteCloudinaryFile(image).catch(() => { });
@@ -590,11 +544,9 @@ exports.addChildServices = async (req, res) => {
 
     // Add new child services to existing ones
     const normalizedChildServices = normalizeChildServices(childServices);
-    const invalidDurationService = normalizedChildServices.find((item) => !item.durationMinutes);
-    if (invalidDurationService) {
-      return res.status(400).json({
-        error: 'Each child service must include a valid duration or durationMinutes value.'
-      });
+    const childValidation = validateChildServices(normalizedChildServices);
+    if (!childValidation.ok) {
+      return res.status(400).json(formatValidationErrorResponse(childValidation.fieldErrors));
     }
 
     const currentChildServiceCount = await getOwnerChildServiceCount(userId);
@@ -637,10 +589,11 @@ exports.addChildServices = async (req, res) => {
       { new: true }
     );
 
-    res.status(200).json({
-      message: 'Child services added successfully.',
-      service: updatedService
-    });
+    const business = await Business.findById(parentService.businessId).select('isActive isApproved owner');
+
+    return res.status(200).json(
+      formatOwnerServiceResponse(updatedService, business, 'Child services added successfully.')
+    );
 
   } catch (err) {
     console.error('Failed to add child services:', err.message);
@@ -672,8 +625,24 @@ exports.getMyServices = async (req, res) => {
 
     const total = await Service.countDocuments(filters);
 
+    const businessIds = [...new Set(services.map((item) => String(item.businessId)).filter(Boolean))];
+    const businesses = await Business.find({ _id: { $in: businessIds } })
+      .select('_id isActive isApproved owner')
+      .lean();
+    const businessById = new Map(businesses.map((item) => [String(item._id), item]));
+
+    const servicesWithPublication = services.map((item) => {
+      const plainService = item.toObject();
+      const business = businessById.get(String(item.businessId));
+      return formatOwnerServiceResponse(plainService, business).data;
+    });
+
     res.status(200).json({
-      services,
+      services: servicesWithPublication.map((entry) => entry.service),
+      publicationByServiceId: Object.fromEntries(
+        servicesWithPublication.map((entry) => [String(entry.service._id), entry.publication])
+      ),
+      data: servicesWithPublication,
       total,
       page,
       totalPages: Math.ceil(total / limit)
@@ -719,6 +688,9 @@ exports.updateService = async (req, res) => {
       return res.status(404).json({ message: 'Service not found' });
     }
 
+    const business = await Business.findOne({ _id: service.businessId, owner: userId })
+      .select('_id isActive isApproved owner');
+
     const subscription = await Subscription.findOne({
       userId,
       status: 'active',
@@ -733,7 +705,6 @@ exports.updateService = async (req, res) => {
     const serviceLimit = subscriptionPlan?.limits?.serviceListings || 0;
     const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
 
-    // Handle image updates
     if (req.body.coverImage && req.body.coverImage !== service.coverImage) {
       await deleteCloudinaryFile(service.coverImage).catch(() => { });
     }
@@ -745,40 +716,59 @@ exports.updateService = async (req, res) => {
       }
     }
 
-    // Update allowed fields
+    let nextServices = service.services;
+    if (req.body.services !== undefined) {
+      const payload = normalizeServicePayload({
+        ...req.body,
+        services: req.body.services,
+      });
+      const childValidation = validateChildServices(payload.normalizedServices);
+      if (!childValidation.ok) {
+        return res.status(400).json(formatValidationErrorResponse(childValidation.fieldErrors));
+      }
+
+      const otherChildServiceCount = await getOwnerChildServiceCount(userId, service._id);
+      if (otherChildServiceCount + payload.normalizedServices.length > serviceLimit) {
+        return res.status(403).json({
+          message: `Service listing limit reached. You can add only ${Math.max(serviceLimit - otherChildServiceCount, 0)} more child services.`,
+        });
+      }
+
+      nextServices = payload.normalizedServices;
+      service.services = nextServices;
+      service.price = getMinimumChildServicePrice(nextServices, service.price);
+      service.duration = '';
+    }
+
     const updatableFields = [
-      'title', 'description', 'price', 'duration', 'services', 'isPublished',
-      'coverImage', 'images', 'features', 'amenities', 'businessHours',
+      'title', 'description', 'coverImage', 'images', 'features', 'amenities', 'businessHours',
       'bookingToolLink', 'maxBookingsPerSlot', 'location', 'contact'
     ];
 
     for (const field of updatableFields) {
       if (req.body[field] !== undefined) {
-        if (field === 'services') {
-          const normalizedServices = normalizeChildServices(req.body.services);
-          const invalidDurationService = normalizedServices.find((item) => !item.durationMinutes);
-
-          if (invalidDurationService) {
-            return res.status(400).json({
-              message: 'Each child service must include a valid duration or durationMinutes value.'
-            });
-          }
-
-          const otherChildServiceCount = await getOwnerChildServiceCount(userId, service._id);
-          if (otherChildServiceCount + normalizedServices.length > serviceLimit) {
-            return res.status(403).json({
-              message: `Service listing limit reached. You can add only ${Math.max(serviceLimit - otherChildServiceCount, 0)} more child services.`,
-            });
-          }
-
-          service.services = normalizedServices;
-          service.price = getMinimumChildServicePrice(normalizedServices, service.price);
-          service.duration = '';
-          continue;
-        }
-
         service[field] = req.body[field];
       }
+    }
+
+    if (req.body.title !== undefined) {
+      service.title = String(req.body.title).trim() || 'Service';
+    }
+
+    if (req.body.description !== undefined) {
+      service.description = String(req.body.description).trim();
+    }
+
+    if (req.body.isPublished !== undefined) {
+      service.isPublished = req.body.isPublished === true || req.body.isPublished === 'true';
+    }
+
+    const publishValidation = validatePublishRequest({
+      isPublished: service.isPublished,
+      normalizedServices: nextServices,
+    });
+    if (!publishValidation.ok) {
+      return res.status(400).json(formatValidationErrorResponse(publishValidation.fieldErrors));
     }
 
     const nextGalleryImages = req.body.images !== undefined ? req.body.images : service.images;
@@ -788,7 +778,6 @@ exports.updateService = async (req, res) => {
       });
     }
 
-    // Handle location as string
     if (req.body.location?.address) {
       service.location = req.body.location.address;
       if (service.contact) {
@@ -798,10 +787,9 @@ exports.updateService = async (req, res) => {
 
     await service.save();
 
-    res.status(200).json({
-      message: 'Service updated successfully',
-      service
-    });
+    return res.status(200).json(
+      formatOwnerServiceResponse(service, business, 'Service updated successfully')
+    );
 
   } catch (error) {
     console.error('Service update error:', error);
@@ -828,7 +816,12 @@ exports.getServiceById = async (req, res) => {
       });
     }
 
-    res.status(200).json({ service });
+    const business = await Business.findOne({ _id: service.businessId, owner: userId })
+      .select('_id isActive isApproved owner');
+
+    return res.status(200).json(
+      formatOwnerServiceResponse(service, business)
+    );
 
   } catch (err) {
     console.error('Failed to fetch service:', err.message);
@@ -872,6 +865,12 @@ exports.getBusinessServiceById = async (req, res) => {
       });
     }
 
+    if (service.isPublished !== true) {
+      return res.status(404).json({
+        message: 'Business service not found.'
+      });
+    }
+
     const childServices = Array.isArray(service.services) ? service.services : [];
     const hasChildServices = childServices.length > 0;
 
@@ -900,6 +899,11 @@ exports.getBusinessServiceById = async (req, res) => {
       };
     });
 
+    const serviceImages = normalizeImages({
+      coverImage: service.coverImage,
+      images: service.images,
+    });
+
     const mappedService = {
       _id: service._id,
       title: service.title || '',
@@ -926,7 +930,9 @@ exports.getBusinessServiceById = async (req, res) => {
         }
         : null,
       coverImage: service.coverImage || '',
-      images: Array.isArray(service.images) ? service.images : [],
+      images: serviceImages.images,
+      image: serviceImages.image,
+      imageUrl: serviceImages.imageUrl,
       location: service.location || '',
       businessHours: mappedBusinessHours,
       bookingToolLink: service.bookingToolLink || '',
