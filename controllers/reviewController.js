@@ -21,6 +21,42 @@ const getListingIdFromParams = (req) =>
 
 const validateObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
 
+const normalizeId = (value) => {
+  if (!value) return value;
+  return typeof value.toString === 'function' ? value.toString() : value;
+};
+
+const normalizeDate = (value) => {
+  if (!value) return value;
+  return value instanceof Date ? value.toISOString() : value;
+};
+
+const toPublicReviewUser = (user) => {
+  if (!user || typeof user !== 'object') return null;
+
+  return {
+    _id: normalizeId(user._id),
+    name: user.name || '',
+    profileImage: user.profileImage || '',
+  };
+};
+
+const toPublicReview = (review) => {
+  const source = review || {};
+
+  return {
+    _id: normalizeId(source._id),
+    userId: toPublicReviewUser(source.userId),
+    listingId: normalizeId(source.listingId),
+    listingType: source.listingType,
+    rating: source.rating,
+    comment: source.comment,
+    image: source.image || '',
+    createdAt: normalizeDate(source.createdAt),
+    updatedAt: normalizeDate(source.updatedAt),
+  };
+};
+
 const ensureListingExists = async (listingId, listingType) => {
   const Model = LISTING_MODELS[listingType];
   if (!Model) {
@@ -77,7 +113,7 @@ exports.listReviews = (listingType) => async (req, res) => {
           limit,
           totalPages: Math.ceil(total / limit),
         },
-        reviews,
+        reviews: reviews.map(toPublicReview),
       },
     });
   } catch (error) {
@@ -159,7 +195,7 @@ exports.upsertReview = (listingType) => async (req, res) => {
       success: true,
       message: isNewReview ? 'Review added successfully' : 'Review updated successfully',
       data: {
-        review: populatedReview,
+        review: toPublicReview(populatedReview),
         summary,
       },
     });
