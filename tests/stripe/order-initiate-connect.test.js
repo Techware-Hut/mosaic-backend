@@ -458,7 +458,7 @@ test('initiateOrder blocks checkout when business is not approved', async () => 
   await initiateOrder(baseRequest(), res);
 
   assert.equal(res.statusCode, 403);
-  assert.match(res.body.message, /not approved/i);
+  assert.match(res.body.message, /approved and active/i);
   assert.equal(getPiCreateCalls().length, 0);
 });
 
@@ -472,7 +472,7 @@ test('initiateOrder blocks checkout when business is deactivated', async () => {
   await initiateOrder(baseRequest(), res);
 
   assert.equal(res.statusCode, 403);
-  assert.match(res.body.message, /unavailable/i);
+  assert.match(res.body.message, /approved and active/i);
   assert.equal(getPiCreateCalls().length, 0);
 });
 

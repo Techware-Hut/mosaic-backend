@@ -14,6 +14,9 @@ const {
   serializeTaxSettings,
 } = require("../utils/vendorTax");
 const { toPublicBusinessCard } = require("../lib/listing/publicListingDto");
+const {
+  publicMarketplaceBusinessFilter,
+} = require("../lib/marketplace/businessEligibility");
 
 exports.createBusiness = async (req, res) => {
   try {
@@ -772,11 +775,9 @@ exports.getProductBusinesses = async (req, res) => {
       limit = 10,
     } = req.query;
 
-    const filters = {
+    const filters = publicMarketplaceBusinessFilter({
       listingType: "product",
-      isActive: true,
-      isApproved: true,
-    };
+    });
 
     if (search) filters.businessName = { $regex: search, $options: "i" };
     if (city) filters["address.city"] = city;
@@ -894,6 +895,7 @@ exports.getBusinessBySlugPublic = async (req, res) => {
     const business = await Business.findOne({
       slug,
       isActive: true,
+      isApproved: true,
       listingType: "product", // ✅ Only product businesses
     })
       .select(

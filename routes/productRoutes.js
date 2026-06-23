@@ -30,7 +30,7 @@ const router = express.Router();
 // ============================================
 
 /**
- * @route   GET /api/products/upload-url
+ * @route   GET /api/product/upload-url
  * @desc    Get pre-signed URL for product image upload
  * @access  Private
  */
@@ -41,7 +41,7 @@ router.get(
 );
 
 /**
- * @route   GET /api/products/variant-upload-url
+ * @route   GET /api/product/variant-upload-url
  * @desc    Get pre-signed URL for variant image upload
  * @access  Private
  */
@@ -52,7 +52,7 @@ router.get(
 );
 
 /**
- * @route   GET /api/products/business/:businessId
+ * @route   GET /api/product/business/:businessId
  * @desc    Get all products for a business
  * @access  Private
  */
@@ -87,7 +87,7 @@ router.delete(
 // ============================================
 
 /**
- * @route   POST /api/products
+ * @route   POST /api/product
  * @desc    Create a new product with variants
  * @access  Private
  */
@@ -100,7 +100,7 @@ router.post(
 );
 
 /**
- * @route   GET /api/products/:productId
+ * @route   GET /api/product/:productId
  * @desc    Get single product by ID with all variants
  * @access  Private
  */
@@ -112,7 +112,7 @@ router.get(
 );
 
 /**
- * @route   PUT /api/products/:productId
+ * @route   PUT /api/product/:productId
  * @desc    Update a product
  * @access  Private
  */
@@ -124,7 +124,7 @@ router.put(
 );
 
 /**
- * @route   DELETE /api/products/delete-product/:productId
+ * @route   DELETE /api/product/delete-product/:productId
  * @desc    Soft delete a product and all its variants
  * @access  Private
  */
@@ -140,7 +140,7 @@ router.delete(
 // ============================================
 
 /**
- * @route   GET /api/products/get-variant/:productId/:variantId
+ * @route   GET /api/product/get-variant/:productId/:variantId
  * @desc    Get a single variant by ID
  * @access  Private
  */
@@ -152,7 +152,7 @@ router.get(
 );
 
 /**
- * @route   POST /api/products/add-variants/:productId
+ * @route   POST /api/product/add-variants/:productId
  * @desc    Add variants to an existing product
  * @access  Private
  */
@@ -165,7 +165,7 @@ router.post(
 );
 
 /**
- * @route   PUT /api/products/update-variant/:productId/:variantId
+ * @route   PUT /api/product/update-variant/:productId/:variantId
  * @desc    Update a specific variant
  * @access  Private
  */
@@ -178,7 +178,7 @@ router.put(
 );
 
 /**
- * @route   PATCH /api/products/update-variantstock/:variantId
+ * @route   PATCH /api/product/update-variantstock/:variantId
  * @desc    Update variant stock (increment/decrement/set)
  * @access  Private
  */
@@ -190,7 +190,7 @@ router.patch(
 );
 
 /**
- * @route   DELETE /api/products/delete-variant/:productId/:variantId
+ * @route   DELETE /api/product/delete-variant/:productId/:variantId
  * @desc    Soft delete a specific variant
  * @access  Private
  */

@@ -64,9 +64,12 @@ function loadController({ application, mailerCalls = {}, emailConfigured = true,
   process.env.MAIL_PASSWORD = emailConfigured ? 'app-password' : '';
 
   const vendorOnboardingMock = buildVendorOnboardingMock(application);
+  const businessUpdates = [];
 
   const businessMock = {
-    findOneAndUpdate: async () => {},
+    findOneAndUpdate: async (filter, update) => {
+      businessUpdates.push({ filter, update });
+    },
   };
 
   const mailerMock = {
@@ -104,12 +107,12 @@ function loadController({ application, mailerCalls = {}, emailConfigured = true,
   const controller = require(controllerPath);
   Module._load = originalLoad;
 
-  return { controller, mailerCalls };
+  return { controller, mailerCalls, businessUpdates };
 }
 
 test('finalizeVerification approves when required docs verified', async () => {
   const application = buildApplication();
-  const { controller, mailerCalls } = loadController({ application });
+  const { controller, mailerCalls, businessUpdates } = loadController({ application });
   const res = createResponse();
 
   await controller.finalizeVerification({ params: { applicationId: application.applicationId } }, res);
@@ -121,6 +124,7 @@ test('finalizeVerification approves when required docs verified', async () => {
   assert.equal(res.body.data.emailSent, true);
   assert.ok(mailerCalls.approved);
   assert.ok(mailerCalls.badge);
+  assert.equal(businessUpdates.at(-1).update.$set.isApproved, true);
 });
 
 test('finalizeVerification rejects when required docs missing', async () => {
@@ -131,7 +135,7 @@ test('finalizeVerification rejects when required docs missing', async () => {
       minorityDocs: false,
     },
   });
-  const { controller, mailerCalls } = loadController({ application });
+  const { controller, mailerCalls, businessUpdates } = loadController({ application });
   const res = createResponse();
 
   await controller.finalizeVerification({ params: { applicationId: application.applicationId } }, res);
@@ -141,6 +145,7 @@ test('finalizeVerification rejects when required docs missing', async () => {
   assert.equal(res.body.data.status, 'rejected');
   assert.ok(mailerCalls.rejection);
   assert.ok(mailerCalls.rejection.rejectionReason.includes('EIN document'));
+  assert.equal(businessUpdates.at(-1).update.$set.isApproved, false);
 });
 
 test('finalizeVerification blocks non-submitted applications', async () => {

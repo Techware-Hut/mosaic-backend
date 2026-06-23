@@ -27,6 +27,7 @@ function loadController(mockProduct, total = 1, options = {}) {
   const {
     visibleBusinessIds = ['507f1f77bcf86cd799439014'],
     capturedFindQuery = { value: null },
+    capturedBusinessFindQuery = { value: null },
     capturedLimit = { value: null },
   } = options;
 
@@ -58,11 +59,14 @@ function loadController(mockProduct, total = 1, options = {}) {
   };
 
   const Business = {
-    find: () => ({
+    find: (query) => {
+      capturedBusinessFindQuery.value = query;
+      return {
       select: () => ({
         lean: async () => visibleBusinessIds.map((id) => ({ _id: id })),
       }),
-    }),
+    };
+    },
   };
 
   const originalLoad = Module._load;
@@ -74,7 +78,12 @@ function loadController(mockProduct, total = 1, options = {}) {
   delete require.cache[controllerPath];
   const loaded = require(controllerPath);
   Module._load = originalLoad;
-  return { controller: loaded, capturedFindQuery, capturedLimit };
+  return {
+    controller: loaded,
+    capturedFindQuery,
+    capturedBusinessFindQuery,
+    capturedLimit,
+  };
 }
 
 test('getFeaturedProducts maps products through toPublicListingCard', async () => {
@@ -140,14 +149,14 @@ test('getFeaturedProducts preserves products and pagination wrapper', async () =
   assert.equal(res.body.products[0].priceLabel, 'Contact for price');
 });
 
-test('getFeaturedProducts scopes query to active businesses', async () => {
+test('getFeaturedProducts scopes query to approved active businesses', async () => {
   const mockProduct = {
     toObject() {
       return { _id: '507f1f77bcf86cd799439011', title: 'Featured' };
     },
   };
   const activeBusinessId = '507f1f77bcf86cd799439014';
-  const { controller, capturedFindQuery } = loadController(mockProduct, 1, {
+  const { controller, capturedFindQuery, capturedBusinessFindQuery } = loadController(mockProduct, 1, {
     visibleBusinessIds: [activeBusinessId],
   });
   const res = mockResponse();
@@ -156,12 +165,14 @@ test('getFeaturedProducts scopes query to active businesses', async () => {
 
   assert.equal(res.statusCode, 200);
   assert.ok(capturedFindQuery.value);
+  assert.equal(capturedBusinessFindQuery.value.isApproved, true);
+  assert.equal(capturedBusinessFindQuery.value.isActive, true);
   assert.equal(capturedFindQuery.value.isFeatured, true);
   assert.equal(capturedFindQuery.value.isPublished, true);
   assert.deepEqual(capturedFindQuery.value.businessId.$in, [activeBusinessId]);
 });
 
-test('getFeaturedProducts returns empty list when no active businesses', async () => {
+test('getFeaturedProducts returns empty list when no approved active businesses', async () => {
   const { controller } = loadController(null, 0, { visibleBusinessIds: [] });
   const res = mockResponse();
 

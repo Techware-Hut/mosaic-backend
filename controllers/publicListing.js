@@ -28,11 +28,14 @@ const {
   mergeBusinessIdFilter,
   buildKeywordRegex,
 } = require('../lib/listing/publicSearchFilters');
+const {
+  publicMarketplaceBusinessFilter,
+} = require('../lib/marketplace/businessEligibility');
 
 const getVisibleBusinessIds = async () => {
-  const businesses = await Business.find({
-    isActive: true,
-  }).select('_id').lean();
+  const businesses = await Business.find(
+    publicMarketplaceBusinessFilter()
+  ).select('_id').lean();
 
   return businesses.map((business) => business._id.toString());
 };
@@ -80,7 +83,7 @@ async function mapProductsWithBusinessMeta(products, listingType = 'product') {
   const [verifiedMap, tagsMap, businesses] = await Promise.all([
     loadVerifiedByBusinessIds(businessIds),
     loadTagsByBusinessIds(businessIds),
-    Business.find({ _id: { $in: businessIds }, isActive: true })
+    Business.find(publicMarketplaceBusinessFilter({ _id: { $in: businessIds } }))
       .select('_id badge tags')
       .lean(),
   ]);
@@ -227,10 +230,9 @@ exports.getAllServices = async (req, res) => {
         .filter(Boolean)
         .map((value) => badgeValueMap[value] || value);
 
-      const badgeBusinesses = await Business.find({
-        isActive: true,
-        badge: { $in: requestedBadges }
-      }).select('_id').lean();
+      const badgeBusinesses = await Business.find(
+        publicMarketplaceBusinessFilter({ badge: { $in: requestedBadges } })
+      ).select('_id').lean();
 
       const badgeBusinessIds = badgeBusinesses.map((b) => b._id.toString());
 
@@ -281,10 +283,9 @@ exports.getAllServices = async (req, res) => {
         .filter(Boolean)
     )];
 
-    const serviceBusinesses = await Business.find({
-      _id: { $in: serviceBusinessIds },
-      isActive: true,
-    })
+    const serviceBusinesses = await Business.find(
+      publicMarketplaceBusinessFilter({ _id: { $in: serviceBusinessIds } })
+    )
       .select('_id businessName description logo email phone address socialLinks badge')
       .lean();
 
@@ -365,10 +366,9 @@ exports.getServiceBySlug = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Service not found' });
     }
 
-    const visibleBusiness = await Business.findOne({
-      _id: service.businessId,
-      isActive: true,
-    }).select('_id').lean();
+    const visibleBusiness = await Business.findOne(
+      publicMarketplaceBusinessFilter({ _id: service.businessId })
+    ).select('_id').lean();
 
     if (!visibleBusiness) {
       return res.status(404).json({ success: false, message: 'Service not found' });
@@ -434,10 +434,9 @@ exports.getServiceById = async (req, res) => {
       });
     }
 
-    const visibleBusiness = await Business.findOne({
-      _id: service.businessId?._id,
-      isActive: true,
-    }).select('_id').lean();
+    const visibleBusiness = await Business.findOne(
+      publicMarketplaceBusinessFilter({ _id: service.businessId?._id })
+    ).select('_id').lean();
 
     if (!visibleBusiness) {
       return res.status(404).json({
@@ -658,10 +657,9 @@ exports.getAllFood = async (req, res) => {
         .filter(Boolean)
         .map((value) => badgeValueMap[value] || value);
 
-      const badgeBusinesses = await Business.find({
-        isActive: true,
-        badge: { $in: requestedBadges }
-      }).select('_id').lean();
+      const badgeBusinesses = await Business.find(
+        publicMarketplaceBusinessFilter({ badge: { $in: requestedBadges } })
+      ).select('_id').lean();
 
       const badgeBusinessIds = badgeBusinesses.map((b) => b._id);
 
@@ -747,10 +745,9 @@ exports.getFoodById = async (req, res) => {
       });
     }
 
-    const visibleBusiness = await Business.findOne({
-      _id: food.businessId?._id,
-      isActive: true,
-    }).select('_id').lean();
+    const visibleBusiness = await Business.findOne(
+      publicMarketplaceBusinessFilter({ _id: food.businessId?._id })
+    ).select('_id').lean();
 
     if (!visibleBusiness) {
       return res.status(404).json({
@@ -1126,10 +1123,9 @@ if (price) {
         .filter(Boolean)
         .map((value) => badgeValueMap[value] || value);
 
-      const badgeBusinesses = await Business.find({
-        isActive: true,
-        badge: { $in: requestedBadges }
-      }).select('_id').lean();
+      const badgeBusinesses = await Business.find(
+        publicMarketplaceBusinessFilter({ badge: { $in: requestedBadges } })
+      ).select('_id').lean();
 
       const badgeBusinessIds = badgeBusinesses.map((b) => b._id.toString());
 
@@ -1361,12 +1357,16 @@ exports.getProductsByFilters = async (req, res) => {
 
 
 
-// Route: /api/products/:productId
+// Route: /api/public/product/:productId
 exports.getProductById = async (req, res) => {
   try {
     const { productId } = req.params;
 
-    const product = await Product.findById(productId)
+    const product = await Product.findOne({
+      _id: productId,
+      isPublished: true,
+      isDeleted: false,
+    })
       .populate({
         path: "businessId",
         select: "businessName owner taxSettings"
@@ -1380,10 +1380,9 @@ exports.getProductById = async (req, res) => {
       });
     }
 
-    const visibleBusiness = await Business.findOne({
-      _id: product.businessId?._id,
-      isActive: true,
-    }).select('_id').lean();
+    const visibleBusiness = await Business.findOne(
+      publicMarketplaceBusinessFilter({ _id: product.businessId?._id })
+    ).select('_id').lean();
 
     if (!visibleBusiness) {
       return res.status(404).json({
@@ -1553,10 +1552,9 @@ exports.getVendorProfile = async (req, res) => {
   try {
     const { businessId } = req.params;
 
-    const business = await Business.findOne({
-      _id: businessId,
-      isActive: true,
-    })
+    const business = await Business.findOne(
+      publicMarketplaceBusinessFilter({ _id: businessId })
+    )
     .select('businessName description logo coverImage email phone address socialLinks website listingType badge metrics businessHours')
     .lean();
 
@@ -1595,10 +1593,9 @@ exports.getProductsByBusinessId = async (req, res) => {
     const { businessId } = req.params;
     const { page = 1, limit = 10, sort } = req.query;
 
-    const visibleBusiness = await Business.findOne({
-      _id: businessId,
-      isActive: true,
-    }).select('_id').lean();
+    const visibleBusiness = await Business.findOne(
+      publicMarketplaceBusinessFilter({ _id: businessId })
+    ).select('_id').lean();
 
     if (!visibleBusiness) {
       return res.json({
