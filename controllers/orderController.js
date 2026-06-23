@@ -88,6 +88,7 @@
 // module.exports = { createOrder };
 
 // controllers/orderController.js
+const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
 const Stripe = require("stripe");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -117,6 +118,89 @@ const toNum = (value) => {
 
   return value == null ? null : Number(value);
 };
+
+const ADMIN_PAYMENT_BUCKETS = ["pending", "paid", "failed", "refunded"];
+const ADMIN_STATUS_BUCKETS = [
+  "created",
+  "ordered",
+  "accepted",
+  "rejected",
+  "shipped",
+  "delivered",
+  "cancelled",
+  "returned",
+  "refunded",
+];
+
+const toObjectIdIfValid = (value) => {
+  if (!value || !mongoose.Types.ObjectId.isValid(value)) return value;
+  return new mongoose.Types.ObjectId(value);
+};
+
+const buildAdminOrderMatch = (query = {}) => {
+  const {
+    status,
+    paymentStatus,
+    businessId,
+    vendorId,
+    userId,
+    from,
+    to,
+    q,
+  } = query;
+
+  const match = {};
+  if (status) match.status = status;
+  if (paymentStatus) match.paymentStatus = paymentStatus;
+  if (businessId) match.businessId = toObjectIdIfValid(businessId);
+  if (vendorId) match.vendorId = toObjectIdIfValid(vendorId);
+  if (userId) match.userId = toObjectIdIfValid(userId);
+  if (from || to) {
+    match.createdAt = {};
+    if (from) match.createdAt.$gte = new Date(from);
+    if (to) match.createdAt.$lte = new Date(to);
+  }
+  if (q) {
+    const searchClauses = [{ groupOrderId: q }];
+    if (mongoose.Types.ObjectId.isValid(q)) {
+      searchClauses.push({ _id: new mongoose.Types.ObjectId(q) });
+    }
+    match.$or = searchClauses;
+  }
+
+  return match;
+};
+
+const summarizeBuckets = (buckets, rows) => {
+  const summary = Object.fromEntries(buckets.map((bucket) => [bucket, 0]));
+  rows.forEach((row) => {
+    if (row?._id != null && Object.prototype.hasOwnProperty.call(summary, row._id)) {
+      summary[row._id] = row.count;
+    }
+  });
+  return summary;
+};
+
+const currencyExpression = { $ifNull: ["$currency", "USD"] };
+const amountExpression = (field, fallback = 0) => ({ $ifNull: [field, fallback] });
+
+const toCurrencySummary = (row) => ({
+  currency: row._id || "USD",
+  totalOrders: row.totalOrders || 0,
+  grossSalesAmount: row.grossSalesAmount || 0,
+  paidSalesAmount: row.paidSalesAmount || 0,
+  refundedSalesAmount: row.refundedSalesAmount || 0,
+  subtotalAmount: row.subtotalAmount || 0,
+  taxAmount: row.taxAmount || 0,
+  shippingAmount: row.shippingAmount || 0,
+});
+
+const toVendorSalesSummary = (row) => ({
+  vendorId: row.vendorId ? String(row.vendorId) : null,
+  currency: row.currency || "USD",
+  orderCount: row.orderCount || 0,
+  totalSalesAmount: row.totalSalesAmount || 0,
+});
 
 const getVariantAttribute = (variantDoc, key) => {
   if (!variantDoc?.attributes) return null;
@@ -1257,36 +1341,7 @@ exports.getAllOrdersAdmin = async (req, res) => {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 20;
     const skip = (page - 1) * limit;
-
-    const {
-      status, // e.g. 'ordered'
-      paymentStatus, // e.g. 'paid'
-      businessId,
-      vendorId,
-      userId,
-      from, // ISO date string
-      to, // ISO date string
-      q, // optional search: groupOrderId / order _id
-    } = req.query;
-
-    const match = {};
-    if (status) match.status = status;
-    if (paymentStatus) match.paymentStatus = paymentStatus;
-    if (businessId) match.businessId = businessId;
-    if (vendorId) match.vendorId = vendorId;
-    if (userId) match.userId = userId;
-    if (from || to) {
-      match.createdAt = {};
-      if (from) match.createdAt.$gte = new Date(from);
-      if (to) match.createdAt.$lte = new Date(to);
-    }
-    if (q) {
-      // search by groupOrderId or order _id string
-      match.$or = [
-        { groupOrderId: q },
-        { _id: q.match(/^[a-f\d]{24}$/i) ? q : undefined }, // only valid ObjectId strings
-      ].filter(Boolean);
-    }
+    const match = buildAdminOrderMatch(req.query);
 
     const [rows, total, paymentAgg, statusAgg] = await Promise.all([
       Order.find(match)
@@ -1308,32 +1363,6 @@ exports.getAllOrdersAdmin = async (req, res) => {
       ]),
     ]);
 
-    // normalize summaries so missing buckets show 0
-    const paymentBuckets = ["pending", "paid", "failed", "refunded"];
-    const statusBuckets = [
-      "created",
-      "ordered",
-      "accepted",
-      "rejected",
-      "shipped",
-      "delivered",
-      "cancelled",
-      "returned",
-      "refunded",
-    ];
-
-    const paymentSummary = Object.fromEntries(
-      paymentBuckets.map((k) => [k, 0])
-    );
-    paymentAgg.forEach((r) => {
-      paymentSummary[r._id] = r.count;
-    });
-
-    const statusSummary = Object.fromEntries(statusBuckets.map((k) => [k, 0]));
-    statusAgg.forEach((r) => {
-      statusSummary[r._id] = r.count;
-    });
-
     return res.status(200).json({
       success: true,
       message: "Orders fetched successfully",
@@ -1345,12 +1374,117 @@ exports.getAllOrdersAdmin = async (req, res) => {
         totalPages: Math.ceil(total / limit),
       },
       summary: {
-        payment: paymentSummary,
-        status: statusSummary,
+        payment: summarizeBuckets(ADMIN_PAYMENT_BUCKETS, paymentAgg),
+        status: summarizeBuckets(ADMIN_STATUS_BUCKETS, statusAgg),
       },
     });
   } catch (err) {
     console.error("getAllOrdersAdmin error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
+  }
+};
+
+exports.getAdminSalesSummary = async (req, res) => {
+  try {
+    const match = buildAdminOrderMatch(req.query);
+    const paidVendorMatch =
+      match.paymentStatus && match.paymentStatus !== "paid"
+        ? null
+        : { ...match, paymentStatus: "paid" };
+    const vendorSalesPipeline = paidVendorMatch
+      ? [
+          { $match: paidVendorMatch },
+          {
+            $group: {
+              _id: {
+                vendorId: "$vendorId",
+                currency: currencyExpression,
+              },
+              orderCount: { $sum: 1 },
+              totalSalesAmount: { $sum: amountExpression("$totalAmount") },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              vendorId: "$_id.vendorId",
+              currency: "$_id.currency",
+              orderCount: 1,
+              totalSalesAmount: 1,
+            },
+          },
+          { $sort: { totalSalesAmount: -1 } },
+          { $limit: 10 },
+        ]
+      : null;
+
+    const [salesByCurrency, vendorSales, paymentAgg, statusAgg] = await Promise.all([
+      Order.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: currencyExpression,
+            totalOrders: { $sum: 1 },
+            grossSalesAmount: { $sum: amountExpression("$totalAmount") },
+            paidSalesAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$paymentStatus", "paid"] },
+                  amountExpression("$totalAmount"),
+                  0,
+                ],
+              },
+            },
+            refundedSalesAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$paymentStatus", "refunded"] },
+                  amountExpression("$totalAmount"),
+                  0,
+                ],
+              },
+            },
+            subtotalAmount: { $sum: amountExpression("$subtotalAmount") },
+            taxAmount: { $sum: amountExpression("$taxSummary.taxTotal") },
+            shippingAmount: { $sum: amountExpression("$shipping.amount") },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      vendorSalesPipeline
+        ? Order.aggregate(vendorSalesPipeline)
+        : Promise.resolve([]),
+      Order.aggregate([
+        { $match: match },
+        { $group: { _id: "$paymentStatus", count: { $sum: 1 } } },
+      ]),
+      Order.aggregate([
+        { $match: match },
+        { $group: { _id: "$status", count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Admin sales summary fetched successfully",
+      data: {
+        salesByCurrency: salesByCurrency.map(toCurrencySummary),
+        topVendors: vendorSales.map(toVendorSalesSummary),
+        platformRevenue: {
+          supported: false,
+          amount: null,
+          reason: "Order records do not persist platform fee amounts yet.",
+        },
+        summary: {
+          payment: summarizeBuckets(ADMIN_PAYMENT_BUCKETS, paymentAgg),
+          status: summarizeBuckets(ADMIN_STATUS_BUCKETS, statusAgg),
+        },
+      },
+    });
+  } catch (err) {
+    console.error("getAdminSalesSummary error:", err);
     return res
       .status(500)
       .json({ success: false, message: "Internal server error" });

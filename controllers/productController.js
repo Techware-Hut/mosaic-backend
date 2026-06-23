@@ -5,6 +5,7 @@ const Subscription = require('../models/Subscription');
 const SubscriptionPlan = require('../models/SubscriptionPlan');
 const { validationResult } = require('express-validator');
 const deleteCloudinaryFile = require('../utils/deleteCloudinaryFile');
+const { sendError, sendForbidden, sendNotFound } = require('../utils/apiError');
 const { PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const mongoose = require('mongoose');
@@ -572,12 +573,18 @@ exports.getProductById = async (req, res) => {
       .lean();
 
     if (!product || product.isDeleted) {
-      return res.status(404).json({ error: 'Product not found' });
+      return sendNotFound(req, res, 'Product not found', {
+        code: 'PRODUCT_NOT_FOUND',
+        includeLegacyError: true,
+      });
     }
 
     // Check ownership
     if (product.ownerId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: 'Unauthorized' });
+      return sendForbidden(req, res, 'Unauthorized', {
+        code: 'PRODUCT_OWNER_REQUIRED',
+        includeLegacyError: true,
+      });
     }
 
     // Get variants
@@ -620,7 +627,10 @@ exports.getProductById = async (req, res) => {
 
   } catch (err) {
     console.error('Error in getProductById:', err);
-    return res.status(500).json({ error: 'Internal server error' });
+    return sendError(req, res, 500, {
+      message: 'Internal server error',
+      includeLegacyError: true,
+    });
   }
 };
 
@@ -651,11 +661,17 @@ exports.updateProduct = async (req, res) => {
     const product = await Product.findById(productId);
 
     if (!product || product.isDeleted) {
-      return res.status(404).json({ error: "Product not found" });
+      return sendNotFound(req, res, "Product not found", {
+        code: "PRODUCT_NOT_FOUND",
+        includeLegacyError: true,
+      });
     }
 
     if (product.ownerId.toString() !== userId.toString()) {
-      return res.status(403).json({ error: "Unauthorized" });
+      return sendForbidden(req, res, "Unauthorized", {
+        code: "PRODUCT_OWNER_REQUIRED",
+        includeLegacyError: true,
+      });
     }
 
     const subscription = await Subscription.findOne({
