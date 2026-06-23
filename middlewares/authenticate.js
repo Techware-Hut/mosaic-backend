@@ -1,16 +1,14 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { clearAuthCookies } = require('../utils/cookieHelper');
+const { sendUnauthorized } = require('../utils/apiError');
 
-function deny(res, message, { clearCookies = false } = {}) {
+function deny(req, res, message, { clearCookies = false, code } = {}) {
   if (clearCookies) {
     clearAuthCookies(res);
   }
 
-  return res.status(401).json({
-    success: false,
-    message,
-  });
+  return sendUnauthorized(req, res, message, { code });
 }
 
 module.exports = async (req, res, next) => {
@@ -21,7 +19,7 @@ module.exports = async (req, res, next) => {
   const token = bearerToken || cookieToken;
 
   if (!token) {
-    return deny(res, 'Authentication required');
+    return deny(req, res, 'Authentication required', { code: 'AUTHENTICATION_REQUIRED' });
   }
 
   try {
@@ -29,12 +27,18 @@ module.exports = async (req, res, next) => {
     const userId = decoded.userId || decoded.sub;
 
     if (!userId) {
-      return deny(res, 'Invalid authentication token', { clearCookies: Boolean(cookieToken) });
+      return deny(req, res, 'Invalid authentication token', {
+        clearCookies: Boolean(cookieToken),
+        code: 'INVALID_AUTH_TOKEN',
+      });
     }
 
     const user = await User.findById(userId);
     if (!user) {
-      return deny(res, 'Authenticated user not found', { clearCookies: Boolean(cookieToken) });
+      return deny(req, res, 'Authenticated user not found', {
+        clearCookies: Boolean(cookieToken),
+        code: 'AUTH_USER_NOT_FOUND',
+      });
     }
 
     const tokenSessionVersion = Number.isInteger(decoded.sessionVersion)
@@ -43,12 +47,18 @@ module.exports = async (req, res, next) => {
     const currentSessionVersion = user.sessionVersion || 0;
 
     if (tokenSessionVersion !== currentSessionVersion) {
-      return deny(res, 'Session expired. Please log in again.', { clearCookies: Boolean(cookieToken) });
+      return deny(req, res, 'Session expired. Please log in again.', {
+        clearCookies: Boolean(cookieToken),
+        code: 'SESSION_EXPIRED',
+      });
     }
 
     req.user = user;
     next();
   } catch (err) {
-    return deny(res, 'Invalid or expired authentication token', { clearCookies: Boolean(cookieToken) });
+    return deny(req, res, 'Invalid or expired authentication token', {
+      clearCookies: Boolean(cookieToken),
+      code: 'INVALID_OR_EXPIRED_AUTH_TOKEN',
+    });
   }
 };

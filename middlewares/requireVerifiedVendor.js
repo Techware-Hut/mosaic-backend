@@ -1,4 +1,5 @@
 const VendorOnboarding = require('../models/VendorOnboardingStage1');
+const { sendForbidden, sendUnauthorized } = require('../utils/apiError');
 
 function createRequireVerifiedVendor(options = {}) {
   const { requireStage1Verified = false } = options;
@@ -7,23 +8,33 @@ function createRequireVerifiedVendor(options = {}) {
     const user = req.user;
 
     if (!user) {
-      return res.status(401).json({ message: 'Unauthorized' });
+      return sendUnauthorized(req, res, 'Unauthorized', {
+        code: 'AUTHENTICATION_REQUIRED',
+      });
     }
 
     if (user.role !== 'business_owner') {
-      return res.status(403).json({ message: 'Only vendors allowed' });
+      return sendForbidden(req, res, 'Only vendors allowed', {
+        code: 'VENDOR_REQUIRED',
+      });
     }
 
     if (!user.isOtpVerified) {
-      return res.status(403).json({ message: 'OTP verification required' });
+      return sendForbidden(req, res, 'OTP verification required', {
+        code: 'OTP_VERIFICATION_REQUIRED',
+      });
     }
 
     if (user.isBlocked) {
-      return res.status(403).json({ message: 'Account is blocked' });
+      return sendForbidden(req, res, 'Account is blocked', {
+        code: 'ACCOUNT_BLOCKED',
+      });
     }
 
     if (user.isDeleted) {
-      return res.status(403).json({ message: 'Account is deleted' });
+      return sendForbidden(req, res, 'Account is deleted', {
+        code: 'ACCOUNT_DELETED',
+      });
     }
 
     if (requireStage1Verified) {
@@ -32,8 +43,8 @@ function createRequireVerifiedVendor(options = {}) {
         .lean();
 
       if (!onboarding || onboarding.status !== 'verified') {
-        return res.status(403).json({
-          message: 'Stage 1 vendor verification required',
+        return sendForbidden(req, res, 'Stage 1 vendor verification required', {
+          code: 'STAGE1_VERIFICATION_REQUIRED',
         });
       }
     }
