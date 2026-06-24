@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionEnd": [
+      {
+        "command": "node .cursor/hooks/return-to-staging.js"
+      }
+    ],
+    "stop": [
+      {
+        "command": "node .cursor/hooks/return-to-staging.js"
+      }
+    ]
+  }
+}

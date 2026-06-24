@@ -1,0 +1,44 @@
+---
+description: Always return the repo to the staging branch at the end of every task or session
+alwaysApply: true
+---
+
+# Land on staging when done
+
+The default integration branch for this repo is **`staging`**, not `main` and not feature branches.
+
+## End-of-session requirement (mandatory)
+
+Before finishing **any** task, coding session, investigation, or PR workflow:
+
+1. **Preserve work** — If there are uncommitted changes the user may want:
+   - Commit them on the feature branch if the user asked for a commit, OR
+   - Stash with a descriptive message: `git stash push -u -m "<branch>: <short summary>"`
+2. **Return to staging**:
+   ```powershell
+   git checkout staging
+   git pull origin staging
+   ```
+3. **Confirm clean landing** — Run `git branch --show-current` and report that the session ended on `staging`.
+
+## During work
+
+- Feature branches are fine while implementing.
+- Do **not** leave the user on a feature branch when the conversation ends.
+- Do **not** end on `main` unless the user explicitly asked to stay there.
+
+## If checkout is blocked
+
+- Stash dirty changes first, then checkout `staging`.
+- Tell the user what was stashed and how to restore: `git stash list` / `git stash pop`.
+
+## Example closing steps
+
+```powershell
+git stash push -u -m "fix/foo: WIP tests"   # only if needed
+git checkout staging
+git pull origin staging
+git status
+```
+
+Always mention the final branch name in the last response.
