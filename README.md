@@ -185,7 +185,7 @@ See [docs/security-remediation-notes.md](docs/security-remediation-notes.md) for
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `MAIL_USER` | Yes for email features | SMTP sender/login identity used by mail utilities |
-| `MAIL_PASSWORD` | Yes for email features | SMTP credential |
+| `MAIL_PASSWORD` | Yes for email features | Gmail **App Password** (not your Google account login password) for SMTP auth |
 | `ADMIN_EMAIL` | Recommended | Admin notification recipient for onboarding, category requests, and contact inquiries |
 | `SUPPORT_EMAIL` | Optional | Support/contact email used in outbound templates |
 | `APP_NAME` | Optional | Branding label used in some email content |
