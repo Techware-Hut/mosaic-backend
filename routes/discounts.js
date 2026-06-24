@@ -74,6 +74,7 @@ router.post(
 router.get(
   '/:id',
   authenticate,
+  isBusinessOwner,
   getDiscountById
 );
 

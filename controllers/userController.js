@@ -76,6 +76,23 @@ function isDuplicateKeyError(err) {
     return err && (err.code === 11000 || err.code === '11000');
 }
 
+const OTP_DELIVERY_FAILED_MESSAGES = {
+    register:
+        'Your account was created, but we could not deliver the verification email. Please try resending the verification code later.',
+    resend:
+        'We could not deliver the verification email. Please try again later.',
+    unverifiedLogin:
+        'Your account still needs verification, but we could not send the verification email. Please try again later.',
+};
+
+function respondOtpDeliveryFailed(res, context) {
+    return res.status(502).json({
+        success: false,
+        code: 'OTP_DELIVERY_FAILED',
+        message: OTP_DELIVERY_FAILED_MESSAGES[context],
+    });
+}
+
 exports.registerUser = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -116,13 +133,14 @@ exports.registerUser = async (req, res) => {
             await sendOtpEmail(email, otp);
         } catch (emailError) {
             console.error('Failed to send OTP email:', emailError);
+            return respondOtpDeliveryFailed(res, 'register');
         }
 
         res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
 
         return res.status(201).json({
             success: true,
-            message: 'User registered successfully. OTP sent to mobile.',
+            message: 'User registered successfully. OTP sent to email.',
         });
     } catch (err) {
         console.error('Registration error:', err);
@@ -224,7 +242,13 @@ exports.resendOtp = async (req, res) => {
         user.otpExpiry = otpExpiry;
         await user.save();
 
-        await sendOtpEmail(user.email, otp);
+        try {
+            await sendOtpEmail(user.email, otp);
+        } catch (emailError) {
+            console.error('Failed to send OTP email:', emailError);
+            return respondOtpDeliveryFailed(res, 'resend');
+        }
+
         res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
 
         return res.status(200).json({
@@ -383,7 +407,13 @@ exports.loginUser = async (req, res) => {
             user.otpExpiry = otpExpiry;
             await user.save();
 
-            await sendOtpEmail(user.email, otp);
+            try {
+                await sendOtpEmail(user.email, otp);
+            } catch (emailError) {
+                console.error('Failed to send OTP email:', emailError);
+                return respondOtpDeliveryFailed(res, 'unverifiedLogin');
+            }
+
             res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
 
             return res.status(403).json({

@@ -45,9 +45,10 @@ Auth is **stateless JWT** with optional **HTTP-only cookies**. There is no serve
 4. `bcrypt.hash(password, 12)` → `passwordHash`.
 5. 6-digit OTP generated, `bcrypt.hash(otp, 10)` stored in `user.otp` with `otpExpiry` = now + 10 minutes.
 6. User saved with `isOtpVerified: false`, `provider: 'local'` (default).
-7. `sendOtpEmail(email, otp)` — OTP delivered by **email** (response message says "mobile" but mailer sends to email).
-8. `otpPending` cookie set (10 min, via `getCookieOptions`).
-9. Returns `201` — no JWT issued until OTP verified.
+7. `sendOtpEmail(email, otp)` — OTP delivered by **email** (Nodemailer + Gmail SMTP).
+8. On successful send: `otpPending` cookie set (10 min, via `getCookieOptions`).
+9. Returns **201** with message *"OTP sent to email"* — no JWT until OTP verified.
+10. On SMTP failure after user save: **502** `{ success: false, code: 'OTP_DELIVERY_FAILED', message: '...' }` — account preserved; no `otpPending` cookie; user may call `POST /api/users/resend-otp` after mail recovery.
 
 ### Diagram
 
@@ -104,11 +105,16 @@ OTP is used for **email verification after registration** and for **re-verificat
 **Rate limit:** 5 / 15 min
 
 - Rejects if user not found, deleted, blocked, or already verified.
-- Generates new OTP, updates hash/expiry, emails OTP, sets `otpPending` cookie.
+- Generates new OTP, updates hash/expiry, emails OTP.
+- On successful send: sets `otpPending` cookie, returns **200**.
+- On SMTP failure after OTP saved: **502** `{ success: false, code: 'OTP_DELIVERY_FAILED' }` — no `otpPending` cookie; OTP hash remains in DB for verify/resend after recovery.
 
 ### Login-triggered OTP
 
-If `loginUser` finds valid credentials but `!user.isOtpVerified`, it generates a **new** OTP, emails it, sets `otpPending`, and returns `403` with `otpPending: true` (no JWT).
+If `loginUser` finds valid credentials but `!user.isOtpVerified`, it generates a **new** OTP, saves hash/expiry, then emails OTP.
+
+- On successful send: sets `otpPending`, returns **403** with `otpPending: true` (no JWT).
+- On SMTP failure: **502** `{ success: false, code: 'OTP_DELIVERY_FAILED' }` — no session, no `otpPending` cookie; account preserved for resend.
 
 ---
 
@@ -124,7 +130,7 @@ If `loginUser` finds valid credentials but `!user.isOtpVerified`, it generates a
 2. Load user; reject with `401 Invalid credentials` if missing or no `passwordHash` (includes Google-only accounts).
 3. Reject `403` if `isDeleted` or `isBlocked`.
 4. `bcrypt.compare(password, passwordHash)` — generic `401` on mismatch.
-5. If `!isOtpVerified` → new OTP emailed, `403 otpPending: true` (see above).
+5. If `!isOtpVerified` → new OTP emailed; on success **403** `otpPending: true`; on SMTP failure **502** `OTP_DELIVERY_FAILED` (see above).
 6. `buildSessionToken(user)` → JWT (`sub`, `role`, `sessionVersion`, 7d).
 7. `setAuthCookies(res, token, user, 7d)`.
 8. Return `200` with `token` and `toPublicAuthUser(user)`.

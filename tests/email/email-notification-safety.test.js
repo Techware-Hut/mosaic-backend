@@ -42,6 +42,14 @@ test('mailer.js does not log OTP values', () => {
   assert.ok(!source.match(/console\.(log|error|warn)\([^)]*\botp\b/i));
 });
 
+test('userController.js does not log OTP values in error handlers', () => {
+  const controllerPath = path.resolve(__dirname, '../../controllers/userController.js');
+  const source = fs.readFileSync(controllerPath, 'utf8');
+  assert.ok(!source.match(/console\.(log|error|warn)\([^)]*,\s*otp\b/i));
+  assert.ok(!source.match(/console\.(log|error|warn)\([^)]*MAIL_PASSWORD/));
+  assert.ok(!source.match(/console\.(log|error|warn)\([^)]*MAIL_USER/));
+});
+
 test('vendorOnboardingEmailDelivery logs error message only', () => {
   const source = fs.readFileSync(deliveryPath, 'utf8');
   assert.ok(source.includes('err.message'));

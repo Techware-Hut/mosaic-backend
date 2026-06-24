@@ -68,12 +68,36 @@ Webhook URL registration: [stripe-webhook-registration.md](stripe-webhook-regist
 
 | Variable | Required for |
 |----------|--------------|
-| `MAIL_USER` | OTP, order, onboarding mail |
-| `MAIL_PASSWORD` | SMTP auth |
+| `MAIL_USER` | OTP, order, onboarding mail (Gmail address; also used as From header) |
+| `MAIL_PASSWORD` | SMTP auth — must be a **Google App Password**, not the account login password |
 | `ADMIN_EMAIL` | Admin notifications |
 | `SUPPORT_EMAIL` | Optional; email templates |
 | `APP_NAME` | Optional branding |
 | `APP_URL` | Optional order email links |
+
+### Auth OTP email (registration / resend / unverified login)
+
+OTP is sent **by email only** via Nodemailer + Gmail (`utils/mailer.js`). There is no SMS/mobile OTP channel.
+
+**Production inbox smoke (disposable test account only):**
+
+1. Set `MAIL_USER` and `MAIL_PASSWORD` (App Password) on Elastic Beanstalk; redeploy.
+2. `POST /api/users/register` with a disposable email you control — expect **201** and inbox delivery within ~2 minutes.
+3. Do **not** paste OTP values or credentials into tickets, Slack, or logs.
+
+**When SMTP delivery fails**, auth endpoints return **502** with `code: OTP_DELIVERY_FAILED` (account may still be saved; user can retry via `POST /api/users/resend-otp` after mail recovery).
+
+**Log signatures for SMTP auth failure (grep EB logs — never log secrets):**
+
+| Signature | Meaning |
+|-----------|---------|
+| `Failed to send OTP email:` | Application caught a registration/resend/login OTP send failure |
+| `Resend OTP error:` | Unexpected error in resend handler (non-delivery paths) |
+| `Login error:` | Unexpected error in login handler (non-delivery paths) |
+| Nodemailer `code: 'EAUTH'` | SMTP authentication rejected |
+| Response contains `535` / `Invalid login` / `Username and Password not accepted` | Gmail rejected credentials — rotate App Password |
+
+Confirm no 6-digit OTP values and no `MAIL_PASSWORD` appear in log lines after auth smoke.
 
 ---
 
