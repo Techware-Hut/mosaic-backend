@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { createService, getMyServices, deleteService, updateService, getServiceById, getBusinessServiceById, getServiceUploadUrl, createParentService, addChildServices, getParentServices, getChildServices } = require('../controllers/serviceController');
+const { deleteChildService } = require('../controllers/serviceChildController');
 const authenticate = require('../middlewares/authenticate');
 const isBusinessOwner = require('../middlewares/isBusinessOwner');
 const isCustomer = require('../middlewares/isCustomer');
@@ -24,6 +25,13 @@ router.get(
   authenticate,
   isBusinessOwner,
   getChildServices
+);
+
+router.delete(
+  '/:parentServiceId/child-services/:childServiceId',
+  authenticate,
+  isBusinessOwner,
+  deleteChildService
 );
 
 router.post(
