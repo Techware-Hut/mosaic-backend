@@ -25,7 +25,8 @@ This document defines the backend deployment flow, rollback approach, and produc
 | Platform | AWS Elastic Beanstalk |
 | EB hostname | `mosaic-backend.us-east-1.elasticbeanstalk.com` |
 | Canonical HTTPS API | `https://api.mosaicbizhub.com` |
-| Frontend (typical) | `https://app.mosaicbizhub.com` |
+| Frontend (canonical) | `https://mosaicbizhub.com` |
+| Frontend (transition) | `https://app.mosaicbizhub.com` |
 
 Use **`https://api.mosaicbizhub.com`** for smoke tests and Stripe webhook URLs. Avoid HTTPS on the raw EB hostname (TLS cert CN mismatch).
 

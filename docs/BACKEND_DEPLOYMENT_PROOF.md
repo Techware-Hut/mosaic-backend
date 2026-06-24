@@ -4,6 +4,8 @@
 **Issues:** [#80 CORS](https://github.com/Techware-Hut/mosaic-backend/issues/80) · [#84 Smoke](https://github.com/Techware-Hut/mosaic-backend/issues/84) · [#18 Sentry](https://github.com/Techware-Hut/mosaic-backend/issues/18)  
 **Latest verification:** 2026-06-18 19:10:36 UTC (final CORS 4/4 — issue #80 closed)
 
+**Domain note:** this document is historical deployment evidence from before the root-domain correction. `https://mosaicbizhub.com` is now the canonical production frontend, `https://app.mosaicbizhub.com` is transition-only, and `https://www.mosaicbizhub.com` should redirect to the apex rather than remain an authenticated app origin.
+
 ---
 
 ## Final verification (2026-06-18 19:10:36 UTC) — issue #80 closed
@@ -94,7 +96,7 @@
 
 **Summary:** PASS=11, FAIL=0, BLOCKED=3
 
-### CORS (OPTIONS `/api/featured-products`, all four launch origins + negative)
+### CORS (OPTIONS `/api/featured-products`, historical four-origin set + negative)
 
 | Origin | HTTP | ACAO exact | Credentials `true` | Result |
 |--------|------|------------|----------------------|--------|

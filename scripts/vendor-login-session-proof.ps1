@@ -8,7 +8,7 @@
 
 param(
     [string]$ApiBaseUrl = $(if ($env:API_BASE_URL) { $env:API_BASE_URL } else { "https://api.mosaicbizhub.com" }),
-    [string]$FrontendOrigin = $(if ($env:FRONTEND_ORIGIN) { $env:FRONTEND_ORIGIN } else { "https://app.mosaicbizhub.com" }),
+    [string]$FrontendOrigin = $(if ($env:FRONTEND_ORIGIN) { $env:FRONTEND_ORIGIN } else { "https://mosaicbizhub.com" }),
     [string]$VendorEmail = $env:SMOKE_TEST_VENDOR_EMAIL,
     [string]$VendorPassword = $env:SMOKE_TEST_VENDOR_PASSWORD,
     [string]$VendorToken = $env:SMOKE_TEST_VENDOR_TOKEN,

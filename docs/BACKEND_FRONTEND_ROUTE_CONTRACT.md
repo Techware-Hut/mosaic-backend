@@ -17,7 +17,7 @@ Frontend must use these canonical routes. **Do not add backend aliases.**
 | Featured products carousel | `GET /api/featured-products` | `/api/products/featured` (404) | **200** |
 | Ranked products browse | `GET /api/ranked` | `/api/products/ranked` (404) | **200** |
 
-CORS preflight for featured: `OPTIONS /api/featured-products` (all four launch origins — see [`CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md)).
+CORS preflight for featured: `OPTIONS /api/featured-products` (canonical apex, temporary app transition, and launch QA origins; see [`CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md)).
 
 **Registry:** Featured → [`routes/featuredProductRoutes.js`](../routes/featuredProductRoutes.js). Ranked → [`routes/publicListing.js`](../routes/publicListing.js) (`listProductsRanked`).
 

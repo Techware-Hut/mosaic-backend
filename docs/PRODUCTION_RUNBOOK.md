@@ -30,7 +30,7 @@ Operational guide for release owners: deployment verification, rollback confirma
 | `http://mosaic-backend.us-east-1.elasticbeanstalk.com/` | EB hostname — **HTTP only** for optional raw health probe |
 | `https://mosaic-backend.us-east-1.elasticbeanstalk.com` | **Do not use** for production smoke — TLS certificate CN mismatch |
 
-Frontend (typical): `https://app.mosaicbizhub.com`
+Frontend (canonical): `https://mosaicbizhub.com` (transition: `https://app.mosaicbizhub.com`)
 
 ---
 

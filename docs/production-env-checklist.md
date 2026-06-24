@@ -12,8 +12,8 @@ Set these in the Elastic Beanstalk environment configuration (or secret manager 
 |----------|-------|
 | `MONGODB_URI` | Production MongoDB (`config/Db.js`) |
 | `JWT_SECRET` | Auth signing |
-| `FRONTEND_URL` | CORS fallback + redirects; required by `authController.js` |
-| `CORS_ORIGINS` | Comma-separated explicit browser origins for CORS (recommended in production). When unset, falls back to `FRONTEND_URL` plus legacy defaults (`app`, `www`, launch Vercel). See [`utils/corsOrigins.js`](../utils/corsOrigins.js). |
+| `FRONTEND_URL` | CORS fallback + redirects; required by `authController.js`. Production should be the apex marketplace origin. |
+| `CORS_ORIGINS` | Comma-separated explicit browser origins for CORS (recommended in production). When unset, falls back to `FRONTEND_URL` plus default production origins: apex, temporary app, and launch Vercel. No wildcard. See [`utils/corsOrigins.js`](../utils/corsOrigins.js). |
 | `GOOGLE_CLIENT_ID` | Module load throws if missing (`authController.js`) |
 | `GOOGLE_CLIENT_SECRET` | Same |
 | `API_BASE_URL` | Public production API base for OAuth callback (e.g. `https://api.mosaicbizhub.com`) |
@@ -123,7 +123,8 @@ Note: Backend code does **not** read `STRIPE_PUBLIC_KEY` (frontend uses `NEXT_PU
 | Variable | Purpose |
 |----------|---------|
 | `NEXT_PUBLIC_API_BASE_URL` | `https://api.mosaicbizhub.com/` |
-| `NEXT_PUBLIC_CLIENT_BASE_URL` | `https://app.mosaicbizhub.com` (or current app host) |
+| `NEXT_PUBLIC_APP_URL` | `https://mosaicbizhub.com` |
+| `NEXT_PUBLIC_CLIENT_BASE_URL` | `https://mosaicbizhub.com` if still required as fallback |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Live publishable key |
 | `NEXT_PUBLIC_GOOGLE_MAPS_KEY` | Address autocomplete |
 | `JWT_SECRET` | Must match backend `JWT_SECRET` for middleware |

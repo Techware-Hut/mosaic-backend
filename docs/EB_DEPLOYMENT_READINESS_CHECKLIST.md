@@ -82,10 +82,11 @@ Full list: [production-env-checklist.md](production-env-checklist.md)
 ## CORS and frontend
 
 - [ ] `CORS_ORIGINS` set on EB with explicit production frontends (recommended):
+  - `https://mosaicbizhub.com`
   - `https://mosaic-biz-frontend-launch.vercel.app`
-  - `https://app.mosaicbizhub.com`
-- [ ] `FRONTEND_URL` matches canonical app host (`https://app.mosaicbizhub.com`) for OAuth redirects and emails
-- [ ] If `CORS_ORIGINS` is unset, verify default fallback still allows launch Vercel + app origins and does not include the root community site ([`utils/corsOrigins.js`](../utils/corsOrigins.js))
+  - `https://app.mosaicbizhub.com` (temporary transition only)
+- [ ] `FRONTEND_URL` matches canonical frontend origin (`https://mosaicbizhub.com`) for OAuth redirects and emails
+- [ ] If `CORS_ORIGINS` is unset, verify default fallback allows apex + launch Vercel + temporary app origin and does not include `www` ([`utils/corsOrigins.js`](../utils/corsOrigins.js))
 - [ ] Frontend `NEXT_PUBLIC_API_BASE_URL` → `https://api.mosaicbizhub.com`
 
 ---
@@ -97,7 +98,7 @@ Full list: [production-env-checklist.md](production-env-checklist.md)
 3. Record version label: `mosaic-<sha>`.
 4. Wait for EB environment recovery.
 
-**GHA post-deploy (implemented #21):** `/api/health`, `/api/ready`, CORS OPTIONS+GET on `/api/featured-products` for launch and app origins.
+**GHA post-deploy (implemented #21):** `/api/health`, `/api/ready`, CORS OPTIONS+GET on `/api/featured-products` for apex, transition app, and launch QA origins.
 
 Related docs: [ENV_VAR_INVENTORY.md](ENV_VAR_INVENTORY.md), [PUSH_TO_MAIN_DEPLOY_CRITERIA.md](PUSH_TO_MAIN_DEPLOY_CRITERIA.md), [BACKUP_ROLLBACK_RUNBOOK.md](BACKUP_ROLLBACK_RUNBOOK.md)
 

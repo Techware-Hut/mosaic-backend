@@ -1,5 +1,6 @@
-const DEFAULT_FRONTEND_URL = 'https://app.mosaicbizhub.com';
+const DEFAULT_FRONTEND_URL = 'https://mosaicbizhub.com';
 const APPROVED_FRONTEND_ORIGINS = [
+  'https://mosaicbizhub.com',
   'https://app.mosaicbizhub.com',
   'https://mosaic-biz-frontend-launch.vercel.app',
 ];
@@ -17,8 +18,8 @@ const ENV_PRIORITY = [
 ];
 
 const DISALLOWED_FRONTEND_ORIGINS = new Set([
-  'https://mosaicbizhub.com',
   'https://www.mosaicbizhub.com',
+  'https://api.mosaicbizhub.com',
 ]);
 
 function parseAbsoluteUrl(value) {

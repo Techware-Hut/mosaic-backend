@@ -1,4 +1,5 @@
 const DEFAULT_CREDENTIAL_ORIGINS = [
+  'https://mosaicbizhub.com',
   'https://app.mosaicbizhub.com',
   'https://mosaic-biz-frontend-launch.vercel.app',
 ];
@@ -14,7 +15,10 @@ const DEV_ORIGINS = [
 ];
 
 function parseCorsOrigins(value) {
-  return value.split(',').map((o) => o.trim()).filter(Boolean);
+  return value
+    .split(',')
+    .map((o) => o.trim())
+    .filter((origin) => origin && origin !== '*');
 }
 
 function getAllowedOrigins() {

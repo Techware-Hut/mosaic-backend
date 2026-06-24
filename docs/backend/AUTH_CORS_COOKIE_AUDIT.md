@@ -125,10 +125,11 @@ cors({
 
 ### Default credentialed origins (hardcoded when `CORS_ORIGINS` unset)
 
-- `https://app.mosaicbizhub.com`
+- `https://mosaicbizhub.com`
+- `https://app.mosaicbizhub.com` (temporary transition)
 - `https://mosaic-biz-frontend-launch.vercel.app`
 
-`https://mosaicbizhub.com` and `https://www.mosaicbizhub.com` are the community site, not the marketplace app, and are intentionally not default credentialed API origins.
+`https://mosaicbizhub.com` is now the canonical marketplace app. `https://www.mosaicbizhub.com` should redirect to the apex and is intentionally not a default credentialed API origin.
 
 ### Dev-only origins (non-production)
 
@@ -163,6 +164,6 @@ cors({
 | --- | --- |
 | Production `CORS_ORIGINS` value confirmation (names only in docs; value in EB console) | AWS / release owner |
 | Whether all Vercel preview URLs are in prod allowlist | Frontend / infra |
-| Cookie behavior on cross-subdomain prod (`app.mosaicbizhub.com` → `api.mosaicbizhub.com`) | QA smoke P1 |
+| Cookie behavior on production frontend/API (`mosaicbizhub.com` -> `api.mosaicbizhub.com`) | QA smoke P1 |
 
 Deep dive: [`../AUTH_FLOW.md`](../AUTH_FLOW.md)

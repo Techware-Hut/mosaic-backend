@@ -8,8 +8,9 @@
 
 | Origin | Role |
 | --- | --- |
+| `https://mosaicbizhub.com` | **Canonical** - production frontend after the root-domain correction |
 | `https://mosaic-biz-frontend-launch.vercel.app` | **Active** — current frontend testing origin |
-| `https://app.mosaicbizhub.com` | **Prepared** — future production frontend domain |
+| `https://app.mosaicbizhub.com` | **Transition** - legacy app origin until cutover smoke passes |
 
 No secrets, cookie values, JWTs, passwords, OTPs, tester email, or PII in this document.
 
@@ -190,6 +191,8 @@ Admin login uses same `POST /api/users/login` as other roles; admin routes use `
 
 | Origin | Path | Method | ACAO | Credentials | Result |
 | --- | --- | --- | --- | --- | --- |
+| apex | `/api/featured-products` | OPTIONS | pending | pending | **REQUIRED after cutover** |
+| apex | `/api/users/login` | OPTIONS | pending | pending | **REQUIRED after cutover** |
 | launch Vercel | `/api/featured-products` | OPTIONS | exact match | **true** | **PASS** |
 | launch Vercel | `/api/users/login` | OPTIONS | exact match | **true** | **PASS** |
 | app.mosaicbizhub.com | `/api/featured-products` | OPTIONS | exact match | **true** | **PASS** |
