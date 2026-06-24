@@ -62,22 +62,22 @@ function createCorsProbeApp(envOverrides) {
   };
 }
 
-test('OPTIONS /api/users/login allows production app origin with credentials', async () => {
+test('OPTIONS /api/users/login allows production apex origin with credentials', async () => {
   const { app, cleanup } = createCorsProbeApp({
     NODE_ENV: 'production',
     CORS_ORIGINS:
-      'https://app.mosaicbizhub.com,https://mosaic-biz-frontend-launch.vercel.app',
+      'https://mosaicbizhub.com,https://app.mosaicbizhub.com,https://mosaic-biz-frontend-launch.vercel.app',
   });
 
   try {
     const res = await supertest(app)
       .options('/api/users/login')
-      .set('Origin', 'https://app.mosaicbizhub.com')
+      .set('Origin', 'https://mosaicbizhub.com')
       .set('Access-Control-Request-Method', 'POST')
       .set('Access-Control-Request-Headers', 'content-type');
 
     assert.equal(res.status, 204);
-    assert.equal(res.headers['access-control-allow-origin'], 'https://app.mosaicbizhub.com');
+    assert.equal(res.headers['access-control-allow-origin'], 'https://mosaicbizhub.com');
     assert.equal(res.headers['access-control-allow-credentials'], 'true');
   } finally {
     cleanup();
@@ -88,7 +88,7 @@ test('OPTIONS /api/users/login allows Vercel preview origin when configured', as
   const { app, cleanup } = createCorsProbeApp({
     NODE_ENV: 'production',
     CORS_ORIGINS:
-      'https://app.mosaicbizhub.com,https://mosaic-biz-frontend-launch.vercel.app',
+      'https://mosaicbizhub.com,https://app.mosaicbizhub.com,https://mosaic-biz-frontend-launch.vercel.app',
   });
 
   try {
@@ -111,7 +111,7 @@ test('OPTIONS /api/users/login allows Vercel preview origin when configured', as
 test('OPTIONS /api/users/login rejects disallowed origin', async () => {
   const { app, cleanup } = createCorsProbeApp({
     NODE_ENV: 'production',
-    CORS_ORIGINS: 'https://app.mosaicbizhub.com',
+    CORS_ORIGINS: 'https://mosaicbizhub.com',
   });
 
   try {

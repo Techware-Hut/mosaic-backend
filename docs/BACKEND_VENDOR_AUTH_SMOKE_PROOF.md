@@ -8,6 +8,8 @@
 **Main SHA at audit:** `5180b2b`  
 **Related:** [VENDOR_LOGIN_SESSION_AUDIT.md](VENDOR_LOGIN_SESSION_AUDIT.md), [BACKEND_PRODUCTION_SMOKE_PROOF.md](BACKEND_PRODUCTION_SMOKE_PROOF.md), PR [#96](https://github.com/Techware-Hut/mosaic-backend/pull/96)
 
+**Domain note:** this proof predates the root-domain correction. `https://mosaicbizhub.com` is now the canonical production frontend. `https://app.mosaicbizhub.com` references below are historical evidence or temporary transition probes.
+
 No secrets, JWTs, cookies, OTPs, passwords, or env values in this document.
 
 ---
@@ -82,7 +84,7 @@ No secrets, JWTs, cookies, OTPs, passwords, or env values in this document.
 ./scripts/smoke-backend.ps1 -ApiBaseUrl https://api.mosaicbizhub.com
 ```
 
-Probes both CORS origins (`app.mosaicbizhub.com` and launch Vercel URL), health, featured-products, admin categories NOTE, admin products test NOTE.
+Probes approved CORS origins (canonical apex, transition app, and launch Vercel URL), health, featured-products, admin categories NOTE, admin products test NOTE.
 
 ### Credentialed vendor cookie chain (session-only env vars — never commit)
 
@@ -191,7 +193,7 @@ Static test: [tests/admin/admin-categories-guard.test.js](../tests/admin/admin-c
 
 - Credentialed vendor login in this session (credentials not available)
 - Live Stripe payments, webhooks, Connect charges
-- Browser DevTools UI flow on `https://app.mosaicbizhub.com`
+- Browser DevTools UI flow on canonical `https://mosaicbizhub.com`
 - Full OTP register → verify → login end-to-end
 - EB boot logs and deploy SHA confirmation on production
 
@@ -209,5 +211,5 @@ Rollback: revert this branch commit. Smoke script changes are additive NOTE rows
 
 1. **Merge PR #96** — remove debug admin products test route from production
 2. **Re-run credentialed vendor proof** with release-owner test account env vars
-3. **Frontend** — verify `business_owner` role and `credentials: 'include'` on app.mosaicbizhub.com ([#142–#144](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/142))
+3. **Frontend** — verify `business_owner` role and `credentials: 'include'` on `mosaicbizhub.com` ([#142–#144](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/142))
 4. **Separate PR** — guard `GET /api/admin/categories` (approval required)

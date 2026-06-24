@@ -166,7 +166,7 @@ test('Google OAuth start rejects hostile redirect query origins in production st
       GOOGLE_CLIENT_ID: 'google-client-id',
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
       API_BASE_URL: 'https://api.mosaicbizhub.com',
-      FRONTEND_URL: 'https://app.mosaicbizhub.com',
+      FRONTEND_URL: 'https://mosaicbizhub.com',
       JWT_SECRET: 'test-secret',
       REQUIRE_PROFILE_COMPLETION: 'false',
       TEMP_COOKIE_TTL_SEC: '900',
@@ -195,7 +195,7 @@ test('Google OAuth start rejects hostile redirect query origins in production st
 
       assert.equal(res.redirectUrl, 'https://accounts.google.com/mock-auth');
       const state = JSON.parse(Buffer.from(capturedState, 'base64').toString());
-      assert.equal(state.redirect, 'https://app.mosaicbizhub.com/');
+      assert.equal(state.redirect, 'https://mosaicbizhub.com/');
     }
   );
 });
@@ -207,7 +207,7 @@ test('Google OAuth callback rejects tampered hostile state redirect origins', as
       GOOGLE_CLIENT_ID: 'google-client-id',
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
       API_BASE_URL: 'https://api.mosaicbizhub.com',
-      FRONTEND_URL: 'https://app.mosaicbizhub.com',
+      FRONTEND_URL: 'https://mosaicbizhub.com',
       JWT_SECRET: 'test-secret',
       REQUIRE_PROFILE_COMPLETION: 'false',
       TEMP_COOKIE_TTL_SEC: '900',
@@ -268,7 +268,7 @@ test('Google OAuth callback rejects tampered hostile state redirect origins', as
 
       await authController.handleGoogleCallback(req, res);
 
-      assert.equal(res.redirectUrl, 'https://app.mosaicbizhub.com/');
+      assert.equal(res.redirectUrl, 'https://mosaicbizhub.com/');
     }
   );
 });

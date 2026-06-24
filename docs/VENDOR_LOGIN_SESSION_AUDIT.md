@@ -1,6 +1,6 @@
 # Vendor Login Session Audit
 
-**Issue context:** Verified vendor OTP succeeds; separate login from production frontend (`https://app.mosaicbizhub.com`) does not keep session.  
+**Issue context:** Verified vendor OTP succeeds; separate login from the then-current production frontend (`https://app.mosaicbizhub.com`) did not keep session. The current canonical production frontend target is `https://mosaicbizhub.com`; app-subdomain evidence below is historical and transition-only.
 **Tracking:** [#81 Backend auth cookie and credentialed request verification](https://github.com/Techware-Hut/mosaic-backend/issues/81)  
 **Branch:** `fix/backend-vendor-login-session-cookie-smoke`  
 **Recorded:** 2026-06-18
@@ -99,7 +99,7 @@ No change to login vendor logic, CORS, or Stripe paths.
 
 ## Frontend handoff (credentialed prod proof **PASS**)
 
-Backend cookie/session chain verified against production API. Verify on `https://app.mosaicbizhub.com`:
+Backend cookie/session chain verified against production API. Re-verify the same chain on `https://mosaicbizhub.com` before release; `https://app.mosaicbizhub.com` is transition-only:
 
 1. Vendor login uses `POST /api/users/login` with `credentials: 'include'`.
 2. Session role check uses **`business_owner`**, not `vendor`.

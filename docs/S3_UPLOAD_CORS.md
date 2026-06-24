@@ -56,6 +56,7 @@ Apply on bucket **`mosaic-biz-hub`** (must match production `AWS_S3_BUCKET`):
   {
     "AllowedOrigins": [
       "https://mosaic-biz-frontend-launch.vercel.app",
+      "https://mosaicbizhub.com",
       "https://app.mosaicbizhub.com"
     ],
     "AllowedMethods": ["PUT", "GET", "HEAD"],
@@ -74,6 +75,8 @@ Apply on bucket **`mosaic-biz-hub`** (must match production `AWS_S3_BUCKET`):
 ## Live verification results (2026-06-19)
 
 Probes used credentialed vendor session against production API; signed URL query strings were **not** recorded.
+
+**Domain note:** this historical proof predates the root-domain correction. The bucket policy above now includes the canonical apex origin; apex S3 upload CORS still needs a fresh browser/probe verification after DNS and frontend env cutover.
 
 ### API presign
 

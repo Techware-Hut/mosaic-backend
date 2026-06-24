@@ -129,6 +129,7 @@ foreach ($p in $paths) {
 }
 
 $corsOrigins = @(
+    'https://mosaicbizhub.com',
     'https://app.mosaicbizhub.com',
     'https://mosaic-biz-frontend-launch.vercel.app'
 )
