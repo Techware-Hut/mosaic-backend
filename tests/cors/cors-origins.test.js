@@ -56,13 +56,15 @@ test('parseCorsOrigins trims and filters empty entries', () => {
 test('getAllowedOrigins uses CORS_ORIGINS when set', () => {
   const { mod, cleanup } = loadCorsOrigins({
     NODE_ENV: 'production',
-    CORS_ORIGINS: 'https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com,https://mosaicbizhub.com,https://www.mosaicbizhub.com',
+    CORS_ORIGINS: 'https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com',
   });
   try {
     const origins = mod.getAllowedOrigins();
-    assert.ok(origins.includes('https://mosaicbizhub.com'));
-    assert.ok(origins.includes('https://www.mosaicbizhub.com'));
-    assert.equal(origins.length, 4);
+    assert.ok(origins.includes('https://mosaic-biz-frontend-launch.vercel.app'));
+    assert.ok(origins.includes('https://app.mosaicbizhub.com'));
+    assert.ok(!origins.includes('https://mosaicbizhub.com'));
+    assert.ok(!origins.includes('https://www.mosaicbizhub.com'));
+    assert.equal(origins.length, 2);
   } finally {
     cleanup();
   }
@@ -80,17 +82,19 @@ test('getAllowedOrigins dedupes CORS_ORIGINS entries', () => {
   }
 });
 
-test('getAllowedOrigins falls back to FRONTEND_URL and legacy when CORS_ORIGINS unset', () => {
+test('getAllowedOrigins falls back to FRONTEND_URL and credentialed app origins when CORS_ORIGINS unset', () => {
   const { mod, cleanup } = loadCorsOrigins({
     NODE_ENV: 'production',
     FRONTEND_URL: 'https://app.mosaicbizhub.com',
   });
   try {
     const origins = mod.getAllowedOrigins();
-    assert.ok(origins.includes('https://mosaicbizhub.com'));
     assert.ok(origins.includes('https://app.mosaicbizhub.com'));
-    for (const legacy of mod.LEGACY_DEFAULT_ORIGINS) {
-      assert.ok(origins.includes(legacy));
+    assert.ok(origins.includes('https://mosaic-biz-frontend-launch.vercel.app'));
+    assert.ok(!origins.includes('https://mosaicbizhub.com'));
+    assert.ok(!origins.includes('https://www.mosaicbizhub.com'));
+    for (const origin of mod.DEFAULT_CREDENTIAL_ORIGINS) {
+      assert.ok(origins.includes(origin));
     }
   } finally {
     cleanup();

@@ -55,7 +55,7 @@ Redact secret values before sharing; compare **names** to this matrix.
 |----------|--------------|------------|---------------|---------------------|--------|----------|-------|
 | `NODE_ENV` | yes — [`utils/corsOrigins.js`](../utils/corsOrigins.js) | yes | **Inferred yes** | `production` | Verify in EB | restart if changed | release owner |
 | `FRONTEND_URL` | yes — auth, Connect | yes | **Not verified** | `https://app.mosaicbizhub.com` | Verify matches production frontend | yes if wrong | release owner |
-| `CORS_ORIGINS` | yes — [`utils/corsOrigins.js`](../utils/corsOrigins.js) | yes | **Inferred yes** | `https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com,https://mosaicbizhub.com,https://www.mosaicbizhub.com` | Verify full list in EB; **replaces fallback when set** | restart | release owner |
+| `CORS_ORIGINS` | yes — [`utils/corsOrigins.js`](../utils/corsOrigins.js) | yes | **Inferred yes** | `https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com` | Verify full list in EB; **replaces fallback when set**. Root and www are community site origins and should stay out unless they are proven to call authenticated APIs. | restart | release owner |
 | `API_BASE_URL` | yes — OAuth | yes | **Not verified** | `https://api.mosaicbizhub.com` | Verify in EB | yes if wrong | release owner |
 | `COOKIE_DOMAIN` | yes — auth cookies | yes | **Not verified** | `.mosaicbizhub.com` | Verify for cross-subdomain cookies | restart | release owner |
 | `COOKIE_SECURE` | yes | yes | **Not verified** | `true` | Verify | restart | release owner |

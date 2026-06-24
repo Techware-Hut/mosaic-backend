@@ -1,6 +1,6 @@
 const Stripe = require('stripe');
 const Business = require('../models/Business'); // adjust path if needed
-const { buildFrontendUrl, normalizeFrontendUrl } = require('../utils/frontendUrl');
+const { sanitizeFrontendRedirectUrl } = require('../utils/frontendUrl');
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 
@@ -17,12 +17,15 @@ exports.createBillingPortalSessionForBusiness = async (req, res) => {
     if (!biz) return res.status(404).json({ error: 'Business not found' });
     if (!biz.stripeCustomerId) return res.status(400).json({ error: 'Business missing stripeCustomerId' });
 
+    const defaultReturnPath = `/partner/${businessId}/my-account`;
     const session = await stripe.billingPortal.sessions.create({
       customer: biz.stripeCustomerId,
-      return_url: normalizeFrontendUrl(
+      return_url: sanitizeFrontendRedirectUrl(
         return_url ||
           process.env.BILLING_PORTAL_RETURN_URL ||
-          buildFrontendUrl(`/partner/${businessId}/my-account`)
+          defaultReturnPath,
+        process.env,
+        defaultReturnPath
       ),
 
     });

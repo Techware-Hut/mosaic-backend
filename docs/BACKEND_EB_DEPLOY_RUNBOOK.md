@@ -60,9 +60,7 @@ GHA CORS probe checks **two** origins only (launch Vercel + app). After deploy, 
 ```powershell
 $origins = @(
   'https://mosaic-biz-frontend-launch.vercel.app',
-  'https://app.mosaicbizhub.com',
-  'https://mosaicbizhub.com',
-  'https://www.mosaicbizhub.com'
+  'https://app.mosaicbizhub.com'
 )
 foreach ($o in $origins) {
   curl.exe -s -D - -o NUL -X OPTIONS `
@@ -86,12 +84,12 @@ Expected: **PASS=11 FAIL=0** (BLOCKED=3 without auth tokens).
 
 ## EB environment configuration
 
-### CORS (required for all four launch origins)
+### CORS (required for marketplace app origins)
 
 AWS Console → Elastic Beanstalk → `mosaic-backend-env` → Configuration → Software → Environment properties:
 
 ```
-CORS_ORIGINS=https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com,https://mosaicbizhub.com,https://www.mosaicbizhub.com
+CORS_ORIGINS=https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com
 FRONTEND_URL=https://app.mosaicbizhub.com
 ```
 

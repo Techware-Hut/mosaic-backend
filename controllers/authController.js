@@ -8,7 +8,7 @@ const {
     clearAuthCookies,
 } = require('../utils/cookieHelper');
 const toPublicAuthUser = require('../utils/toPublicAuthUser');
-const { buildFrontendUrl, normalizeFrontendUrl } = require('../utils/frontendUrl');
+const { buildFrontendUrl, sanitizeFrontendRedirectUrl } = require('../utils/frontendUrl');
 
 const {
     GOOGLE_CLIENT_ID,
@@ -71,7 +71,7 @@ function setAuthCookies(res, user, sessionJwt, ttlSeconds = SESSION_TTL_SEC) {
  * q: redirect=<absolute URL to send user back to>
  */
 exports.startGoogleAuth = (req, res) => {
-    const redirect = normalizeFrontendUrl((req.query.redirect || FRONTEND_URL).toString(), frontendEnv());
+    const redirect = sanitizeFrontendRedirectUrl((req.query.redirect || FRONTEND_URL).toString(), frontendEnv(), '/');
     const state = Buffer.from(JSON.stringify({ redirect })).toString('base64');
 
     const url = oauth.generateAuthUrl({
@@ -154,7 +154,7 @@ exports.handleGoogleCallback = async (req, res) => {
         const session = mintSessionJWT(user);
         setAuthCookies(res, user, session);
 
-        return res.redirect(redirect || frontendUrl('/'));
+        return res.redirect(sanitizeFrontendRedirectUrl(redirect, frontendEnv(), '/'));
     } catch (err) {
         console.error('Google OAuth callback error:', err);
         return res.redirect(frontendUrl('/?error=google_login_failed'));

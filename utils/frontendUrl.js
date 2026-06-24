@@ -1,4 +1,12 @@
 const DEFAULT_FRONTEND_URL = 'https://app.mosaicbizhub.com';
+const APPROVED_FRONTEND_ORIGINS = [
+  'https://app.mosaicbizhub.com',
+  'https://mosaic-biz-frontend-launch.vercel.app',
+];
+const DEV_FRONTEND_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+];
 
 const ENV_PRIORITY = [
   'CANONICAL_FRONTEND_URL',
@@ -8,6 +16,11 @@ const ENV_PRIORITY = [
   'APP_URL',
 ];
 
+const DISALLOWED_FRONTEND_ORIGINS = new Set([
+  'https://mosaicbizhub.com',
+  'https://www.mosaicbizhub.com',
+]);
+
 function parseAbsoluteUrl(value) {
   if (!value) return null;
 
@@ -16,6 +29,33 @@ function parseAbsoluteUrl(value) {
   } catch {
     return null;
   }
+}
+
+function isProductionEnv(env = process.env) {
+  return env.NODE_ENV === 'production';
+}
+
+function getAllowedFrontendOrigins(env = process.env) {
+  const origins = [...APPROVED_FRONTEND_ORIGINS];
+
+  if (!isProductionEnv(env)) {
+    origins.push(...DEV_FRONTEND_ORIGINS);
+  }
+
+  return [...new Set(origins)];
+}
+
+function getOrigin(value) {
+  if (!value) return null;
+
+  const parsed = value instanceof URL ? value : parseAbsoluteUrl(value);
+  return parsed?.origin || null;
+}
+
+function isAllowedFrontendOrigin(value, env = process.env) {
+  const origin = getOrigin(value);
+  if (!origin || DISALLOWED_FRONTEND_ORIGINS.has(origin)) return false;
+  return getAllowedFrontendOrigins(env).includes(origin);
 }
 
 function toBaseUrlString(url) {
@@ -33,7 +73,7 @@ function toBaseUrlString(url) {
 function getFrontendBaseUrl(env = process.env) {
   for (const key of ENV_PRIORITY) {
     const parsed = parseAbsoluteUrl(env[key]);
-    if (parsed) {
+    if (parsed && isAllowedFrontendOrigin(parsed, env)) {
       return toBaseUrlString(parsed);
     }
   }
@@ -47,7 +87,25 @@ function normalizeFrontendUrl(value, env = process.env) {
   const parsed =
     parseAbsoluteUrl(rawValue) || new URL(rawValue || '/', `${baseUrl}/`);
 
-  return parsed.toString();
+  if (isAllowedFrontendOrigin(parsed, env)) {
+    return parsed.toString();
+  }
+
+  const safe = new URL(`${parsed.pathname}${parsed.search}${parsed.hash}`, `${baseUrl}/`);
+  return safe.toString();
+}
+
+function sanitizeFrontendRedirectUrl(value, env = process.env, fallbackPath = '/') {
+  const baseUrl = getFrontendBaseUrl(env);
+  const rawValue = String(value || fallbackPath || '/').trim();
+  const parsed =
+    parseAbsoluteUrl(rawValue) || new URL(rawValue || fallbackPath || '/', `${baseUrl}/`);
+
+  if (isAllowedFrontendOrigin(parsed, env)) {
+    return parsed.toString();
+  }
+
+  return buildFrontendUrl(fallbackPath || '/', env);
 }
 
 function buildFrontendUrl(path = '/', env = process.env) {
@@ -59,9 +117,14 @@ function getFrontendLogoUrl(env = process.env) {
 }
 
 module.exports = {
+  APPROVED_FRONTEND_ORIGINS,
   DEFAULT_FRONTEND_URL,
+  DEV_FRONTEND_ORIGINS,
   buildFrontendUrl,
+  getAllowedFrontendOrigins,
   getFrontendBaseUrl,
   getFrontendLogoUrl,
+  isAllowedFrontendOrigin,
   normalizeFrontendUrl,
+  sanitizeFrontendRedirectUrl,
 };

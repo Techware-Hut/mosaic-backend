@@ -84,10 +84,8 @@ Full list: [production-env-checklist.md](production-env-checklist.md)
 - [ ] `CORS_ORIGINS` set on EB with explicit production frontends (recommended):
   - `https://mosaic-biz-frontend-launch.vercel.app`
   - `https://app.mosaicbizhub.com`
-  - `https://mosaicbizhub.com`
-  - `https://www.mosaicbizhub.com`
 - [ ] `FRONTEND_URL` matches canonical app host (`https://app.mosaicbizhub.com`) for OAuth redirects and emails
-- [ ] If `CORS_ORIGINS` is unset, verify legacy fallback still allows launch Vercel + app origins ([`utils/corsOrigins.js`](../utils/corsOrigins.js))
+- [ ] If `CORS_ORIGINS` is unset, verify default fallback still allows launch Vercel + app origins and does not include the root community site ([`utils/corsOrigins.js`](../utils/corsOrigins.js))
 - [ ] Frontend `NEXT_PUBLIC_API_BASE_URL` → `https://api.mosaicbizhub.com`
 
 ---

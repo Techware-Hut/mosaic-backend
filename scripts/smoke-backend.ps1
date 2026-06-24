@@ -130,7 +130,6 @@ foreach ($p in $paths) {
 
 $corsOrigins = @(
     'https://app.mosaicbizhub.com',
-    'https://mosaicbizhub.com',
     'https://mosaic-biz-frontend-launch.vercel.app'
 )
 if ($env:FRONTEND_ORIGIN) {
