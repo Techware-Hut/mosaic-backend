@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { buildFrontendUrl, getFrontendLogoUrl } = require('./frontendUrl');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -23,7 +24,7 @@ exports.sendWelcomeEmail = async (to, vendorName) => {
         <p style="color: #555; font-size: 16px;">
           Explore, engage, and make the most out of your journey with us.
         </p>
-        <a href="https://app.mosaicbizhub.com" 
+        <a href="${buildFrontendUrl('/')}" 
            style="display: inline-block; margin-top: 20px; padding: 10px 20px; background-color: #0d6efd; color: #fff; text-decoration: none; border-radius: 5px;">
            Visit Platform
         </a>
@@ -35,7 +36,7 @@ exports.sendWelcomeEmail = async (to, vendorName) => {
     attachments: [
       {
         filename: 'logo.png',
-        path: 'https://app.mosaicbizhub.com/_next/image?url=%2Flogo.png&w=750&q=75',
+        path: getFrontendLogoUrl(),
         cid: 'platformLogo', // same CID as used in the <img src="cid:...">
       }
     ]
@@ -81,7 +82,7 @@ exports.sendAdminOnboardingSubmissionEmail = async ({
           Please log in to the Admin Dashboard to review the submitted application and proceed with the verification process.
         </p>
 
-        <a href="https://app.mosaicbizhub.com/admin/vendor-applications/${applicationId}"
+        <a href="${buildFrontendUrl(`/admin/vendor-applications/${applicationId}`)}"
            style="display:inline-block;margin-top:16px;padding:10px 16px;
            background:#0d6efd;color:#fff;text-decoration:none;border-radius:4px;">
            Access Admin Dashboard
@@ -156,7 +157,7 @@ exports.sendVendorApprovedEmail = async ({
 
         <p><strong>Application ID:</strong> ${applicationId}</p>
 
-        <a href="https://app.mosaicbizhub.com/login?type=vendor"
+        <a href="${buildFrontendUrl('/login?type=vendor')}"
            style="display:inline-block;margin-top:16px;padding:12px 20px;
            background:#28a745;color:#fff;text-decoration:none;border-radius:4px;">
             Continue Onboarding
@@ -214,7 +215,7 @@ exports.sendVendorRejectionEmail = async ({
 
           <div style="margin:25px 0; text-align:center;">
             <a 
-              href="https://app.mosaicbizhub.com/partners/business/new"
+              href="${buildFrontendUrl('/partners/business/new')}"
               style="background:#c79b44; color:#fff; padding:12px 18px; text-decoration:none; border-radius:6px; font-size:14px; font-weight:bold;"
             >
               Update Documents
@@ -376,7 +377,7 @@ exports.sendAdminVendorProfileCompletedEmail = async ({
 
   const safeApplicationId = applicationId || "N/A";
   const safeBusinessName = businessName || "N/A";
-  const dashboardLink = `https://app.mosaicbizhub.com/admin/vendor-applications/${applicationId}`;
+  const dashboardLink = buildFrontendUrl(`/admin/vendor-applications/${applicationId}`);
 
   const mailOptions = {
     from: `"Mosaic Biz Hub System Notification" <${process.env.MAIL_USER}>`,
@@ -435,7 +436,7 @@ exports.sendVendorTrustBadgeAssignedEmail = async ({
   vendorName,
   badgeName,
 }) => {
-  const dashboardLink = "https://app.mosaicbizhub.com/login?type=vendor";
+  const dashboardLink = buildFrontendUrl("/login?type=vendor");
 
   const mailOptions = {
     from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
@@ -503,7 +504,7 @@ exports.sendAdminVendorCategoryRequestEmail = async ({
   // const safeBusinessName = businessName || "N/A";
   const safeRequestedCategory = requestedCategory || "N/A";
 
-  const dashboardLink = `https://app.mosaicbizhub.com/admin/category-requests`;
+  const dashboardLink = buildFrontendUrl("/admin/category-requests");
 
   const mailOptions = {
     from: `"Mosaic Biz Hub System Notification" <${process.env.MAIL_USER}>`,

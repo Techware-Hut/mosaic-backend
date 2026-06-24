@@ -2,10 +2,11 @@
 const nodemailer = require("nodemailer");
 const PDFDocument = require("pdfkit");
 const { renderInvoicePdfBufferForOrder } = require("../services/invoiceService");
+const { getFrontendBaseUrl, getFrontendLogoUrl } = require("./frontendUrl");
 
-const APP_URL = process.env.APP_URL || "https://app.mosaicbizhub.com";
+const APP_URL = getFrontendBaseUrl();
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || process.env.MAIL_USER;
-const LOGO_URL = 'https://app.mosaicbizhub.com/_next/image?url=%2Flogo.png&w=750&q=75';
+const LOGO_URL = getFrontendLogoUrl();
 
 const transporter =
   global.__MAILER__ ||
@@ -339,7 +340,7 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
   const invoiceFileName = `invoice-${order.groupOrderId || order._id}.pdf`;
 
   const attachments = [
-    { filename: "logo.png", path: "https://app.mosaicbizhub.com/_next/image?url=%2Flogo.png&w=750&q=75", cid: "platformLogo" },
+    { filename: "logo.png", path: LOGO_URL, cid: "platformLogo" },
     { filename: invoiceFileName, content: pdf, contentType: "application/pdf" },
   ];
 

@@ -1,5 +1,6 @@
 const Stripe = require('stripe');
 const Business = require('../models/Business'); // adjust path if needed
+const { buildFrontendUrl, normalizeFrontendUrl } = require('../utils/frontendUrl');
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 
@@ -18,7 +19,11 @@ exports.createBillingPortalSessionForBusiness = async (req, res) => {
 
     const session = await stripe.billingPortal.sessions.create({
       customer: biz.stripeCustomerId,
-      return_url: return_url || process.env.BILLING_PORTAL_RETURN_URL || `${process.env.FRONTEND_URL}/partner/${businessId}/my-account`,
+      return_url: normalizeFrontendUrl(
+        return_url ||
+          process.env.BILLING_PORTAL_RETURN_URL ||
+          buildFrontendUrl(`/partner/${businessId}/my-account`)
+      ),
 
     });
 

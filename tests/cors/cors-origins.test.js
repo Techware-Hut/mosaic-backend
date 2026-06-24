@@ -87,6 +87,7 @@ test('getAllowedOrigins falls back to FRONTEND_URL and legacy when CORS_ORIGINS 
   });
   try {
     const origins = mod.getAllowedOrigins();
+    assert.ok(origins.includes('https://mosaicbizhub.com'));
     assert.ok(origins.includes('https://app.mosaicbizhub.com'));
     for (const legacy of mod.LEGACY_DEFAULT_ORIGINS) {
       assert.ok(origins.includes(legacy));

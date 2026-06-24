@@ -5,6 +5,7 @@ const Subscription = require("../models/Subscription");
 const Business = require("../models/Business");
 const { sendWelcomeEmail } = require("../utils/WellcomeMailer");
 const { ensurePlanPrice } = require('../helpers/stripePlan');
+const { buildFrontendUrl } = require('../utils/frontendUrl');
 
 exports.createCheckoutSession = async (req, res) => {
   try {
@@ -29,8 +30,8 @@ exports.createCheckoutSession = async (req, res) => {
       mode: "subscription",
       customer_email: draft.email,
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: "https://app.mosaicbizhub.com/partners",
-      cancel_url: "https://app.mosaicbizhub.com/partners",
+      success_url: buildFrontendUrl("/partners"),
+      cancel_url: buildFrontendUrl("/partners"),
       metadata: {
         draftId: draft._id.toString(),
         ownerId: draft.owner.toString(),

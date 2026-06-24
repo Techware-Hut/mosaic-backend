@@ -1,4 +1,5 @@
 const LEGACY_DEFAULT_ORIGINS = [
+  'https://mosaicbizhub.com',
   'https://app.mosaicbizhub.com',
   'https://www.mosaicbizhub.com',
   'https://mosaic-biz-frontend-launch.vercel.app',

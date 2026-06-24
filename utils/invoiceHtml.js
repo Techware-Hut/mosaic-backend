@@ -1,8 +1,9 @@
 // utils/invoiceHtml.js
 const axios = require('axios');
+const { getFrontendLogoUrl } = require('./frontendUrl');
 
 const CURRENCY_MINOR_DIGITS = { USD: 2, INR: 2, EUR: 2, GBP: 2, AED: 2, AUD: 2, CAD: 2, JPY: 0, KWD: 3 };
-const LOGO_URL = 'https://app.mosaicbizhub.com/_next/image?url=%2Flogo.png&w=750&q=75';
+const LOGO_URL = getFrontendLogoUrl();
 
 const minorDigits = (c = 'USD') => CURRENCY_MINOR_DIGITS[String(c || 'USD').toUpperCase()] ?? 2;
 // Smart converter: if a subtotal hint is provided, choose minor→major or pass-through (already major)

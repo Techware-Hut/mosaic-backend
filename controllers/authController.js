@@ -8,6 +8,7 @@ const {
     clearAuthCookies,
 } = require('../utils/cookieHelper');
 const toPublicAuthUser = require('../utils/toPublicAuthUser');
+const { buildFrontendUrl, normalizeFrontendUrl } = require('../utils/frontendUrl');
 
 const {
     GOOGLE_CLIENT_ID,
@@ -35,6 +36,8 @@ const oauth = new OAuth2Client(
 const SESSION_TTL_SEC = 7 * 24 * 60 * 60;
 const TEMP_PROFILE_TTL_SEC = Math.max(60, Number(TEMP_COOKIE_TTL_SEC) || 900);
 const TEMP_PROFILE_TTL_MS = TEMP_PROFILE_TTL_SEC * 1000;
+const frontendEnv = () => ({ ...process.env, FRONTEND_URL });
+const frontendUrl = (path = '/') => buildFrontendUrl(path, frontendEnv());
 
 function getServerAssignedOAuthRole(existingUser) {
     if (!existingUser) return 'customer';
@@ -68,7 +71,7 @@ function setAuthCookies(res, user, sessionJwt, ttlSeconds = SESSION_TTL_SEC) {
  * q: redirect=<absolute URL to send user back to>
  */
 exports.startGoogleAuth = (req, res) => {
-    const redirect = (req.query.redirect || FRONTEND_URL).toString();
+    const redirect = normalizeFrontendUrl((req.query.redirect || FRONTEND_URL).toString(), frontendEnv());
     const state = Buffer.from(JSON.stringify({ redirect })).toString('base64');
 
     const url = oauth.generateAuthUrl({
@@ -93,11 +96,11 @@ exports.handleGoogleCallback = async (req, res) => {
 
         const { tokens } = await oauth.getToken(code);
         const idToken = tokens.id_token;
-        if (!idToken) return res.redirect(`${FRONTEND_URL}?error=no_id_token`);
+        if (!idToken) return res.redirect(frontendUrl('/?error=no_id_token'));
 
         const ticket = await oauth.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID });
         const payload = ticket.getPayload();
-        if (!payload?.email) return res.redirect(`${FRONTEND_URL}?error=no_email_from_google`);
+        if (!payload?.email) return res.redirect(frontendUrl('/?error=no_email_from_google'));
 
         const googleId = payload.sub;
         const email = payload.email.toLowerCase();
@@ -126,7 +129,7 @@ exports.handleGoogleCallback = async (req, res) => {
         }
 
         if (user.isBlocked || user.isDeleted) {
-            return res.redirect(`${FRONTEND_URL}?error=account_restricted`);
+            return res.redirect(frontendUrl('/?error=account_restricted'));
         }
 
         // (optional) if you must collect mobile/minorityType first
@@ -144,17 +147,17 @@ exports.handleGoogleCallback = async (req, res) => {
                 httpOnly: true,
                 maxAge: TEMP_PROFILE_TTL_MS,
             });
-            return res.redirect(`${FRONTEND_URL}/complete-profile`);
+            return res.redirect(frontendUrl('/complete-profile'));
         }
 
         // set the three cookies the same way as your login route
         const session = mintSessionJWT(user);
         setAuthCookies(res, user, session);
 
-        return res.redirect(redirect || FRONTEND_URL);
+        return res.redirect(redirect || frontendUrl('/'));
     } catch (err) {
         console.error('Google OAuth callback error:', err);
-        return res.redirect(`${FRONTEND_URL}?error=google_login_failed`);
+        return res.redirect(frontendUrl('/?error=google_login_failed'));
     }
 };
 

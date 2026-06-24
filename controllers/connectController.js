@@ -3,6 +3,7 @@ const Stripe = require('stripe');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const Business = require('../models/Business');
 const { getReturnAndRefreshUrls } = require('../lib/connect/connectUrls');
+const { buildFrontendUrl } = require('../utils/frontendUrl');
 
 function normalizeCapabilityStatus(status) {
   return typeof status === 'string' ? status.toLowerCase() : 'inactive';
@@ -131,19 +132,25 @@ exports.getStatus = async (req, res) => {
  */
 exports.handleReturn = async (req, res) => {
   try {
-    const frontend = process.env.FRONTEND_URL;
     // send the user to the vendor dashboard connect return page
-    return res.redirect(`${frontend}/partners/connect/return${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`);
+    return res.redirect(
+      buildFrontendUrl(
+        `/partners/connect/return${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`
+      )
+    );
   } catch {
-    return res.redirect(process.env.FRONTEND_URL || '/');
+    return res.redirect(buildFrontendUrl('/'));
   }
 };
 
 exports.handleRefresh = async (req, res) => {
   try {
-    const frontend = process.env.FRONTEND_URL;
-    return res.redirect(`${frontend}/partners/connect/refresh${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`);
+    return res.redirect(
+      buildFrontendUrl(
+        `/partners/connect/refresh${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`
+      )
+    );
   } catch {
-    return res.redirect(process.env.FRONTEND_URL || '/');
+    return res.redirect(buildFrontendUrl('/'));
   }
 };

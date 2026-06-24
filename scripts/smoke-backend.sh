@@ -88,6 +88,7 @@ do
 done
 
 CORS_ORIGINS=(
+  "https://mosaicbizhub.com"
   "https://app.mosaicbizhub.com"
   "https://mosaic-biz-frontend-launch.vercel.app"
 )

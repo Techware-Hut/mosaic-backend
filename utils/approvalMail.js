@@ -1,7 +1,8 @@
 // mailer/businessStatusEmails.js
 const nodemailer = require("nodemailer");
+const { getFrontendBaseUrl } = require("./frontendUrl");
 
-const APP_URL = process.env.FRONTEND_URL || "https://app.mosaicbizhub.com";
+const APP_URL = getFrontendBaseUrl();
 const SUPPORT_EMAIL ="support@mosaicbizhub.com";
 
 // If you already have a transporter elsewhere, delete this block and import that one.
