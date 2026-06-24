@@ -1,5 +1,37 @@
 const Discount = require('../models/Discounts');
+const Business = require('../models/Business');
 const mongoose = require('mongoose');
+
+const UPDATABLE_DISCOUNT_FIELDS = [
+  'name',
+  'couponCode',
+  'type',
+  'value',
+  'minOrderAmount',
+  'maxDiscountAmount',
+  'usageLimit',
+  'validFrom',
+  'validTill',
+  'isActive',
+];
+
+async function findDiscountOwnedByUser(discountId, userId) {
+  if (!mongoose.Types.ObjectId.isValid(discountId)) {
+    return null;
+  }
+
+  const discount = await Discount.findById(discountId);
+  if (!discount) {
+    return null;
+  }
+
+  const business = await Business.findOne({
+    _id: discount.businessId,
+    owner: userId,
+  });
+
+  return business ? discount : null;
+}
 
 // ============================================
 // CREATE DISCOUNT
@@ -87,7 +119,7 @@ exports.getBusinessDiscounts = async (req, res) => {
 // ============================================
 exports.getDiscountById = async (req, res) => {
   try {
-    const discount = await Discount.findById(req.params.id);
+    const discount = await findDiscountOwnedByUser(req.params.id, req.user._id);
 
     if (!discount) {
       return res.status(404).json({
@@ -116,11 +148,7 @@ exports.getDiscountById = async (req, res) => {
 // ============================================
 exports.updateDiscount = async (req, res) => {
   try {
-    const discount = await Discount.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
+    const discount = await findDiscountOwnedByUser(req.params.id, req.user._id);
 
     if (!discount) {
       return res.status(404).json({
@@ -128,6 +156,16 @@ exports.updateDiscount = async (req, res) => {
         message: "Discount not found"
       });
     }
+
+    for (const field of UPDATABLE_DISCOUNT_FIELDS) {
+      if (req.body[field] !== undefined) {
+        discount[field] = field === 'couponCode'
+          ? String(req.body[field]).toUpperCase()
+          : req.body[field];
+      }
+    }
+
+    await discount.save();
 
     res.json({
       success: true,
@@ -149,7 +187,7 @@ exports.updateDiscount = async (req, res) => {
 // ============================================
 exports.deleteDiscount = async (req, res) => {
   try {
-    const discount = await Discount.findByIdAndDelete(req.params.id);
+    const discount = await findDiscountOwnedByUser(req.params.id, req.user._id);
 
     if (!discount) {
       return res.status(404).json({
@@ -157,6 +195,8 @@ exports.deleteDiscount = async (req, res) => {
         message: "Discount not found"
       });
     }
+
+    await discount.deleteOne();
 
     res.json({
       success: true,

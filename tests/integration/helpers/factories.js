@@ -9,6 +9,7 @@ const ServiceSubcategory = require('../../../models/ServiceSubcategory');
 const Subscription = require('../../../models/Subscription');
 const SubscriptionPlan = require('../../../models/SubscriptionPlan');
 const VendorOnboarding = require('../../../models/VendorOnboardingStage1');
+const Discount = require('../../../models/Discounts');
 const { getCapturedOtp } = require('./otpCapture');
 
 function uniqueEmail(prefix) {
@@ -194,6 +195,21 @@ async function seedVendorOnboarding(user, overrides = {}) {
   });
 }
 
+async function seedDiscount(business, overrides = {}) {
+  const suffix = `${Date.now()}_${Math.random().toString(16).slice(2, 8)}`.toUpperCase();
+
+  return Discount.create({
+    businessId: business._id,
+    name: overrides.name || 'Integration Discount',
+    couponCode: overrides.couponCode || `INT${suffix}`.slice(0, 20),
+    type: overrides.type || 'percentage',
+    value: overrides.value ?? 10,
+    minOrderAmount: overrides.minOrderAmount ?? 0,
+    isActive: overrides.isActive ?? true,
+    ...overrides,
+  });
+}
+
 module.exports = {
   validStage1Draft,
   registerUser,
@@ -205,6 +221,7 @@ module.exports = {
   seedServiceBusiness,
   seedServiceCategories,
   seedPublishedProduct,
+  seedDiscount,
   seedVendorOnboarding,
   uniqueEmail,
 };
