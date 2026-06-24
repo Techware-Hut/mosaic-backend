@@ -19,7 +19,7 @@ For full route maps and lifecycle detail, see [ARCHITECTURE.md](ARCHITECTURE.md)
 | Entry | `index.js` → `app.js` |
 | Default port | `3001` |
 | Production API | `https://api.mosaicbizhub.com` |
-| Deploy target | AWS Elastic Beanstalk (manual GHA deploy from `main`) |
+| Deploy target | AWS Elastic Beanstalk (auto GHA deploy on push/merge to `main`; manual `workflow_dispatch` also available) |
 | **MVP program status** | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) |
 
 ---
@@ -404,7 +404,7 @@ POST finalizeVerification  → status verified → syncBusinessFromOnboarding �
 | [production-smoke-checklist.md](production-smoke-checklist.md) | Post-deploy smoke tiers P0–P6 |
 | [production-env-checklist.md](production-env-checklist.md) | EB env var audit |
 
-**Branch flow:** `sprint/backend-*` → PR → human merge → `main` → manual GHA EB deploy. Push-to-main auto-deploy is **disabled**.
+**Branch flow:** `feature/*` or `sprint/backend-*` → PR → **`staging`** → PR → **`main`** → auto GHA EB deploy. Never open feature PRs directly to `main`. Manual `workflow_dispatch` remains for redeploys.
 
 ---
 
@@ -432,7 +432,8 @@ POST finalizeVerification  → status verified → syncBusinessFromOnboarding �
 ## Release-control guardrails (agents)
 
 - One issue per branch; one PR per issue
-- No direct commits to `main`; no merge; no deploy
+- Branch from `staging`; promote via PR to `staging`, then PR `staging` → `main` only
+- No direct commits to `main`; no merge; no manual deploy triggers
 - No secrets in docs, logs, or screenshots
 - No fake production proof or live Stripe charges
 - Do not edit deploy workflows without explicit issue scope + written approval

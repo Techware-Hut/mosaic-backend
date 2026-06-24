@@ -70,12 +70,12 @@ flowchart LR
 | 2 | Complete [STAGING.md](../STAGING.md) integration checklist | Backend engineer + reviewer | **Provisional** |
 | 3 | Open PR `staging` → `main`; obtain approvals | Reviewer + release owner | **Provisional** |
 | 4 | Confirm rollback readiness (SHA, EB path) | Release owner + infra owner | **Provisional** |
-| 5 | Deploy exact `main` commit to EB | Infrastructure owner | — |
+| 5 | Auto-deploy exact `main` commit to EB via GHA | GitHub Actions (on push/merge to `main`) | — |
 | 6 | **Confirm deployed commit on EB** | **Infrastructure / deployment owner** | **Required before final smoke** |
 | 7 | Run post-deploy smoke on `https://api.mosaicbizhub.com` | Release owner | **Provisional until commit confirmed** |
 | 8 | Fill proof pack; Go/No-Go decision | Release owner | **Final launch sign-off** |
 
-**No auto-deploy on merge.** Merging to `main` does not update EB until the infrastructure owner deploys.
+**Auto-deploy on merge.** Merging or pushing to `main` triggers the deploy workflow after tests pass. Manual `workflow_dispatch` remains available for redeploys.
 
 **Critical rule:** Final launch sign-off requires the **deployment owner to confirm the commit SHA running on EB** matches the intended `main` release. Baseline health probes on the custom domain (while an older commit is still live) are **not** sufficient for sign-off.
 
