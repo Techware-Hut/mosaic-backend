@@ -88,8 +88,8 @@ do
 done
 
 CORS_ORIGINS=(
-  "https://mosaicbizhub.com"
   "https://app.mosaicbizhub.com"
+  "https://mosaicbizhub.com"
   "https://mosaic-biz-frontend-launch.vercel.app"
 )
 if [ -n "${FRONTEND_ORIGIN:-}" ]; then

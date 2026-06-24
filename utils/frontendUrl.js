@@ -1,5 +1,4 @@
-const DEFAULT_FRONTEND_URL = 'https://mosaicbizhub.com';
-const LEGACY_FRONTEND_HOSTS = new Set(['app.mosaicbizhub.com']);
+const DEFAULT_FRONTEND_URL = 'https://app.mosaicbizhub.com';
 
 const ENV_PRIORITY = [
   'CANONICAL_FRONTEND_URL',
@@ -31,14 +30,10 @@ function toBaseUrlString(url) {
   return copy.toString().replace(/\/$/, '');
 }
 
-function isLegacyFrontendHost(url) {
-  return LEGACY_FRONTEND_HOSTS.has(url.hostname.toLowerCase());
-}
-
 function getFrontendBaseUrl(env = process.env) {
   for (const key of ENV_PRIORITY) {
     const parsed = parseAbsoluteUrl(env[key]);
-    if (parsed && !isLegacyFrontendHost(parsed)) {
+    if (parsed) {
       return toBaseUrlString(parsed);
     }
   }
@@ -51,12 +46,6 @@ function normalizeFrontendUrl(value, env = process.env) {
   const rawValue = String(value || '/').trim();
   const parsed =
     parseAbsoluteUrl(rawValue) || new URL(rawValue || '/', `${baseUrl}/`);
-
-  if (isLegacyFrontendHost(parsed)) {
-    const canonical = new URL(`${baseUrl}/`);
-    parsed.protocol = canonical.protocol;
-    parsed.host = canonical.host;
-  }
 
   return parsed.toString();
 }
@@ -71,7 +60,6 @@ function getFrontendLogoUrl(env = process.env) {
 
 module.exports = {
   DEFAULT_FRONTEND_URL,
-  LEGACY_FRONTEND_HOSTS,
   buildFrontendUrl,
   getFrontendBaseUrl,
   getFrontendLogoUrl,

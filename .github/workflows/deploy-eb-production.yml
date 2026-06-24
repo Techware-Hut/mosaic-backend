@@ -139,10 +139,10 @@ jobs:
       - name: Post-deploy CORS probe
         env:
           LAUNCH_ORIGIN: https://mosaic-biz-frontend-launch.vercel.app
-          APP_ORIGIN: https://mosaicbizhub.com
-          LEGACY_APP_ORIGIN: https://app.mosaicbizhub.com
+          APP_ORIGIN: https://app.mosaicbizhub.com
+          ROOT_ORIGIN: https://mosaicbizhub.com
         run: |
-          for origin in "$LAUNCH_ORIGIN" "$APP_ORIGIN" "$LEGACY_APP_ORIGIN"; do
+          for origin in "$LAUNCH_ORIGIN" "$APP_ORIGIN" "$ROOT_ORIGIN"; do
             echo "CORS OPTIONS for Origin: $origin"
             headers=$(curl -s -D - -o /dev/null -X OPTIONS \
               -H "Origin: $origin" \
