@@ -1,4 +1,5 @@
 const isProd = process.env.NODE_ENV === 'production';
+const PROD_COOKIE_DOMAIN_DEFAULT = '.mosaicbizhub.com';
 
 function parseBooleanEnv(value, fallback) {
   if (value === undefined) return fallback;
@@ -14,13 +15,58 @@ function normalizeSameSite(value) {
   return normalized;
 }
 
+function parseHostnameFromUrl(value) {
+  if (!value) return undefined;
+  try {
+    return new URL(String(value).trim()).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeDomainCandidate(domain) {
+  return String(domain).trim().replace(/^\./, '').toLowerCase();
+}
+
+function isCookieDomainValidForHost(cookieDomain, requestHost) {
+  if (!cookieDomain || !requestHost) return true;
+
+  const domain = normalizeDomainCandidate(cookieDomain);
+  const host = String(requestHost).trim().toLowerCase();
+
+  return host === domain || host.endsWith(`.${domain}`);
+}
+
+function resolveApiHost() {
+  return (
+    parseHostnameFromUrl(process.env.API_BASE_URL) ||
+    (isProd ? 'api.mosaicbizhub.com' : undefined)
+  );
+}
+
+let loggedInvalidCookieDomain = false;
+
 function resolveCookieDomain() {
+  const apiHost = resolveApiHost();
+
   if (process.env.COOKIE_DOMAIN === undefined) {
-    return isProd ? '.mosaicbizhub.com' : undefined;
+    return isProd ? PROD_COOKIE_DOMAIN_DEFAULT : undefined;
   }
 
   const trimmed = String(process.env.COOKIE_DOMAIN).trim();
-  return trimmed.length > 0 ? trimmed : undefined;
+  if (trimmed.length === 0) return undefined;
+
+  if (apiHost && !isCookieDomainValidForHost(trimmed, apiHost)) {
+    if (!loggedInvalidCookieDomain) {
+      console.warn(
+        '[cookieHelper] COOKIE_DOMAIN is not valid for the API host; using safe fallback'
+      );
+      loggedInvalidCookieDomain = true;
+    }
+    return isProd ? PROD_COOKIE_DOMAIN_DEFAULT : undefined;
+  }
+
+  return trimmed;
 }
 
 const cookieSecure = parseBooleanEnv(process.env.COOKIE_SECURE, isProd);
@@ -35,9 +81,12 @@ function getCookieOptions(maxAge, { httpOnly = true, ...overrides } = {}) {
     secure: cookieSecure,
     sameSite: cookieSameSite,
     path: '/',
-    maxAge,
     ...overrides,
   };
+
+  if (maxAge !== undefined) {
+    options.maxAge = maxAge;
+  }
 
   if (cookieDomain) {
     options.domain = cookieDomain;
@@ -51,7 +100,11 @@ function setCookie(res, name, value, options = {}) {
 }
 
 function clearCookie(res, name, options = {}) {
-  res.clearCookie(name, getCookieOptions(undefined, options));
+  res.clearCookie(name, {
+    ...getCookieOptions(undefined, options),
+    maxAge: 0,
+    expires: new Date(0),
+  });
 }
 
 function setAuthCookies(res, token, user, maxAge) {
@@ -72,4 +125,6 @@ module.exports = {
   clearCookie,
   setAuthCookies,
   clearAuthCookies,
+  isCookieDomainValidForHost,
+  normalizeDomainCandidate,
 };

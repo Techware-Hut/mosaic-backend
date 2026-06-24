@@ -2,7 +2,7 @@
 
 **Issue:** [#23 Define criteria for re-enabling push-to-main deployment](https://github.com/Techware-Hut/mosaic-backend/issues/23)  
 **Workflow:** [`.github/workflows/deploy-eb-production.yml`](../.github/workflows/deploy-eb-production.yml)  
-**Current state:** `push:` to `main` is **commented out** — deploy is manual `workflow_dispatch` only.
+**Current state:** `push:` to `main` is **enabled** — deploy runs automatically on push/merge to `main`. Manual `workflow_dispatch` also available.
 
 ---
 
