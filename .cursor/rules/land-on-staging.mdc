@@ -1,44 +1,84 @@
 ---
-description: Always return the repo to the staging branch at the end of every task or session
+description: Feature branch workflow — start from staging, land on staging when done, branch again for the next task
 alwaysApply: true
 ---
 
-# Land on staging when done
+# Feature workflow: staging is home base
 
-The default integration branch for this repo is **`staging`**, not `main` and not feature branches.
+**`staging`** is the integration branch. **`main`** is production — do not use it for day-to-day feature work unless explicitly asked.
 
-## End-of-session requirement (mandatory)
+## Start a feature (beginning of task)
 
-Before finishing **any** task, coding session, investigation, or PR workflow:
+Always branch from an up-to-date `staging`:
 
-1. **Preserve work** — If there are uncommitted changes the user may want:
-   - Commit them on the feature branch if the user asked for a commit, OR
-   - Stash with a descriptive message: `git stash push -u -m "<branch>: <short summary>"`
-2. **Return to staging**:
+```powershell
+git checkout staging
+git pull origin staging
+git checkout -b fix/short-description   # or feat/, chore/, etc.
+```
+
+Do **not** start a new feature from `main` or from another stale feature branch.
+
+## While working
+
+- Stay on the feature branch until the task is complete.
+- Commit when the user asks, or when the task is genuinely done (focused commits, no secrets).
+
+## Task completion (mandatory before ending session)
+
+When a feature is **done**, land it on `staging` and reset to a clean tree:
+
+1. **Commit** remaining work on the feature branch (if any):
+   ```powershell
+   git add <relevant files>
+   git commit -m "Short why-focused message"
+   ```
+2. **Land on staging** — prefer PR when the change should be reviewed; otherwise merge locally:
+   ```powershell
+   # Option A: open PR (preferred for non-trivial changes)
+   git push -u origin HEAD
+   gh pr create --base staging --head <feature-branch> --title "..." --body "..."
+
+   # Option B: direct merge when user wants it merged now
+   git checkout staging
+   git pull origin staging
+   git merge <feature-branch>
+   git push origin staging
+   ```
+3. **Clean up and reset**:
    ```powershell
    git checkout staging
    git pull origin staging
+   git branch -d <feature-branch>          # delete local feature branch if merged
+   git status                                # must be clean
    ```
-3. **Confirm clean landing** — Run `git branch --show-current` and report that the session ended on `staging`.
+4. **Report** — state clearly: branch is `staging`, working tree clean, feature landed (commit SHA or PR URL).
 
-## During work
+## Start the next feature
 
-- Feature branches are fine while implementing.
-- Do **not** leave the user on a feature branch when the conversation ends.
-- Do **not** end on `main` unless the user explicitly asked to stay there.
-
-## If checkout is blocked
-
-- Stash dirty changes first, then checkout `staging`.
-- Tell the user what was stashed and how to restore: `git stash list` / `git stash pop`.
-
-## Example closing steps
+Only after step 3 above — never chain a new feature branch from the old one:
 
 ```powershell
-git stash push -u -m "fix/foo: WIP tests"   # only if needed
 git checkout staging
 git pull origin staging
-git status
+git checkout -b fix/next-task
 ```
 
-Always mention the final branch name in the last response.
+## End-of-session rule
+
+- **Never** leave the repo on a feature branch when the conversation ends.
+- **Never** end with uncommitted changes without stashing and explaining why.
+- If the task is **incomplete**, stash WIP, return to `staging`, and tell the user how to resume:
+  ```powershell
+  git stash push -u -m "<branch>: WIP summary"
+  git checkout staging
+  git pull origin staging
+  ```
+
+## Do not
+
+- Leave the user on `fix/*`, `feat/*`, or other feature branches after task completion.
+- Skip landing completed work on `staging` before starting the next feature.
+- Auto-commit without user approval unless they explicitly asked to commit.
+
+Always mention the **final branch name** (`staging`) in your last response.
