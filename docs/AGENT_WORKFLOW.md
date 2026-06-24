@@ -22,9 +22,9 @@ Process guide for AI agents and developers working on `Techware-Hut/mosaic-backe
 | --- | --- |
 | One issue per branch | Branch name: `sprint/backend-<short-description>` |
 | One PR per issue | Do not bundle unrelated fixes |
-| No direct commits to `main` | Always use a feature branch |
+| No direct commits to `main` | Always use a feature branch; promote via `staging` only |
 | No merge | Human merges after review |
-| No deploy | Human runs EB deploy via GHA `workflow_dispatch` |
+| No manual deploy | Agents must not trigger GHA deploy workflows; merge to `main` triggers auto-deploy |
 | No secrets | Never commit `.env`, paste values in docs, or log credentials |
 | No fake proof | Do not invent smoke results, payment success, or production evidence |
 | No live Stripe charges | Test mode only unless written approval exists |
@@ -37,7 +37,7 @@ Process guide for AI agents and developers working on `Techware-Hut/mosaic-backe
 
 ## Before coding
 
-1. `git checkout main && git pull origin main`
+1. `git checkout staging && git pull origin staging`
 2. Confirm working tree is clean (`git status`)
 3. Read docs listed in [Read order](#read-order-mandatory) above
 4. Inspect existing tests for the area you will change (`tests/<domain>/`)
@@ -75,11 +75,13 @@ Examples: `docs(agent): architecture knowledge pack (#50)` · `fix(checkout): bl
 
 | Action | Who | How |
 | --- | --- | --- |
-| Merge to `main` | Human reviewer | GitHub PR merge |
-| Production deploy | Release owner | Manual GHA workflow: [deploy-eb-production.yml](../.github/workflows/deploy-eb-production.yml) |
+| Merge to `staging` | Human reviewer | GitHub PR merge from feature branch |
+| Merge to `main` | Human reviewer | GitHub PR merge from `staging` only |
+| Production deploy | Automatic on push/merge to `main` | [deploy-eb-production.yml](../.github/workflows/deploy-eb-production.yml) (tests must pass first) |
+| Manual redeploy | Release owner | GHA `workflow_dispatch` on [deploy-eb-production.yml](../.github/workflows/deploy-eb-production.yml) |
 | Post-deploy smoke | QA / release owner | [production-smoke-checklist.md](production-smoke-checklist.md) tiers P0–P6 |
 | Deploy evidence | Release owner | Append to [deploy-verification.md](deploy-verification.md) |
-| Push-to-main auto-deploy | **Disabled** | Intentionally commented out in deploy workflow |
+| Push-to-main auto-deploy | **Enabled** | Push/merge to `main` triggers deploy workflow |
 
 Agents must **not** trigger deploy workflows, change EB env vars, or mark launch items complete without evidence.
 

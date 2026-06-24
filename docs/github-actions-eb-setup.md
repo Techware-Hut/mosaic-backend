@@ -186,7 +186,7 @@ The deploy workflow (`.github/workflows/deploy-eb-production.yml`):
 4. Passes temporary credentials to `einaregilsson/beanstalk-deploy@v22`
 5. Runs post-deploy health probes on `https://api.mosaicbizhub.com`
 
-Push-to-`main` auto-deploy is **temporarily disabled** in the workflow (only `workflow_dispatch` runs until AWS OIDC and the GitHub `production` environment are confirmed). After first successful manual deploy, re-enable the push trigger in the workflow. When enabled, deploys are gated by the GitHub **`production`** environment.
+Push-to-`main` auto-deploy is **enabled** in the workflow. Push/merge to `main` triggers deploy; `workflow_dispatch` remains for manual redeploys. Deploys are gated by the deploy workflow `test` job and the GitHub **`production`** environment when configured.
 
 ---
 
@@ -203,7 +203,7 @@ Push-to-`main` auto-deploy is **temporarily disabled** in the workflow (only `wo
 9. [ ] Run [production-smoke-checklist.md](production-smoke-checklist.md) minimum tier
 10. [ ] Update [deploy-verification.md](deploy-verification.md) with deployed SHA
 
-After first successful manual deploy, re-enable push-to-`main` in the workflow; auto-deploy will then be gated by the `production` environment when configured.
+Push-to-`main` auto-deploy is enabled; deploys run automatically on push/merge to `main` and are gated by the `production` environment when configured. Use `workflow_dispatch` for manual redeploys.
 
 Remove obsolete deploy secrets if they were ever added (not used by OIDC):
 

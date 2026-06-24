@@ -16,7 +16,7 @@ Use this document as project instructions for LLM coding assistants working on *
 | **Language** | Plain JavaScript (CommonJS). No TypeScript, no build step |
 | **Entry** | [`index.js`](../index.js) → [`app.js`](../app.js) |
 | **Default port** | `3001` (`PORT` env var) |
-| **Deploy target** | AWS Elastic Beanstalk (`us-east-1`), manual GitHub Actions deploy from `main` |
+| **Deploy target** | AWS Elastic Beanstalk (`us-east-1`), auto GitHub Actions deploy on push/merge to `main` (manual `workflow_dispatch` also available) |
 | **Tests** | `npm test` → Node built-in test runner (~168 tests across 37 files) |
 | **Docs hub** | [LLM_CONTEXT.md](LLM_CONTEXT.md) (start here for safe edits) |
 
@@ -469,11 +469,12 @@ Full route map: [API_SURFACE.md](API_SURFACE.md)
 
 ### Branch flow
 
-`sprint/backend-*` → PR → human merge → `main` → **manual** GHA EB deploy (push-to-main auto-deploy is disabled)
+`feature/*` or `sprint/backend-*` → PR → **`staging`** → PR → **`main`** → **auto** GHA EB deploy. Never open feature PRs directly to `main`. Manual `workflow_dispatch` remains for redeploys.
 
 ### Production deploy
 
-- Workflow: [`.github/workflows/deploy-eb-production.yml`](../.github/workflows/deploy-eb-production.yml)
+- Workflow: [`.github/workflows/deploy-eb-production.yml`](../.github/workflows/deploy-eb-production.yml) — triggers on push/merge to `main` and via `workflow_dispatch`
+- Deploy job requires the `test` job to pass; gated by GitHub `production` environment when configured
 - EB app: `mosaic-biz-hub-backend`, env: `mosaic-backend-env`
 - Region: `us-east-1`
 
