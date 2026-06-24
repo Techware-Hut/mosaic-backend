@@ -34,19 +34,27 @@ function loadProductController({
   productDeleted = false,
 } = {}) {
   const originalLoad = Module._load;
+  const productDoc = {
+    _id: 'prod-1',
+    ownerId: productOwnerId,
+    isDeleted: productDeleted,
+    businessId: 'biz-1',
+    coverImage: null,
+    galleryImages: [],
+    saveCalled: false,
+    async save() {
+      this.saveCalled = true;
+    },
+  };
+  const captured = {
+    productDoc,
+    variantUpdateManyCalls: [],
+  };
 
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request.endsWith('models/Product')) {
       return {
-        findById: async () => ({
-          _id: 'prod-1',
-          ownerId: productOwnerId,
-          isDeleted: productDeleted,
-          businessId: 'biz-1',
-          coverImage: null,
-          galleryImages: [],
-          save: async () => {},
-        }),
+        findById: async () => productDoc,
         findOne: async () => null,
         countDocuments: async () => 0,
       };
@@ -55,6 +63,10 @@ function loadProductController({
       return {
         findOne: async () => null,
         deleteMany: async () => {},
+        updateMany: async (...args) => {
+          captured.variantUpdateManyCalls.push(args);
+          return { modifiedCount: 2 };
+        },
       };
     }
     if (request.endsWith('models/Business')) {
@@ -94,7 +106,10 @@ function loadProductController({
   delete require.cache[productControllerPath];
   const controller = require(productControllerPath);
   Module._load = originalLoad;
-  return controller;
+  return {
+    ...controller,
+    __captured: captured,
+  };
 }
 
 test('updateProduct returns 403 when ownerId does not match vendor', async () => {
@@ -129,4 +144,46 @@ test('updateProduct returns 404 when product is deleted', async () => {
 
   assert.equal(res.statusCode, 404);
   assert.equal(res.body.error, 'Product not found');
+});
+
+test('deleteProduct is owner-scoped and soft-deletes product variants', async () => {
+  const { deleteProduct, __captured } = loadProductController();
+  const res = mockResponse();
+
+  await deleteProduct(
+    {
+      params: { productId: 'prod-1' },
+      user: { _id: ownerId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(__captured.productDoc.isDeleted, true);
+  assert.equal(__captured.productDoc.saveCalled, true);
+  assert.deepEqual(__captured.variantUpdateManyCalls, [
+    [
+      { productId: 'prod-1' },
+      { $set: { isDeleted: true } },
+    ],
+  ]);
+});
+
+test('deleteProduct rejects another vendor and leaves variants untouched', async () => {
+  const { deleteProduct, __captured } = loadProductController({ productOwnerId: otherOwnerId });
+  const res = mockResponse();
+
+  await deleteProduct(
+    {
+      params: { productId: 'prod-1' },
+      user: { _id: ownerId },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.error, 'Unauthorized');
+  assert.equal(__captured.productDoc.isDeleted, false);
+  assert.equal(__captured.productDoc.saveCalled, false);
+  assert.deepEqual(__captured.variantUpdateManyCalls, []);
 });
