@@ -119,15 +119,16 @@ cors({
 ### Allowlist construction (`getAllowedOrigins`)
 
 1. If `CORS_ORIGINS` set → parse comma-separated list
-2. Else → `[FRONTEND_URL, ...LEGACY_DEFAULT_ORIGINS]`
+2. Else → `[FRONTEND_URL, ...DEFAULT_CREDENTIAL_ORIGINS]`
 3. If `NODE_ENV !== 'production'` → append `DEV_ORIGINS` (localhost, Expo dev URLs)
 4. Dedupe with `Set`
 
-### Legacy default origins (hardcoded when `CORS_ORIGINS` unset)
+### Default credentialed origins (hardcoded when `CORS_ORIGINS` unset)
 
 - `https://app.mosaicbizhub.com`
-- `https://www.mosaicbizhub.com`
 - `https://mosaic-biz-frontend-launch.vercel.app`
+
+`https://mosaicbizhub.com` and `https://www.mosaicbizhub.com` are the community site, not the marketplace app, and are intentionally not default credentialed API origins.
 
 ### Dev-only origins (non-production)
 

@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { buildFrontendUrl } = require('./frontendUrl');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -97,7 +98,7 @@ exports.sendWelcomeEmail = async (to, firstName, role) => {
           <p>Your account isn't just a login — it's a vote for a more inclusive economy.</p>
 
           <p>
-            <a href="https://app.mosaicbizhub.com" 
+            <a href="${buildFrontendUrl('/')}" 
                style="display:inline-block; padding:10px 16px; background:#000; color:#fff; text-decoration:none; border-radius:5px;">
                Start exploring
             </a>

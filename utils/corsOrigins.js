@@ -1,6 +1,5 @@
-const LEGACY_DEFAULT_ORIGINS = [
+const DEFAULT_CREDENTIAL_ORIGINS = [
   'https://app.mosaicbizhub.com',
-  'https://www.mosaicbizhub.com',
   'https://mosaic-biz-frontend-launch.vercel.app',
 ];
 
@@ -27,7 +26,7 @@ function getAllowedOrigins() {
   } else {
     origins = [
       process.env.FRONTEND_URL,
-      ...LEGACY_DEFAULT_ORIGINS,
+      ...DEFAULT_CREDENTIAL_ORIGINS,
     ].filter(Boolean);
   }
 
@@ -39,7 +38,7 @@ function getAllowedOrigins() {
 }
 
 module.exports = {
-  LEGACY_DEFAULT_ORIGINS,
+  DEFAULT_CREDENTIAL_ORIGINS,
   DEV_ORIGINS,
   parseCorsOrigins,
   getAllowedOrigins,
