@@ -26,6 +26,7 @@ const {
   loadTagsByBusinessIds,
   narrowVisibleBusinessIds,
   mergeBusinessIdFilter,
+  applyBadgeBusinessIdFilter,
   buildKeywordRegex,
 } = require('../lib/listing/publicSearchFilters');
 const {
@@ -142,12 +143,6 @@ exports.getAllServices = async (req, res) => {
     } = req.query;
 
     const filters = { isPublished: true };
-    const badgeValueMap = {
-      silver: 'Silver',
-      gold: 'Gold',
-      platinum: 'Platinum',
-      diamond: 'Diamond',
-    };
 
     // Search
     if (search) {
@@ -222,43 +217,9 @@ exports.getAllServices = async (req, res) => {
       }
     }
 
-    // Badge filtering via Business badge
-    if (badge) {
-      const requestedBadges = (Array.isArray(badge) ? badge : [badge])
-        .flatMap((value) => String(value || '').split(','))
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean)
-        .map((value) => badgeValueMap[value] || value);
-
-      const badgeBusinesses = await Business.find(
-        publicMarketplaceBusinessFilter({ badge: { $in: requestedBadges } })
-      ).select('_id').lean();
-
-      const badgeBusinessIds = badgeBusinesses.map((b) => b._id.toString());
-
-      if (!badgeBusinessIds.length) {
-        return res.json({
-          success: true,
-          total: 0,
-          page: parseInt(page),
-          totalPages: 0,
-          data: [],
-        });
-      }
-
-      if (filters.businessId) {
-        if (!badgeBusinessIds.includes(String(filters.businessId))) {
-          return res.json({
-            success: true,
-            total: 0,
-            page: parseInt(page),
-            totalPages: 0,
-            data: [],
-          });
-        }
-      } else {
-        filters.businessId = { $in: badgeBusinessIds };
-      }
+    const badgeScoped = await applyBadgeBusinessIdFilter(filters, badge);
+    if (badgeScoped.empty) {
+      return res.json(emptyListResponse(page));
     }
 
     // Sorting
@@ -560,12 +521,6 @@ exports.getAllFood = async (req, res) => {
     } = req.query;
 
     const filters = { isPublished: true };
-    const badgeValueMap = {
-      silver: 'Silver',
-      gold: 'Gold',
-      platinum: 'Platinum',
-      diamond: 'Diamond',
-    };
 
     // Search filter
     if (search) {
@@ -649,31 +604,9 @@ exports.getAllFood = async (req, res) => {
       filters.price = { $gte: 0, $lte: 200 };
     }
 
-    // Badge filtering
-    if (badge) {
-      const requestedBadges = (Array.isArray(badge) ? badge : [badge])
-        .flatMap((value) => String(value || '').split(','))
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean)
-        .map((value) => badgeValueMap[value] || value);
-
-      const badgeBusinesses = await Business.find(
-        publicMarketplaceBusinessFilter({ badge: { $in: requestedBadges } })
-      ).select('_id').lean();
-
-      const badgeBusinessIds = badgeBusinesses.map((b) => b._id);
-
-      if (!badgeBusinessIds.length) {
-        return res.json({
-          success: true,
-          total: 0,
-          page: parseInt(page),
-          totalPages: 0,
-          data: [],
-        });
-      }
-
-      filters.businessId = { $in: badgeBusinessIds };
+    const badgeScoped = await applyBadgeBusinessIdFilter(filters, badge);
+    if (badgeScoped.empty) {
+      return res.json(emptyListResponse(page));
     }
 
     // Sorting
@@ -1037,12 +970,6 @@ exports.getAllProducts = async (req, res) => {
     } = req.query;
 
     const filters = { isDeleted: false, isPublished: true };
-    const badgeValueMap = {
-      silver: 'Silver',
-      gold: 'Gold',
-      platinum: 'Platinum',
-      diamond: 'Diamond',
-    };
 
     if (search) {
       filters.$or = [
@@ -1115,43 +1042,9 @@ if (price) {
   }
 }
 
-    // Badge filtering via Business badge
-    if (badge) {
-      const requestedBadges = (Array.isArray(badge) ? badge : [badge])
-        .flatMap((value) => String(value || '').split(','))
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean)
-        .map((value) => badgeValueMap[value] || value);
-
-      const badgeBusinesses = await Business.find(
-        publicMarketplaceBusinessFilter({ badge: { $in: requestedBadges } })
-      ).select('_id').lean();
-
-      const badgeBusinessIds = badgeBusinesses.map((b) => b._id.toString());
-
-      if (!badgeBusinessIds.length) {
-        return res.json({
-          success: true,
-          total: 0,
-          page: parseInt(page),
-          totalPages: 0,
-          data: [],
-        });
-      }
-
-      if (filters.businessId) {
-        if (!badgeBusinessIds.includes(String(filters.businessId))) {
-          return res.json({
-            success: true,
-            total: 0,
-            page: parseInt(page),
-            totalPages: 0,
-            data: [],
-          });
-        }
-      } else {
-        filters.businessId = { $in: badgeBusinessIds };
-      }
+    const badgeScoped = await applyBadgeBusinessIdFilter(filters, badge);
+    if (badgeScoped.empty) {
+      return res.json(emptyListResponse(page));
     }
 
     let sortOption = { createdAt: -1 };

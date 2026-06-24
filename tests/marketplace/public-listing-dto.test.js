@@ -48,6 +48,7 @@ test('normalizePrice returns null for missing values', () => {
 
 test('normalizePrice parses Decimal128 shape and zero', () => {
   assert.equal(normalizePrice({ $numberDecimal: '19.99' }), 19.99);
+  assert.equal(normalizePrice({ $numberDecimal: '15.00' }), 15);
   assert.equal(normalizePrice(0), 0);
 });
 

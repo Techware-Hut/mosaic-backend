@@ -14,6 +14,8 @@ const {
   intersectBusinessIdSets,
   shouldIncludeListingType,
   buildFlexibleMatchRegex,
+  normalizeBadgeValues,
+  mergeBusinessIdFilter,
 } = require(filtersPath);
 
 test('parsePublicSearchQuery leaves keyword empty when absent', () => {
@@ -32,6 +34,11 @@ test('parsePublicSearchQuery preserves city and state filters', () => {
   const parsed = parsePublicSearchQuery({ city: ' Austin ', state: ' TX ' });
   assert.equal(parsed.city, 'Austin');
   assert.equal(parsed.state, 'TX');
+});
+
+test('parsePublicSearchQuery preserves country filters', () => {
+  const parsed = parsePublicSearchQuery({ country: ' United States ' });
+  assert.equal(parsed.country, 'United States');
 });
 
 test('resolveBusinessIdsForMinorityType returns null for empty input', async () => {
@@ -65,6 +72,28 @@ test('resolveBusinessIdsByLocation applies city and state with approved active b
   assert.equal(capturedFilter.isActive, true);
   assert.equal(capturedFilter.isApproved, true);
   assert.equal(capturedFilter.$and.length, 2);
+});
+
+test('resolveBusinessIdsByLocation applies country with approved active business scope', async () => {
+  const id = '507f1f77bcf86cd799439012';
+  let capturedFilter = null;
+  const filters = loadFiltersWithMocks({
+    Business: {
+      find: async (filter) => {
+        capturedFilter = filter;
+        return [{ _id: id }];
+      },
+    },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: { find: async () => [] },
+  });
+
+  const result = await filters.resolveBusinessIdsByLocation({ country: 'United States' });
+  assert.equal(result.length, 1);
+  assert.equal(String(result[0]), id);
+  assert.equal(capturedFilter.isActive, true);
+  assert.equal(capturedFilter.isApproved, true);
+  assert.equal(capturedFilter.$and.length, 1);
 });
 
 test('searchPublicListings returns empty data for unknown categorySlug', async () => {
@@ -111,6 +140,19 @@ test('intersectBusinessIdSets returns shared business ids', () => {
   const result = intersectBusinessIdSets(a, b);
   assert.equal(result.length, 1);
   assert.equal(String(result[0]), String(a[0]));
+});
+
+test('mergeBusinessIdFilter intersects explicit businessId lists', () => {
+  const keep = '507f1f77bcf86cd799439011';
+  const drop = '507f1f77bcf86cd799439012';
+  const result = mergeBusinessIdFilter({ $in: [keep, drop] }, [keep]);
+
+  assert.equal(result.empty, false);
+  assert.deepEqual(result.filter.$in.map(String), [keep]);
+});
+
+test('normalizeBadgeValues supports Bronze and comma-separated case normalization', () => {
+  assert.deepEqual(normalizeBadgeValues('bronze, GOLD'), ['Bronze', 'Gold']);
 });
 
 test('shouldIncludeListingType respects listingType filter', () => {
