@@ -12,7 +12,7 @@
 
 Audit and document launch-safe backend email notification behavior for vendor onboarding, order confirmation, and review follow-up readiness. Add tests proving graceful SMTP failure handling and logging safety without faking delivery.
 
-**Principle:** Do not fake email delivery. When SMTP is missing or send fails, core HTTP flows still succeed unless the existing contract intentionally requires failure (e.g. forgot-password).
+**Principle:** Do not fake email delivery. When SMTP is missing or send fails, auth OTP flows return **502** `OTP_DELIVERY_FAILED` after persisting the unverified account/OTP hash. Vendor onboarding skips sends when env is missing; forgot-password returns **500** on send failure.
 
 ---
 
@@ -51,6 +51,19 @@ Audit and document launch-safe backend email notification behavior for vendor on
 | [`admin/vendorOnboardVerifyStage1.js`](../controllers/admin/vendorOnboardVerifyStage1.js) | `POST /api/vendor-onboarding/:id/finalize` | Approve / reject / badge |
 | [`orderController.js`](../controllers/orderController.js) | `POST /api/orders/initiate`, accept/reject/ship/deliver | Order placed + lifecycle |
 | [`stripePaymentController.js`](../controllers/stripePaymentController.js) | `POST /api/stripe/payment/webhook` | Order paid + invoice |
+| [`userController.js`](../controllers/userController.js) | `POST /api/users/register`, `/resend-otp`, unverified `/login` | Registration / resend / login OTP |
+
+### Auth OTP delivery failure contract
+
+| Endpoint | On SMTP success | On SMTP failure after DB save |
+| --- | --- | --- |
+| `POST /api/users/register` | **201** — OTP sent to email; `otpPending` cookie | **502** `OTP_DELIVERY_FAILED` — account saved; no cookie |
+| `POST /api/users/resend-otp` | **200** — OTP resent; `otpPending` cookie | **502** `OTP_DELIVERY_FAILED` — new OTP hash saved; no cookie |
+| `POST /api/users/login` (unverified) | **403** `otpPending: true` — OTP emailed | **502** `OTP_DELIVERY_FAILED` — no session/cookie |
+
+**Gmail setup:** `MAIL_USER` + `MAIL_PASSWORD` where `MAIL_PASSWORD` is a [Google App Password](https://support.google.com/accounts/answer/185833) (requires 2-Step Verification).
+
+**Production inbox smoke (auth OTP):** Register with a disposable inbox; confirm delivery or **502** + log grep for `Failed to send OTP email:` / `EAUTH` / `535`. Never log OTP values or `MAIL_PASSWORD`.
 
 ### Environment variables (names only — never commit values)
 

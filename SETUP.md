@@ -66,10 +66,11 @@ npm run dev
 
 ### Email
 
-- Set `MAIL_USER`.
-- Set `MAIL_PASSWORD`.
+- Set `MAIL_USER` (Gmail address used as SMTP login and From header).
+- Set `MAIL_PASSWORD` to a [Google App Password](https://support.google.com/accounts/answer/185833) — not your normal Google account password. Requires 2-Step Verification on the Google account.
 - Set `ADMIN_EMAIL`.
 - Set `SUPPORT_EMAIL` if you want support links in emails.
+- **Local inbox check:** After starting the server, register a test account with a real inbox you control. Confirm the verification email arrives within a few minutes. Do not log or paste OTP values.
 
 ### Optional integrations
 

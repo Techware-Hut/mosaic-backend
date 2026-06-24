@@ -214,6 +214,7 @@ test('registerUser succeeds for fresh vendor email', async () => {
 
   assert.equal(res.statusCode, 201);
   assert.equal(res.body.success, true);
+  assert.match(res.body.message, /OTP sent to email/i);
 });
 
 test('register route uses registerLimiter with max 5 per 15 minutes', () => {
