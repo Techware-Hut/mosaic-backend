@@ -55,6 +55,39 @@ test('register → OTP verify → login → auth/check → logout session flow',
   assert.equal(afterLogout.status, 401);
 });
 
+test('business_owner register → verify → login → auth/check → logout session flow', async () => {
+  const agent = createAgent(getApp());
+
+  const { registerRes, email, password } = await registerAndVerify(agent, {
+    role: 'business_owner',
+  });
+
+  assert.equal(registerRes.status, 201);
+  assert.equal(registerRes.body.success, true);
+
+  const loginRes = await login(agent, email, password);
+  assert.equal(loginRes.status, 200);
+  assert.ok(loginRes.body.token);
+  assert.equal(loginRes.body.user.role, 'business_owner');
+  assert.equal(loginRes.headers['set-cookie']?.some((c) => c.startsWith('token=')), true);
+  assert.equal(
+    loginRes.headers['set-cookie']?.some((c) => c.startsWith('user_session=')),
+    true
+  );
+
+  const authCheck = await agent.get('/api/users/auth/check');
+  assert.equal(authCheck.status, 200);
+  assert.equal(authCheck.body.loggedIn, true);
+  assert.equal(authCheck.body.user.role, 'business_owner');
+  assert.equal(authCheck.body.user.isOtpVerified, true);
+
+  const logoutRes = await agent.post('/api/users/logout');
+  assert.equal(logoutRes.status, 200);
+
+  const afterLogout = await agent.get('/api/users/auth/check');
+  assert.equal(afterLogout.status, 401);
+});
+
 test('OTP verification uses captured fixture OTP from mailer stub', async () => {
   const agent = createAgent(getApp());
   const { email } = await registerUser(agent, { role: 'business_owner' });

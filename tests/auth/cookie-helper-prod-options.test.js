@@ -11,6 +11,7 @@ function loadCookieHelper(envOverrides = {}) {
     'COOKIE_SECURE',
     'COOKIE_SAMESITE',
     'COOKIE_DOMAIN',
+    'API_BASE_URL',
   ]) {
     saved[key] = process.env[key];
     if (Object.prototype.hasOwnProperty.call(envOverrides, key)) {
@@ -105,4 +106,61 @@ test('getCookieOptions allows non-httpOnly override for user_session cookie', ()
   assert.equal(options.secure, false);
   assert.equal(options.sameSite, 'lax');
   assert.equal('domain' in options, false);
+});
+
+test('getCookieOptions falls back when COOKIE_DOMAIN is invalid for API host', () => {
+  const { getCookieOptions } = loadCookieHelper({
+    NODE_ENV: 'production',
+    COOKIE_DOMAIN: 'app.mosaicbizhub.com',
+    API_BASE_URL: 'https://api.mosaicbizhub.com',
+  });
+
+  const options = getCookieOptions(1000);
+
+  assert.equal(options.domain, '.mosaicbizhub.com');
+});
+
+test('getCookieOptions omits domain when invalid COOKIE_DOMAIN in non-production', () => {
+  const { getCookieOptions } = loadCookieHelper({
+    NODE_ENV: 'development',
+    COOKIE_DOMAIN: 'app.mosaicbizhub.com',
+    API_BASE_URL: 'https://api.mosaicbizhub.com',
+  });
+
+  const options = getCookieOptions(1000);
+
+  assert.equal('domain' in options, false);
+});
+
+test('getCookieOptions accepts parent domain for API host', () => {
+  const { getCookieOptions } = loadCookieHelper({
+    NODE_ENV: 'production',
+    COOKIE_DOMAIN: '.mosaicbizhub.com',
+    API_BASE_URL: 'https://api.mosaicbizhub.com',
+  });
+
+  const options = getCookieOptions(1000);
+
+  assert.equal(options.domain, '.mosaicbizhub.com');
+});
+
+test('clearCookie sets expires and maxAge zero for logout compatibility', () => {
+  const { clearCookie, getCookieOptions } = loadCookieHelper({
+    NODE_ENV: 'production',
+    COOKIE_DOMAIN: '.mosaicbizhub.com',
+  });
+
+  const cleared = [];
+  const res = {
+    clearCookie(name, options) {
+      cleared.push({ name, options });
+    },
+  };
+
+  clearCookie(res, 'token');
+  assert.equal(cleared.length, 1);
+  assert.equal(cleared[0].name, 'token');
+  assert.equal(cleared[0].options.maxAge, 0);
+  assert.ok(cleared[0].options.expires instanceof Date);
+  assert.equal(cleared[0].options.domain, getCookieOptions(1000).domain);
 });
