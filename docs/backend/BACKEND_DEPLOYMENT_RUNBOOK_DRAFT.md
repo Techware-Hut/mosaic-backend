@@ -11,7 +11,8 @@
 | URL | Use |
 | --- | --- |
 | `https://api.mosaicbizhub.com` | **Supported production API** — smoke, webhooks, OAuth |
-| `https://app.mosaicbizhub.com` | Typical frontend (CORS, redirects) |
+| `https://mosaicbizhub.com` | Canonical frontend (CORS, redirects) |
+| `https://app.mosaicbizhub.com` | Temporary transition frontend |
 | `http://mosaic-backend.us-east-1.elasticbeanstalk.com/` | EB raw HTTP health (optional) |
 
 **Do not use** `https://mosaic-backend.us-east-1.elasticbeanstalk.com` for prod smoke — TLS CN mismatch.

@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { buildFrontendUrl } = require('./frontendUrl');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -27,7 +28,7 @@ exports.sendVendorNewServiceBookingEmail = async ({
 }) => {
   if (!to || to.length === 0) return;
 
-  const dashboardLink = 'https://app.mosaicbizhub.com/partners/dashboard';
+  const dashboardLink = buildFrontendUrl('/partners/dashboard');
 
   const selectedServices = Array.isArray(services) && services.length > 0
     ? services.map((item) => `<li>${safe(item)}</li>`).join('')
@@ -70,7 +71,7 @@ exports.sendCustomerNewServiceBookingConfirmationEmail = async ({
 }) => {
   if (!to) return;
 
-  const bookingsLink = 'https://app.mosaicbizhub.com/customer/bookings';
+  const bookingsLink = buildFrontendUrl('/customer/bookings');
 
   const selectedServices = Array.isArray(services) && services.length > 0
     ? services.map((item) => `<li>${safe(item)}</li>`).join('')

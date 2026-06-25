@@ -4,24 +4,26 @@ const { getReturnAndRefreshUrls } = require('../../lib/connect/connectUrls');
 
 const businessId = '507f1f77bcf86cd799439011';
 
-test('getReturnAndRefreshUrls uses FRONTEND_URL and default Connect paths', () => {
+test('getReturnAndRefreshUrls uses the apex frontend host and default Connect paths', () => {
   const urls = getReturnAndRefreshUrls(businessId, {
-    FRONTEND_URL: 'https://app.mosaicbizhub.com',
+    NODE_ENV: 'production',
+    FRONTEND_URL: 'https://mosaicbizhub.com',
   });
 
   assert.equal(
     urls.returnUrl,
-    'https://app.mosaicbizhub.com/partners/connect/return?businessId=507f1f77bcf86cd799439011'
+    'https://mosaicbizhub.com/partners/connect/return?businessId=507f1f77bcf86cd799439011'
   );
   assert.equal(
     urls.refreshUrl,
-    'https://app.mosaicbizhub.com/partners/connect/refresh?businessId=507f1f77bcf86cd799439011'
+    'https://mosaicbizhub.com/partners/connect/refresh?businessId=507f1f77bcf86cd799439011'
   );
 });
 
 test('getReturnAndRefreshUrls honors full URL overrides', () => {
   const urls = getReturnAndRefreshUrls(businessId, {
-    FRONTEND_URL: 'https://app.mosaicbizhub.com',
+    NODE_ENV: 'production',
+    FRONTEND_URL: 'https://mosaicbizhub.com',
     CONNECT_RETURN_URL: 'https://mosaic-biz-frontend-launch.vercel.app/partners/connect/return',
     CONNECT_REFRESH_URL: 'https://mosaic-biz-frontend-launch.vercel.app/partners/connect/refresh',
   });
@@ -38,11 +40,30 @@ test('getReturnAndRefreshUrls honors full URL overrides', () => {
 
 test('getReturnAndRefreshUrls honors custom path env vars', () => {
   const urls = getReturnAndRefreshUrls(businessId, {
-    FRONTEND_URL: 'https://app.mosaicbizhub.com',
+    NODE_ENV: 'production',
+    FRONTEND_URL: 'https://mosaicbizhub.com',
     CONNECT_RETURN_PATH: '/partners/connect/return',
     CONNECT_REFRESH_PATH: '/partners/connect/refresh',
   });
 
   assert.ok(urls.returnUrl.includes('/partners/connect/return'));
   assert.ok(urls.refreshUrl.includes('/partners/connect/refresh'));
+});
+
+test('getReturnAndRefreshUrls moves unsafe full URL overrides back to the apex host', () => {
+  const urls = getReturnAndRefreshUrls(businessId, {
+    NODE_ENV: 'production',
+    FRONTEND_URL: 'https://mosaicbizhub.com',
+    CONNECT_RETURN_URL: 'https://www.mosaicbizhub.com/partners/connect/return',
+    CONNECT_REFRESH_URL: 'https://evil.example/partners/connect/refresh',
+  });
+
+  assert.equal(
+    urls.returnUrl,
+    'https://mosaicbizhub.com/partners/connect/return?businessId=507f1f77bcf86cd799439011'
+  );
+  assert.equal(
+    urls.refreshUrl,
+    'https://mosaicbizhub.com/partners/connect/refresh?businessId=507f1f77bcf86cd799439011'
+  );
 });

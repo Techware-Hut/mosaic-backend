@@ -17,8 +17,8 @@ When `CORS_ORIGINS` **is set** in EB, it **replaces** the fallback list (`FRONTE
 When `CORS_ORIGINS` is **unset**, fallback includes:
 
 - `FRONTEND_URL`
+- `https://mosaicbizhub.com`
 - `https://app.mosaicbizhub.com`
-- `https://www.mosaicbizhub.com`
 - `https://mosaic-biz-frontend-launch.vercel.app`
 
 Dev origins are appended only when `NODE_ENV !== 'production'`.
@@ -29,6 +29,7 @@ Dev origins are appended only when `NODE_ENV !== 'production'`.
 
 | Origin | HTTP | Access-Control-Allow-Origin | Access-Control-Allow-Credentials | Result |
 |--------|------|----------------------------|----------------------------------|--------|
+| `https://mosaicbizhub.com` | Pending | Pending | Pending | **Required after cutover** |
 | `https://app.mosaicbizhub.com` | 204 | exact match | `true` | **Passed** |
 | `https://mosaic-biz-frontend-launch.vercel.app` | 204 | exact match | `true` | **Passed** |
 
@@ -65,8 +66,8 @@ Arbitrary Vercel preview URLs are **not** allowlisted unless explicitly added to
 
 | Variable | Recommended production value |
 |----------|-------------------------------|
-| `CORS_ORIGINS` | Comma-separated explicit browser origins |
-| `FRONTEND_URL` | `https://app.mosaicbizhub.com` |
+| `CORS_ORIGINS` | Comma-separated explicit browser origins: apex plus approved transition/QA origins |
+| `FRONTEND_URL` | `https://mosaicbizhub.com` |
 
 Full list: [production-env-checklist.md](production-env-checklist.md)
 
@@ -74,4 +75,4 @@ Full list: [production-env-checklist.md](production-env-checklist.md)
 
 ## Verdict
 
-CORS for approved production + launch origins: **Passed** on current production runtime (`403d68e`). Post-merge redeploy must preserve `CORS_ORIGINS` configuration.
+The prior app-subdomain and launch QA CORS probes passed on current production runtime (`403d68e`). The apex origin is now the required canonical production frontend and must pass after EB `CORS_ORIGINS` is reconciled and the corrected backend is redeployed.

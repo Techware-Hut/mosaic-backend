@@ -119,15 +119,17 @@ cors({
 ### Allowlist construction (`getAllowedOrigins`)
 
 1. If `CORS_ORIGINS` set → parse comma-separated list
-2. Else → `[FRONTEND_URL, ...LEGACY_DEFAULT_ORIGINS]`
+2. Else → `[FRONTEND_URL, ...DEFAULT_CREDENTIAL_ORIGINS]`
 3. If `NODE_ENV !== 'production'` → append `DEV_ORIGINS` (localhost, Expo dev URLs)
 4. Dedupe with `Set`
 
-### Legacy default origins (hardcoded when `CORS_ORIGINS` unset)
+### Default credentialed origins (hardcoded when `CORS_ORIGINS` unset)
 
-- `https://app.mosaicbizhub.com`
-- `https://www.mosaicbizhub.com`
+- `https://mosaicbizhub.com`
+- `https://app.mosaicbizhub.com` (temporary transition)
 - `https://mosaic-biz-frontend-launch.vercel.app`
+
+`https://mosaicbizhub.com` is now the canonical marketplace app. `https://www.mosaicbizhub.com` should redirect to the apex and is intentionally not a default credentialed API origin.
 
 ### Dev-only origins (non-production)
 
@@ -162,6 +164,6 @@ cors({
 | --- | --- |
 | Production `CORS_ORIGINS` value confirmation (names only in docs; value in EB console) | AWS / release owner |
 | Whether all Vercel preview URLs are in prod allowlist | Frontend / infra |
-| Cookie behavior on cross-subdomain prod (`app.mosaicbizhub.com` → `api.mosaicbizhub.com`) | QA smoke P1 |
+| Cookie behavior on production frontend/API (`mosaicbizhub.com` -> `api.mosaicbizhub.com`) | QA smoke P1 |
 
 Deep dive: [`../AUTH_FLOW.md`](../AUTH_FLOW.md)

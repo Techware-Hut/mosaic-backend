@@ -51,18 +51,17 @@ Or: GitHub → Actions → **Deploy to Elastic Beanstalk** → Run workflow → 
 1. `npm ci` + `npm test` (196 tests)
 2. Zip deploy bundle (excludes `tests/`, `docs/`, `.github/`)
 3. Deploy to EB version label `mosaic-<sha>`
-4. Post-deploy probes: `/`, `/api/users/auth/check` (401), `/api/health`, `/api/ready`, CORS (2 origins only)
+4. Post-deploy probes: `/`, `/api/users/auth/check` (401), `/api/health`, `/api/ready`, CORS for apex, transition app, and launch QA origins
 
 ### 4. Post-deploy manual verification
 
-GHA CORS probe checks **two** origins only (launch Vercel + app). After deploy, verify **all four** launch origins:
+GHA CORS probe checks the approved browser origins. After deploy, verify the apex, transition app, and launch QA origins:
 
 ```powershell
 $origins = @(
   'https://mosaic-biz-frontend-launch.vercel.app',
-  'https://app.mosaicbizhub.com',
   'https://mosaicbizhub.com',
-  'https://www.mosaicbizhub.com'
+  'https://app.mosaicbizhub.com'
 )
 foreach ($o in $origins) {
   curl.exe -s -D - -o NUL -X OPTIONS `
@@ -86,13 +85,13 @@ Expected: **PASS=11 FAIL=0** (BLOCKED=3 without auth tokens).
 
 ## EB environment configuration
 
-### CORS (required for all four launch origins)
+### CORS (required for marketplace app origins)
 
 AWS Console → Elastic Beanstalk → `mosaic-backend-env` → Configuration → Software → Environment properties:
 
 ```
-CORS_ORIGINS=https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com,https://mosaicbizhub.com,https://www.mosaicbizhub.com
-FRONTEND_URL=https://app.mosaicbizhub.com
+CORS_ORIGINS=https://mosaicbizhub.com,https://app.mosaicbizhub.com,https://mosaic-biz-frontend-launch.vercel.app
+FRONTEND_URL=https://mosaicbizhub.com
 ```
 
 Apply configuration (EB restarts instances). No code redeploy required for env-only changes if CORS code is already deployed.
@@ -145,7 +144,7 @@ Full Sentry doc: [`docs/SENTRY_EB_DEPLOY_VERIFICATION.md`](SENTRY_EB_DEPLOY_VERI
 | `/api/health` 404 after merge | Deploy not run (push disabled) | Manual `workflow_dispatch` |
 | Apex CORS 500 | `CORS_ORIGINS` unset or missing apex | Set EB env; apply config |
 | CORS 500 after env change | Instances not restarted | Apply config; wait for Green |
-| Deploy workflow fails CORS | Wrong origin in probe | Check EB `CORS_ORIGINS`; manual 4-origin probe |
+| Deploy workflow fails CORS | Wrong origin in probe | Check EB `CORS_ORIGINS`; manual approved-origin probe |
 | Auth smoke BLOCKED | No test tokens | See [`docs/SMOKE_TEST_TOKENS.md`](SMOKE_TEST_TOKENS.md) |
 
 ---

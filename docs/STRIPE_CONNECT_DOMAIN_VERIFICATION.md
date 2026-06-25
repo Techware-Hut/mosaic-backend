@@ -29,10 +29,11 @@ Unit tests: [`tests/connect/connect-urls.test.js`](../tests/connect/connect-urls
 
 | Environment | `FRONTEND_URL` (expected) | Return URL shape |
 |-------------|---------------------------|------------------|
-| Production | `https://app.mosaicbizhub.com` | `https://app.mosaicbizhub.com/partners/connect/return?businessId=<id>` |
+| Production | `https://mosaicbizhub.com` | `https://mosaicbizhub.com/partners/connect/return?businessId=<id>` |
+| Transition | `https://app.mosaicbizhub.com` | Temporary only until apex smoke passes |
 | QA / launch Vercel | `https://mosaic-biz-frontend-launch.vercel.app` | Same path on launch host (via override or FRONTEND_URL) |
 
-**Note:** Production EB should use `FRONTEND_URL=https://app.mosaicbizhub.com`. Use `CONNECT_RETURN_URL` / `CONNECT_REFRESH_URL` only when a full override is intentionally required.
+**Note:** Production EB should use the apex marketplace origin. Use `CONNECT_RETURN_URL` / `CONNECT_REFRESH_URL` only when a full override is intentionally required.
 
 ---
 

@@ -145,7 +145,7 @@ Add only the values needed for the features you plan to run locally. Some flows 
 | `PORT` | Optional | HTTP port, defaults to `3001` |
 | `NODE_ENV` | Optional | Runtime mode used in auth/cookie behavior |
 | `MONGODB_URI` | Yes | MongoDB connection string |
-| `FRONTEND_URL` | Recommended | Frontend base URL for OAuth redirects, emails, and CORS fallback when `CORS_ORIGINS` is unset |
+| `FRONTEND_URL` | Recommended | Frontend base URL for OAuth redirects, emails, and CORS fallback when `CORS_ORIGINS` is unset. Production should classify `https://mosaicbizhub.com` as canonical. |
 | `CORS_ORIGINS` | Recommended (prod) | Comma-separated browser origins allowed for CORS (explicit domains only; no `*`). When unset, falls back to `FRONTEND_URL` plus legacy production defaults. See [`utils/corsOrigins.js`](utils/corsOrigins.js). |
 | `JWT_SECRET` | Yes | JWT signing/verification secret |
 | `COOKIE_DOMAIN` | Optional | Cookie domain override; defaults to `.mosaicbizhub.com` in production and unset locally |
@@ -253,6 +253,6 @@ See [docs/security-remediation-notes.md](docs/security-remediation-notes.md) for
 ## Deployment notes
 
 - Ensure all Stripe webhook endpoints in the deployed environment use the correct secrets documented above.
-- Confirm `CORS_ORIGINS` (or `FRONTEND_URL` fallback) allows all production frontend origins; confirm `FRONTEND_URL` for OAuth redirects and link generation.
+- Confirm `CORS_ORIGINS` (or `FRONTEND_URL` fallback) allows the canonical apex frontend and approved transition/QA origins; confirm `FRONTEND_URL` for OAuth redirects and link generation.
 - Configure AWS and mail credentials before enabling upload or notification flows.
 - For production, verify MongoDB, Stripe, SMTP, and S3 credentials in the deployment environment rather than relying on a local `.env`.

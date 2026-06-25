@@ -1,10 +1,10 @@
 // utils/orderMailer.js
 const nodemailer = require("nodemailer");
+const { buildFrontendUrl, getFrontendLogoUrl } = require("./frontendUrl");
 
 const APP_NAME = process.env.APP_NAME || "Mosaic Biz Hub";
-const BASE_URL = process.env.FRONTEND_URL;
-const LOGO_URL = "https://app.mosaicbizhub.com/_next/image?url=%2Flogo.png&w=750&q=75";
-const ORDERS_URL = `${BASE_URL}/customer/order`;
+const LOGO_URL = getFrontendLogoUrl();
+const ORDERS_URL = buildFrontendUrl("/customer/order");
 
 // Configure transporter (swap service/config as needed)
 const transporter = nodemailer.createTransport({
@@ -131,7 +131,7 @@ function plainText({ title, lines = [] }) {
 // }
 
 async function sendCustomerOrderPlacedEmail(to, order) {
-  const orderUrl = "https://app.mosaicbizhub.com/customer/order";
+  const orderUrl = buildFrontendUrl("/customer/order");
 
   const html = wrapHtml({
     title: "Order Placed Successfully",
@@ -166,7 +166,7 @@ async function sendCustomerOrderPlacedEmail(to, order) {
 
 
 async function sendVendorNewOrderEmail(to, order) {
-  const orderUrl = "https://app.mosaicbizhub.com/partners/dashboard";
+  const orderUrl = buildFrontendUrl("/partners/dashboard");
 
   const html = wrapHtml({
     title: "New Order Received",
@@ -205,7 +205,7 @@ async function sendOrderStatusEmail(to, orderId, status) {
     ? `Order Accepted`
     : `Order Rejected`;
 
-  const orderUrl = "https://app.mosaicbizhub.com/customer/order";
+  const orderUrl = buildFrontendUrl("/customer/order");
 
   const bodyHtml = isAccepted
     ? `
@@ -287,7 +287,7 @@ async function sendOrderStatusEmail(to, orderId, status) {
 }
 
 async function sendOrderUpdateEmail(to, status, trackingUrl = null) {
-  const orderUrl = "https://app.mosaicbizhub.com/customer/order";
+  const orderUrl = buildFrontendUrl("/customer/order");
 
   let title = "";
   let message = "";

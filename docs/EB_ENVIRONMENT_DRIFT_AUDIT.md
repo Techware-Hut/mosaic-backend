@@ -44,7 +44,7 @@ Redact secret values before sharing; compare **names** to this matrix.
 | release.commit = `403d68e`, deploymentVersion = `mosaic-403d68e` | Release identity vars set; **stale** vs `main` `0af8803` |
 | `/api/ready` database connected | `MONGODB_URI` present and valid |
 | Public listings 200 | Core app booted; Stripe/email not probed |
-| CORS 204 + exact ACAO for app + launch Vercel | `CORS_ORIGINS` likely includes both origins |
+| CORS 204 + exact ACAO for app + launch Vercel | `CORS_ORIGINS` likely includes prior app-domain origins; apex still requires cutover smoke |
 | OPTIONS credentials=true | Cookie auth path configured |
 
 ---
@@ -54,8 +54,8 @@ Redact secret values before sharing; compare **names** to this matrix.
 | Variable | Used by code | Documented | Inferred prod | Expected safe value | Action | Redeploy | Owner |
 |----------|--------------|------------|---------------|---------------------|--------|----------|-------|
 | `NODE_ENV` | yes — [`utils/corsOrigins.js`](../utils/corsOrigins.js) | yes | **Inferred yes** | `production` | Verify in EB | restart if changed | release owner |
-| `FRONTEND_URL` | yes — auth, Connect | yes | **Not verified** | `https://app.mosaicbizhub.com` | Verify matches production frontend | yes if wrong | release owner |
-| `CORS_ORIGINS` | yes — [`utils/corsOrigins.js`](../utils/corsOrigins.js) | yes | **Inferred yes** | `https://mosaic-biz-frontend-launch.vercel.app,https://app.mosaicbizhub.com,https://mosaicbizhub.com,https://www.mosaicbizhub.com` | Verify full list in EB; **replaces fallback when set** | restart | release owner |
+| `FRONTEND_URL` | yes — auth, Connect | yes | **Not verified** | `https://mosaicbizhub.com` | Verify matches production frontend | yes if wrong | release owner |
+| `CORS_ORIGINS` | yes — [`utils/corsOrigins.js`](../utils/corsOrigins.js) | yes | **Inferred yes** | Apex + temporary app + launch Vercel origins | Verify full list in EB; **replaces fallback when set**. `www` should redirect to apex and should stay out of default credentialed CORS. | restart | release owner |
 | `API_BASE_URL` | yes — OAuth | yes | **Not verified** | `https://api.mosaicbizhub.com` | Verify in EB | yes if wrong | release owner |
 | `COOKIE_DOMAIN` | yes — auth cookies | yes | **Not verified** | `.mosaicbizhub.com` | Verify for cross-subdomain cookies | restart | release owner |
 | `COOKIE_SECURE` | yes | yes | **Not verified** | `true` | Verify | restart | release owner |
@@ -119,7 +119,7 @@ All: **Operator Action Required** — confirm names present in EB; do not commit
 ## Manual EB actions after merge + redeploy
 
 1. Set `RELEASE_COMMIT_SHA`, `DEPLOYMENT_VERSION_LABEL`, `SENTRY_RELEASE` to deployed SHA (`mosaic-0af8803…` or full SHA per workflow).
-2. Confirm `FRONTEND_URL=https://app.mosaicbizhub.com` for production Connect return URLs.
+2. Confirm `FRONTEND_URL=https://mosaicbizhub.com` for production Connect return URLs.
 3. Confirm `CORS_ORIGINS` includes required origins (see [CORS_PRODUCTION_SMOKE_PROOF.md](CORS_PRODUCTION_SMOKE_PROOF.md)).
 4. Restart EB environment if env-only changes; full redeploy if code changed.
 

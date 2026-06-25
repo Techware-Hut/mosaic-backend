@@ -220,7 +220,7 @@ These launch-critical areas have **no** meaningful automated coverage. They requ
 | **Order checkout E2E** | Order controller not tested | P5.2–P5.5 | Test order `paymentStatus: paid` |
 | **Admin finalize + emails** | Yes (5 finalize tests) | P3.4 | Live approval/rejection email received |
 | **Frontend integration** | Backend tests only | Script + P6 | `verify-auth-check-smoke.js` page loads |
-| **Cross-domain cookies** | Cookie helper unit-tested only | P1.4 | Browser session on `app.mosaicbizhub.com` |
+| **Cross-domain cookies** | Cookie helper unit-tested only | P1.4 | Browser session on `mosaicbizhub.com` |
 | **Open P0 blockers** | Documented gaps, not tested | Launch review | [launch-readiness-report.md](launch-readiness-report.md) §9 |
 
 ### Manual smoke script (not `npm test`)

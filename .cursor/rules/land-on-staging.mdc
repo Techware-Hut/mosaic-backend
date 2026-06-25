@@ -1,0 +1,84 @@
+---
+description: Feature branch workflow — start from staging, land on staging when done, branch again for the next task
+alwaysApply: true
+---
+
+# Feature workflow: staging is home base
+
+**`staging`** is the integration branch. **`main`** is production — do not use it for day-to-day feature work unless explicitly asked.
+
+## Start a feature (beginning of task)
+
+Always branch from an up-to-date `staging`:
+
+```powershell
+git checkout staging
+git pull origin staging
+git checkout -b fix/short-description   # or feat/, chore/, etc.
+```
+
+Do **not** start a new feature from `main` or from another stale feature branch.
+
+## While working
+
+- Stay on the feature branch until the task is complete.
+- Commit when the user asks, or when the task is genuinely done (focused commits, no secrets).
+
+## Task completion (mandatory before ending session)
+
+When a feature is **done**, land it on `staging` and reset to a clean tree:
+
+1. **Commit** remaining work on the feature branch (if any):
+   ```powershell
+   git add <relevant files>
+   git commit -m "Short why-focused message"
+   ```
+2. **Land on staging** — prefer PR when the change should be reviewed; otherwise merge locally:
+   ```powershell
+   # Option A: open PR (preferred for non-trivial changes)
+   git push -u origin HEAD
+   gh pr create --base staging --head <feature-branch> --title "..." --body "..."
+
+   # Option B: direct merge when user wants it merged now
+   git checkout staging
+   git pull origin staging
+   git merge <feature-branch>
+   git push origin staging
+   ```
+3. **Clean up and reset**:
+   ```powershell
+   git checkout staging
+   git pull origin staging
+   git branch -d <feature-branch>          # delete local feature branch if merged
+   git status                                # must be clean
+   ```
+4. **Report** — state clearly: branch is `staging`, working tree clean, feature landed (commit SHA or PR URL).
+
+## Start the next feature
+
+Only after step 3 above — never chain a new feature branch from the old one:
+
+```powershell
+git checkout staging
+git pull origin staging
+git checkout -b fix/next-task
+```
+
+## End-of-session rule
+
+- **Never** leave the repo on a feature branch when the conversation ends.
+- **Never** end with uncommitted changes without stashing and explaining why.
+- If the task is **incomplete**, stash WIP, return to `staging`, and tell the user how to resume:
+  ```powershell
+  git stash push -u -m "<branch>: WIP summary"
+  git checkout staging
+  git pull origin staging
+  ```
+
+## Do not
+
+- Leave the user on `fix/*`, `feat/*`, or other feature branches after task completion.
+- Skip landing completed work on `staging` before starting the next feature.
+- Auto-commit without user approval unless they explicitly asked to commit.
+
+Always mention the **final branch name** (`staging`) in your last response.
