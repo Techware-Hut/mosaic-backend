@@ -12,6 +12,7 @@ const {
 } = require('../controllers/categoryController');
 const s3Controller = require('../controllers/s3Controller');
 const authenticate = require('../middlewares/authenticate');
+const isAdmin = require('../middlewares/isAdmin');
 const isBusinessOwner = require('../middlewares/isBusinessOwner');
 const isBusinessOwnerOrAdmin = require('../middlewares/isBusinessOwnerOrAdmin');
 const router = express.Router();
@@ -27,7 +28,7 @@ router.get('/getProductCategories', getProductCategories);
 router.get('/subcategories/:categoryId', getProductSubcategories);
 router.get('/sub-categories', listSubcategories);
 router.get("/s3-presigned-url", authenticate,isBusinessOwnerOrAdmin, s3Controller.getPresignedUrl);
-router.get('/admin/categories', getAllCategoriesAdmin);
+router.get('/admin/categories', authenticate, isAdmin, getAllCategoriesAdmin);
 
 
 module.exports = router;

@@ -87,7 +87,6 @@ Notable dual mounts:
 
 | Route | Method | Notes |
 | --- | --- | --- |
-| `GET /api/admin/categories` | GET | No `authenticate`/`isAdmin` at route — public taxonomy dump |
 | `GET /api/vendor-onboarding/status/:applicationId` | GET | Intentionally public polling |
 | `POST /api/discounts/validate` | POST | Public coupon validation |
 | `POST /api/discounts/apply` | POST | Public apply |
@@ -215,7 +214,7 @@ Environment variable names involved (values not listed): `STRIPE_SECRET_KEY`, `S
 | --- | --- |
 | Child service delete | Covered by `tests/integration/service-child-delete.integration.test.js` (on audit baseline) |
 | Discount ownership IDOR | No integration test proving cross-vendor discount mutation fails |
-| Public `GET /api/admin/categories` | `tests/admin/admin-categories-guard.test.js` documents public exposure |
+| Admin `GET /api/admin/categories` | `tests/admin/admin-categories-guard.test.js` verifies `authenticate` + `isAdmin` |
 | Stripe checkout draft ownership | No test for cross-user draft checkout |
 | Route registration completeness | `tests/launch/backend-launch-contract.test.js` covers mounts, not every route |
 | Full route manifest sync | No CI check that `API_SURFACE.md` row count matches code |
@@ -312,16 +311,16 @@ Cannot be proven from static analysis alone:
 | **Full route** | `GET /api/admin/categories` |
 | **Method** | GET |
 | **Router / controller** | `categoryRoutes.js:30` → `getAllCategoriesAdmin` |
-| **Middleware** | None |
-| **Expected role** | Docs imply admin; code is public |
+| **Middleware** | `authenticate`, `isAdmin` |
+| **Expected role** | admin |
 | **Identifier semantics** | N/A |
 | **Request contract** | None |
 | **Response contract** | `{ success, data: { foodCategories, serviceCategories, productCategories } }` |
-| **Evidence** | `categoryController.js:64-130` |
-| **Likely frontend impact** | Admin UI may assume auth gate; endpoint works without session |
+| **Evidence** | `routes/categoryRoutes.js`, `tests/admin/admin-categories-guard.test.js` |
+| **Likely frontend impact** | Admin UI must call with an authenticated admin session; public browse uses `/api/categories/*` |
 | **Owner** | **backend** |
-| **Smoke test** | Unauthenticated GET → 200 with full taxonomy |
-| **Next action** | Add authenticate+isAdmin or rename path to public `/api/categories/admin` — **do not implement in audit branch** |
+| **Smoke test** | Unauthenticated GET returns `401`; non-admin sessions return `403` |
+| **Next action** | Resolved in launch hardening pass |
 
 ---
 
