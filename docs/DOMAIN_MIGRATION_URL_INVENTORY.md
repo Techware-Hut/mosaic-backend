@@ -18,7 +18,7 @@ The prior `app.mosaicbizhub.com` canonical-domain plan is superseded. Do not pro
 
 | Area | File | Behavior |
 | --- | --- | --- |
-| Frontend URL generation | `utils/frontendUrl.js` | Defaults to `https://mosaicbizhub.com`; approves apex, temporary app, Vercel QA, and dev localhost outside production; rejects `www`, API, and arbitrary origins |
+| Frontend URL generation | `utils/frontendUrl.js` | Defaults generated links to `https://mosaicbizhub.com`; ignores stale `app.mosaicbizhub.com` env defaults; approves temporary app only for transition redirects/CORS preservation; approves Vercel QA and dev localhost outside production; rejects `www`, API, and arbitrary origins |
 | Stripe Connect return and refresh URLs | `lib/connect/connectUrls.js` | Uses the shared frontend URL allowlist and preserves approved full URL overrides |
 | Google OAuth redirect state | `controllers/authController.js` | Sanitizes supplied redirects before state creation and again before callback redirect |
 | Billing portal return URL | `controllers/billing.controller.js` | Sanitizes user-supplied or configured return URLs to an approved frontend origin or fallback account path |
@@ -57,7 +57,7 @@ Names only; do not commit values.
 | `CORS_ORIGINS` | Explicit comma-separated origins: apex plus approved transition/QA origins; no wildcard |
 | `API_BASE_URL` | API subdomain |
 | `COOKIE_DOMAIN` | Audit before changing; production default remains `.mosaicbizhub.com` when unset |
-| `CONNECT_RETURN_URL`, `CONNECT_REFRESH_URL` | Optional full overrides; must resolve to an approved frontend origin |
+| `CONNECT_RETURN_URL`, `CONNECT_REFRESH_URL` | Optional full overrides; must resolve to an approved frontend origin; leave unset for canonical apex generated defaults |
 | `CONNECT_RETURN_PATH`, `CONNECT_REFRESH_PATH` | Optional Connect path overrides on approved frontend origin |
 | `BILLING_PORTAL_RETURN_URL` | Optional billing return override; sanitized before use |
 | `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` | Release reporting; unchanged by hostname swap |

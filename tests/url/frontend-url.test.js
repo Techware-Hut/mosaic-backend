@@ -25,6 +25,17 @@ test('getFrontendBaseUrl uses the first approved configured frontend origin', ()
   );
 });
 
+test('getFrontendBaseUrl ignores the legacy app subdomain as a configured default', () => {
+  assert.equal(
+    getFrontendBaseUrl({
+      NODE_ENV: 'production',
+      FRONTEND_URL: 'https://app.mosaicbizhub.com',
+      APP_URL: 'https://app.mosaicbizhub.com',
+    }),
+    'https://mosaicbizhub.com'
+  );
+});
+
 test('getFrontendBaseUrl ignores www because it should redirect to apex', () => {
   assert.equal(
     getFrontendBaseUrl({
@@ -33,6 +44,16 @@ test('getFrontendBaseUrl ignores www because it should redirect to apex', () => 
       APP_URL: 'https://www.mosaicbizhub.com',
     }),
     'https://mosaicbizhub.com'
+  );
+});
+
+test('buildFrontendUrl falls back to apex when production env still points at legacy app', () => {
+  assert.equal(
+    buildFrontendUrl('/partners/connect/return?businessId=abc', {
+      NODE_ENV: 'production',
+      FRONTEND_URL: 'https://app.mosaicbizhub.com',
+    }),
+    'https://mosaicbizhub.com/partners/connect/return?businessId=abc'
   );
 });
 
