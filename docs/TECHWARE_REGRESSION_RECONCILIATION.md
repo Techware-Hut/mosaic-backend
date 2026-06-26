@@ -63,7 +63,7 @@ History checks run before code edits:
 | 24 | Rejected applications cannot be resubmitted. | STALE_ALREADY_FIXED | `submitForReview` permits `rejected`. | `POST /api/vendor-onboarding/submit`. | Rejected resubmit tests. | No change. |
 | 25 | Admin approval sync failure. | PARTIALLY_CONFIRMED | `isApproved` sync exists; `isActive` remains separate. | Admin finalization and public marketplace eligibility. | Finalization and eligibility tests. | No change until lifecycle rule approved. |
 | 26 | Missing user metadata in login response. | STALE_ALREADY_FIXED | Shared serializer returns `mobile` and `isOtpVerified`. | `POST /api/user/login`, `GET /api/user/auth/check`. | Auth payload tests. | No change. |
-| 27 | Backend canonical frontend domain still points to `app.mosaicbizhub.com` after apex decision. | CONFIRMED_CURRENT_DEFECT | Current staging still has `utils/frontendUrl.js:1-4`, `utils/corsOrigins.js:1-4`, `tests/url/frontend-url.test.js:21-35`, and `docs/DOMAIN_MIGRATION_URL_INVENTORY.md:9-21` treating app as canonical and apex as disallowed/community. | Generated frontend URLs and default credentialed CORS origins. | Open PR `#130 fix/backend-root-domain-canonicalization -> staging` isolates this fix. Not bundled here to keep badge/listing recovery focused. | Separate P7 domain PR required before staging promotion. |
+| 27 | Backend canonical frontend domain still points to `app.mosaicbizhub.com` after apex decision. | RESOLVED_AFTER_REPORT | Current staging defaults generated frontend links to `https://mosaicbizhub.com`, keeps `app.mosaicbizhub.com` transition-only, keeps Vercel launch QA approved, and rejects `www`/API as frontend redirect targets. Stale app-domain env values no longer become the generated default. | Generated frontend URLs and default credentialed CORS origins. | `tests/url/frontend-url.test.js`, `tests/connect/connect-urls.test.js`, `tests/cors/cors-origins.test.js`. | Resolved by the root-domain correction and follow-up generated-link hardening. |
 
 ## Contradictions In The Report
 
@@ -92,7 +92,7 @@ Out of scope:
 - Product route aliases.
 - Food default price behavior.
 - Stripe Connect/payment/subscription/webhook changes.
-- Apex/root domain code changes already isolated in PR `#130`.
+- Apex/root domain code changes, now handled by the root-domain correction and generated-link hardening.
 - Main branch merge or production deploy.
 
 ## Ordered Queue Evidence
@@ -105,7 +105,7 @@ Out of scope:
 | Product counts and deletion | RUNTIME_EVIDENCE_REQUIRED | Product delete route is registered at `routes/productRoutes.js:127-135` and soft-deletes product plus variants in `controllers/productController.js:926-955`. Public/admin/category counts use `Product.countDocuments` or aggregation with `isDeleted:false`; quota usage is documented and tested in `utils/listingTierLimits.js:6-17`, `tests/vendor/listing-tier-limits.test.js:10-24`. No wrong consumer result was reproduced. |
 | Stale auth/onboarding claims | STALE_ALREADY_FIXED | OTP delivery tests, auth-check payload tests, rejected-resubmit tests, vendor finalize tests, and marketplace eligibility tests cover these without backend behavior changes. |
 | Food price ceiling | PRODUCT_DECISION_REQUIRED | `controllers/publicListing.js:593-604` keeps default `$0-$200`; `price=all` explicitly opts out. No approved source found proving no maximum is intended. |
-| Canonical domain audit | CONFIRMED_CURRENT_DEFECT, SEPARATE_PR | Apex is now contractually canonical, but staging still defaults to app. PR `#130` contains the isolated root-domain correction; this branch does not change CORS/cookie/domain behavior. |
+| Canonical domain audit | RESOLVED_AFTER_REPORT | Apex is now contractually canonical for generated backend links. `app.mosaicbizhub.com` remains only as a temporary transition origin for CORS/redirect preservation until apex auth/payment smoke passes. |
 
 ## Runtime Smoke Evidence
 

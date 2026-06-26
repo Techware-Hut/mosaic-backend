@@ -49,5 +49,5 @@ app.use("trust proxy", 1);
 app.js
 
 stripeController.js
-    success_url: 'https://app.mosaicbizhub.com/partners',
-    cancel_url: 'https://app.mosaicbizhub.com/partners',
+    success_url: buildFrontendUrl("/partners"),
+    cancel_url: buildFrontendUrl("/partners"),

@@ -1,8 +1,14 @@
 const DEFAULT_FRONTEND_URL = 'https://mosaicbizhub.com';
+const LEGACY_FRONTEND_URL = 'https://app.mosaicbizhub.com';
+const LAUNCH_QA_FRONTEND_URL = 'https://mosaic-biz-frontend-launch.vercel.app';
 const APPROVED_FRONTEND_ORIGINS = [
-  'https://mosaicbizhub.com',
-  'https://app.mosaicbizhub.com',
-  'https://mosaic-biz-frontend-launch.vercel.app',
+  DEFAULT_FRONTEND_URL,
+  LEGACY_FRONTEND_URL,
+  LAUNCH_QA_FRONTEND_URL,
+];
+const GENERATED_FRONTEND_ORIGINS = [
+  DEFAULT_FRONTEND_URL,
+  LAUNCH_QA_FRONTEND_URL,
 ];
 const DEV_FRONTEND_ORIGINS = [
   'http://localhost:3000',
@@ -46,6 +52,16 @@ function getAllowedFrontendOrigins(env = process.env) {
   return [...new Set(origins)];
 }
 
+function getGeneratedFrontendOrigins(env = process.env) {
+  const origins = [...GENERATED_FRONTEND_ORIGINS];
+
+  if (!isProductionEnv(env)) {
+    origins.push(...DEV_FRONTEND_ORIGINS);
+  }
+
+  return [...new Set(origins)];
+}
+
 function getOrigin(value) {
   if (!value) return null;
 
@@ -57,6 +73,12 @@ function isAllowedFrontendOrigin(value, env = process.env) {
   const origin = getOrigin(value);
   if (!origin || DISALLOWED_FRONTEND_ORIGINS.has(origin)) return false;
   return getAllowedFrontendOrigins(env).includes(origin);
+}
+
+function isAllowedGeneratedFrontendOrigin(value, env = process.env) {
+  const origin = getOrigin(value);
+  if (!origin || DISALLOWED_FRONTEND_ORIGINS.has(origin)) return false;
+  return getGeneratedFrontendOrigins(env).includes(origin);
 }
 
 function toBaseUrlString(url) {
@@ -74,7 +96,7 @@ function toBaseUrlString(url) {
 function getFrontendBaseUrl(env = process.env) {
   for (const key of ENV_PRIORITY) {
     const parsed = parseAbsoluteUrl(env[key]);
-    if (parsed && isAllowedFrontendOrigin(parsed, env)) {
+    if (parsed && isAllowedGeneratedFrontendOrigin(parsed, env)) {
       return toBaseUrlString(parsed);
     }
   }
@@ -121,10 +143,15 @@ module.exports = {
   APPROVED_FRONTEND_ORIGINS,
   DEFAULT_FRONTEND_URL,
   DEV_FRONTEND_ORIGINS,
+  GENERATED_FRONTEND_ORIGINS,
+  LAUNCH_QA_FRONTEND_URL,
+  LEGACY_FRONTEND_URL,
   buildFrontendUrl,
   getAllowedFrontendOrigins,
   getFrontendBaseUrl,
+  getGeneratedFrontendOrigins,
   getFrontendLogoUrl,
+  isAllowedGeneratedFrontendOrigin,
   isAllowedFrontendOrigin,
   normalizeFrontendUrl,
   sanitizeFrontendRedirectUrl,
