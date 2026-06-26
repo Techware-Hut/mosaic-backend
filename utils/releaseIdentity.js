@@ -1,6 +1,10 @@
+const fs = require('fs');
+const path = require('path');
+
 const SAFE_LABEL_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 const SAFE_SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
 const VERSION_LABEL_PATTERN = /^mosaic-[a-f0-9]{7,40}$/i;
+const DEFAULT_RELEASE_MANIFEST_PATH = path.resolve(__dirname, '..', 'release-manifest.json');
 
 function normalizeOptionalString(value) {
   if (value == null) return undefined;
@@ -28,9 +32,27 @@ function extractCommitFromVersionLabel(label) {
   return sanitizeCommitSha(normalized);
 }
 
+function getReleaseManifestPath() {
+  return normalizeOptionalString(process.env.RELEASE_MANIFEST_PATH) || DEFAULT_RELEASE_MANIFEST_PATH;
+}
+
+function readReleaseManifest() {
+  try {
+    const raw = fs.readFileSync(getReleaseManifestPath(), 'utf8');
+    const manifest = JSON.parse(raw);
+    return manifest && typeof manifest === 'object' ? manifest : {};
+  } catch (_err) {
+    return {};
+  }
+}
+
 function getReleaseCommitSha() {
+  const manifest = readReleaseManifest();
+
   return (
     sanitizeCommitSha(process.env.RELEASE_COMMIT_SHA)
+    || sanitizeCommitSha(manifest.commit)
+    || extractCommitFromVersionLabel(manifest.deploymentVersion)
     || extractCommitFromVersionLabel(process.env.DEPLOYMENT_VERSION_LABEL)
     || extractCommitFromVersionLabel(process.env.SENTRY_RELEASE)
     || 'unknown'
@@ -43,8 +65,11 @@ function getShortReleaseCommitSha() {
 }
 
 function getReleaseEnvironment() {
+  const manifest = readReleaseManifest();
+
   return (
     normalizeOptionalString(process.env.RELEASE_ENVIRONMENT)
+    || normalizeOptionalString(manifest.environment)
     || normalizeOptionalString(process.env.SENTRY_ENVIRONMENT)
     || normalizeOptionalString(process.env.NODE_ENV)
     || 'development'
@@ -52,6 +77,12 @@ function getReleaseEnvironment() {
 }
 
 function getDeploymentVersionLabel() {
+  const manifest = readReleaseManifest();
+  const manifestVersion = normalizeOptionalString(manifest.deploymentVersion);
+  if (manifestVersion && SAFE_LABEL_PATTERN.test(manifestVersion)) {
+    return manifestVersion;
+  }
+
   const explicit = normalizeOptionalString(process.env.DEPLOYMENT_VERSION_LABEL);
   if (explicit && SAFE_LABEL_PATTERN.test(explicit)) {
     return explicit;

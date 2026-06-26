@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const releaseIdentityPath = path.resolve(__dirname, '../../utils/releaseIdentity.js');
@@ -12,6 +14,7 @@ function withReleaseIdentity(envOverrides, run) {
     'DEPLOYMENT_VERSION_LABEL',
     'SENTRY_RELEASE',
     'SENTRY_ENVIRONMENT',
+    'RELEASE_MANIFEST_PATH',
     'NODE_ENV',
   ]) {
     saved[key] = process.env[key];
@@ -72,6 +75,45 @@ test('getSentryRelease falls back to deployment label when SENTRY_RELEASE unset'
       });
     }
   );
+});
+
+test('getPublicReleaseInfo prefers packaged manifest over stale Sentry release env', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-release-'));
+  const manifestPath = path.join(tempDir, 'release-manifest.json');
+
+  fs.writeFileSync(
+    manifestPath,
+    JSON.stringify({
+      commit: 'feedbee1234567890abcdef1234567890abcdef1',
+      environment: 'production',
+      deploymentVersion: 'mosaic-feedbee1234567890abcdef1234567890abcdef1',
+    })
+  );
+
+  try {
+    withReleaseIdentity(
+      {
+        RELEASE_MANIFEST_PATH: manifestPath,
+        SENTRY_RELEASE: 'mosaic-deadbee1234567890abcdef1234567890abcdef1',
+        SENTRY_ENVIRONMENT: 'staging',
+      },
+      ({ getPublicReleaseInfo, getSentryTags }) => {
+        const info = getPublicReleaseInfo();
+        assert.deepEqual(info, {
+          commit: 'feedbee',
+          environment: 'production',
+          deploymentVersion: 'mosaic-feedbee1234567890abcdef1234567890abcdef1',
+        });
+        assert.deepEqual(getSentryTags(), {
+          deployment_version: 'mosaic-feedbee1234567890abcdef1234567890abcdef1',
+          commit_sha: 'feedbee',
+          environment: 'production',
+        });
+      }
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('getReleaseCommitSha derives commit from SENTRY_RELEASE mosaic label', () => {
