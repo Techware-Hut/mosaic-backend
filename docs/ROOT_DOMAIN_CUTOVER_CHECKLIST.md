@@ -29,6 +29,7 @@ This checklist is names-only and value-safe. It records human configuration work
 ## AWS Elastic Beanstalk
 
 - Env var names to reconcile: `FRONTEND_URL`, `CORS_ORIGINS`, `API_BASE_URL`, `COOKIE_DOMAIN`, `CONNECT_RETURN_URL`, `CONNECT_REFRESH_URL`, `CONNECT_RETURN_PATH`, `CONNECT_REFRESH_PATH`, `BILLING_PORTAL_RETURN_URL`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`.
+- Names-only EB drift audit: [EB_ENV_DRIFT_CUTOVER_AUDIT_2026_06_26.md](EB_ENV_DRIFT_CUTOVER_AUDIT_2026_06_26.md).
 - Do not automatically change `COOKIE_DOMAIN`; first confirm whether cookies are host-only or intentionally shared across `mosaicbizhub.com` subdomains.
 - Preserve HttpOnly auth cookies, Secure in production, SameSite behavior, credentialed requests, and explicit CORS origins.
 

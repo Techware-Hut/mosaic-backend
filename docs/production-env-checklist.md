@@ -47,7 +47,7 @@ Set these in the Elastic Beanstalk environment configuration (or secret manager 
 | `PLATFORM_FEE_CENTS` | Order Connect fees |
 | `BILLING_PORTAL_RETURN_URL` | Billing portal return |
 | `CONNECT_RETURN_PATH` / `CONNECT_REFRESH_PATH` | Connect onboarding paths |
-| `CONNECT_RETURN_URL` / `CONNECT_REFRESH_URL` | Optional full URL overrides |
+| `CONNECT_RETURN_URL` / `CONNECT_REFRESH_URL` | Optional full URL overrides. Prefer `FRONTEND_URL` + path vars in production; use full overrides only for intentional QA/cutover windows. |
 
 Webhook URL registration: [stripe-webhook-registration.md](stripe-webhook-registration.md)
 
@@ -127,7 +127,7 @@ Note: Backend code does **not** read `STRIPE_PUBLIC_KEY` (frontend uses `NEXT_PU
 | `NEXT_PUBLIC_CLIENT_BASE_URL` | `https://mosaicbizhub.com` if still required as fallback |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Live publishable key |
 | `NEXT_PUBLIC_GOOGLE_MAPS_KEY` | Address autocomplete |
-| `JWT_SECRET` | Must match backend `JWT_SECRET` for middleware |
+| `JWT_SECRET` | Must match backend `JWT_SECRET` for the frontend Next proxy |
 
 See `mosaic-biz-frontend/.env.example` when present.
 
