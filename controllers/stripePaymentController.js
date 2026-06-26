@@ -72,9 +72,6 @@ exports.stripePaymentWebhook = async (req, res) => {
         // store IDs on each item (matches your current schema)
 
         order.items.forEach((it) => {
-          console.log(chargeId || it.chargeId)
-          console.log(transferId || it.transferId)
-          console.log(applicationFeeId || it.applicationFeeId)
           it.chargeId = chargeId || it.chargeId;
           it.transferId = transferId || it.transferId;
           it.applicationFeeId = applicationFeeId || it.applicationFeeId;

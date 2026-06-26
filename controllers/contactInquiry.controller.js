@@ -44,7 +44,7 @@ exports.createContactInquiry = async (req, res) => {
 
       await transporter.sendMail(mailOptions);
     } catch (emailError) {
-      console.log('Email sending failed:', emailError.message);
+      console.warn('Contact inquiry email sending failed:', emailError.message);
     }
 
     res.status(201).json({ 

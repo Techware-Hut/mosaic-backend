@@ -62,7 +62,6 @@ async function invoiceHtmlForOrder({ order }) {
         const unitMajor = Number(it?.price || 0); // unit price captured at purchase (MAJOR)
         const lineMajor = unitMajor * qty;
         subtotalMajor += lineMajor;
-        console.log(subtotalMajor, unitMajor, qty, lineMajor)
         return { name, options, sku, qty, unitMajor, lineMajor };
     });
 
