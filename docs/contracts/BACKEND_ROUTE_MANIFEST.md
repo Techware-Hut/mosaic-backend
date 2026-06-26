@@ -483,7 +483,7 @@
 | FullRoute | Method | Router | Controller | Middleware | Auth | Role | Destructive | PaySens | ID semantics | Doc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `/` | GET | `app.js` | `router.inline` | — | Public | — | no | no | — | listed |
-| `/api/admin/categories` | GET | `routes/categoryRoutes` | `inline` | — | Public | — | no | no | — | listed |
+| `/api/admin/categories` | GET | `routes/categoryRoutes` | `inline` | authenticate, isAdmin | JWT cookie/Bearer | admin | no | no | — | listed |
 | `/api/billing-portal/session` | POST | `routes/api.routes` | `inline` | authenticate, isBusinessOwner | JWT cookie/Bearer | business_owner | no | yes | — | listed |
 | `/api/categories` | GET | `routes/categoryRoutes` | `inline` | — | Public | — | no | no | — | listed |
 | `/api/category-requests` | POST | `routes/categoryRoutes` | `inline` | authenticate, isBusinessOwner | JWT cookie/Bearer | business_owner | no | no | — | listed |
