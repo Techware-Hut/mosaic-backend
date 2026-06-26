@@ -5,8 +5,6 @@ const ProductVariant = require('../../models/ProductVariant');
 // GET /api/wishlist
 exports.getWishlist = async (req, res) => {
     try {
-        console.log("hre");
-
         const wishlist = await Wishlist.find({ customerId: req.user._id })
             .populate({
                 path: 'productVariantId',
