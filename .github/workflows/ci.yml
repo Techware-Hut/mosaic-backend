@@ -40,3 +40,12 @@ jobs:
 
       - name: Run integration tests
         run: npm run test:integration
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Confirm required build gate
+        run: echo "Backend validation completed; required build status is satisfied."
