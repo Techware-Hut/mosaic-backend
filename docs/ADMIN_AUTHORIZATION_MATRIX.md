@@ -56,7 +56,7 @@ Mount prefixes from [`app.js`](../app.js). All mutation routes require `authenti
 
 ## Public taxonomy reads (intentional)
 
-These admin-mounted **GET list** endpoints expose category metadata without auth — used by marketplace UI for taxonomy dropdowns:
+These admin-mounted **GET list** endpoints expose category metadata without auth for legacy taxonomy dropdowns. Aggregated admin category management uses `GET /api/admin/categories` and now requires `authenticate` + `isAdmin`.
 
 | Endpoint | File |
 |----------|------|
@@ -64,9 +64,8 @@ These admin-mounted **GET list** endpoints expose category metadata without auth
 | `GET /api/admin/category/service` | `categoryRoutes.js` |
 | `GET /api/admin/category/food` | `foodCategoryRoutes.js` |
 | `GET /api/admin/category/*-subcategory` (list) | `*SubcategoryRoutes.js` |
-| `GET /api/admin/categories` | `routes/categoryRoutes.js` (aggregated) |
 
-**Mutations** (POST/PUT/DELETE) on these mounts require admin. Documented in [`tests/admin/admin-categories-guard.test.js`](../tests/admin/admin-categories-guard.test.js).
+**Mutations** (POST/PUT/DELETE) on these mounts require admin. `GET /api/admin/categories` also requires admin and is documented in [`tests/admin/admin-categories-guard.test.js`](../tests/admin/admin-categories-guard.test.js).
 
 ---
 

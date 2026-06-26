@@ -257,7 +257,7 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 | GET | `/api/subcategories/:categoryId` | — | `getProductSubcategories` | ⚪ Public | Subcategories | 🟢 |
 | GET | `/api/sub-categories` | — | `listSubcategories` | ⚪ Public | List subcategories | 🟢 |
 | GET | `/api/s3-presigned-url` | `authenticate`, `isBusinessOwnerOrAdmin` | `s3Controller.getPresignedUrl` | owner or admin | Generic S3 URL | 🟡 |
-| GET | `/api/admin/categories` | — | `getAllCategoriesAdmin` | ⚪ Public | Admin category list (no router guard on this route) | 🟡 audit |
+| GET | `/api/admin/categories` | `authenticate`, `isAdmin` | `getAllCategoriesAdmin` | admin | Admin category list | 🟢 guarded |
 
 ### Subcategories — [`routes/subcategoryRoutes.js`](../routes/subcategoryRoutes.js) → `/api`
 
