@@ -35,6 +35,16 @@ Unit tests: [`tests/connect/connect-urls.test.js`](../tests/connect/connect-urls
 
 **Note:** Production EB should use the apex marketplace origin. Use `CONNECT_RETURN_URL` / `CONNECT_REFRESH_URL` only when a full override is intentionally required.
 
+Preferred launch configuration:
+
+```text
+FRONTEND_URL=https://mosaicbizhub.com
+CONNECT_RETURN_PATH=/partners/connect/return
+CONNECT_REFRESH_PATH=/partners/connect/refresh
+```
+
+Full URL overrides are valid for intentional QA or cutover windows, but they should not point at `https://app.mosaicbizhub.com` after apex launch except during a documented temporary rollback window.
+
 ---
 
 ## Runtime verification
@@ -66,6 +76,7 @@ Connect **code** aligns with frontend route expectations. No connect controller 
 2. `POST https://api.mosaicbizhub.com/api/connect/<businessId>/account-link` with Bearer token.
 3. Confirm 200 + Stripe onboarding URL (do not complete onboarding in production without approval).
 4. Verify EB `FRONTEND_URL` matches intended frontend host before relying on default URL builder.
+5. If `CONNECT_RETURN_URL` / `CONNECT_REFRESH_URL` are set, verify they point to the intended apex or QA host and not an accidental legacy app default.
 
 ---
 

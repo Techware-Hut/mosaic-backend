@@ -142,7 +142,6 @@ exports.createProductWithVariants = async (req, res) => {
     }
 
     const userId = req.user._id;
-    console.log('Creating product for user:', userId);
 
     const {
       title,
@@ -399,7 +398,6 @@ const maxPrice = Math.max(...prices);
 //     }
 
 //     const userId = req.user._id;
-//     console.log('Creating product for user:', userId);
 
 //     const {
 //       title,

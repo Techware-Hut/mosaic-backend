@@ -1217,7 +1217,7 @@ exports.getProductsByFilters = async (req, res) => {
               product.variants = [];
             }
           } catch (variantError) {
-            console.log('Error fetching variants for product:', product._id, variantError.message);
+            console.warn('Error fetching variants for product:', product._id, variantError.message);
             product.variants = [];
           }
         }
