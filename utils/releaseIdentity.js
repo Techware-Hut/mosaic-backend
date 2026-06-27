@@ -50,9 +50,9 @@ function getReleaseCommitSha() {
   const manifest = readReleaseManifest();
 
   return (
-    sanitizeCommitSha(process.env.RELEASE_COMMIT_SHA)
-    || sanitizeCommitSha(manifest.commit)
+    sanitizeCommitSha(manifest.commit)
     || extractCommitFromVersionLabel(manifest.deploymentVersion)
+    || sanitizeCommitSha(process.env.RELEASE_COMMIT_SHA)
     || extractCommitFromVersionLabel(process.env.DEPLOYMENT_VERSION_LABEL)
     || extractCommitFromVersionLabel(process.env.SENTRY_RELEASE)
     || 'unknown'
@@ -68,8 +68,8 @@ function getReleaseEnvironment() {
   const manifest = readReleaseManifest();
 
   return (
-    normalizeOptionalString(process.env.RELEASE_ENVIRONMENT)
-    || normalizeOptionalString(manifest.environment)
+    normalizeOptionalString(manifest.environment)
+    || normalizeOptionalString(process.env.RELEASE_ENVIRONMENT)
     || normalizeOptionalString(process.env.SENTRY_ENVIRONMENT)
     || normalizeOptionalString(process.env.NODE_ENV)
     || 'development'
@@ -103,10 +103,17 @@ function getDeploymentVersionLabel() {
 
 function getSentryRelease() {
   const sentryRelease = normalizeOptionalString(process.env.SENTRY_RELEASE);
+  const deploymentLabel = getDeploymentVersionLabel();
+
+  if (deploymentLabel !== 'mosaic-unknown') {
+    return deploymentLabel;
+  }
+
   if (sentryRelease && SAFE_LABEL_PATTERN.test(sentryRelease)) {
     return sentryRelease;
   }
-  return getDeploymentVersionLabel();
+
+  return deploymentLabel;
 }
 
 function getPublicReleaseInfo() {

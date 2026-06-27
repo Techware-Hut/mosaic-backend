@@ -77,7 +77,7 @@ test('getSentryRelease falls back to deployment label when SENTRY_RELEASE unset'
   );
 });
 
-test('getPublicReleaseInfo prefers packaged manifest over stale Sentry release env', () => {
+test('getPublicReleaseInfo prefers packaged manifest over stale release env vars', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-release-'));
   const manifestPath = path.join(tempDir, 'release-manifest.json');
 
@@ -94,16 +94,20 @@ test('getPublicReleaseInfo prefers packaged manifest over stale Sentry release e
     withReleaseIdentity(
       {
         RELEASE_MANIFEST_PATH: manifestPath,
+        RELEASE_COMMIT_SHA: 'badcafe1234567890abcdef1234567890abcdef1',
+        RELEASE_ENVIRONMENT: 'staging',
+        DEPLOYMENT_VERSION_LABEL: 'mosaic-badcafe1234567890abcdef1234567890abcdef1',
         SENTRY_RELEASE: 'mosaic-deadbee1234567890abcdef1234567890abcdef1',
         SENTRY_ENVIRONMENT: 'staging',
       },
-      ({ getPublicReleaseInfo, getSentryTags }) => {
+      ({ getPublicReleaseInfo, getSentryRelease, getSentryTags }) => {
         const info = getPublicReleaseInfo();
         assert.deepEqual(info, {
           commit: 'feedbee',
           environment: 'production',
           deploymentVersion: 'mosaic-feedbee1234567890abcdef1234567890abcdef1',
         });
+        assert.equal(getSentryRelease(), 'mosaic-feedbee1234567890abcdef1234567890abcdef1');
         assert.deepEqual(getSentryTags(), {
           deployment_version: 'mosaic-feedbee1234567890abcdef1234567890abcdef1',
           commit_sha: 'feedbee',
