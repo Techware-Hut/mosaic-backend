@@ -89,8 +89,12 @@ done
 
 CORS_ORIGINS=(
   "https://mosaicbizhub.com"
+  "https://www.mosaicbizhub.com"
   "https://app.mosaicbizhub.com"
   "https://mosaic-biz-frontend-launch.vercel.app"
+  "https://mosaic-biz-frontend-launch-digital-builders.vercel.app"
+  "https://mosaic-biz-frontend-launch-git-main-digital-builders.vercel.app"
+  "https://mosaic-biz-frontend-launch-git-develop-digital-builders.vercel.app"
 )
 if [ -n "${FRONTEND_ORIGIN:-}" ]; then
   CORS_ORIGINS=("$FRONTEND_ORIGIN")
@@ -108,10 +112,10 @@ for CORS_ORIGIN in "${CORS_ORIGINS[@]}"; do
 done
 
 code=$(http_code "$BASE/api/admin/categories")
-if [ "$code" = "200" ]; then
-  pass "NOTE GET /api/admin/categories unauth ($code) — public exposure documented"
+if [ "$code" = "401" ]; then
+  pass "P3.2 GET /api/admin/categories unauth ($code)"
 else
-  fail "NOTE GET /api/admin/categories ($code, expected 200 on current main)"
+  fail "P3.2 GET /api/admin/categories ($code, expected 401)"
 fi
 
 code=$(http_code "$BASE/admin/api/products/test")
