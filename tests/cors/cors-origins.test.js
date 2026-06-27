@@ -53,18 +53,22 @@ test('parseCorsOrigins trims and filters empty entries', () => {
   }
 });
 
-test('getAllowedOrigins uses CORS_ORIGINS when set', () => {
+test('getAllowedOrigins merges CORS_ORIGINS with approved launch origins when set', () => {
   const { mod, cleanup } = loadCorsOrigins({
     NODE_ENV: 'production',
-    CORS_ORIGINS: 'https://mosaicbizhub.com,https://app.mosaicbizhub.com,https://mosaic-biz-frontend-launch.vercel.app',
+    CORS_ORIGINS: 'https://custom-preview.example,https://mosaicbizhub.com',
   });
   try {
     const origins = mod.getAllowedOrigins();
+    assert.ok(origins.includes('https://custom-preview.example'));
     assert.ok(origins.includes('https://mosaicbizhub.com'));
+    assert.ok(origins.includes('https://www.mosaicbizhub.com'));
     assert.ok(origins.includes('https://mosaic-biz-frontend-launch.vercel.app'));
+    assert.ok(origins.includes('https://mosaic-biz-frontend-launch-digital-builders.vercel.app'));
+    assert.ok(origins.includes('https://mosaic-biz-frontend-launch-git-main-digital-builders.vercel.app'));
+    assert.ok(origins.includes('https://mosaic-biz-frontend-launch-git-develop-digital-builders.vercel.app'));
     assert.ok(origins.includes('https://app.mosaicbizhub.com'));
-    assert.ok(!origins.includes('https://www.mosaicbizhub.com'));
-    assert.equal(origins.length, 3);
+    assert.equal(origins.length, mod.DEFAULT_CREDENTIAL_ORIGINS.length + 1);
   } finally {
     cleanup();
   }
@@ -76,7 +80,7 @@ test('getAllowedOrigins dedupes CORS_ORIGINS entries', () => {
     CORS_ORIGINS: 'https://mosaicbizhub.com,https://mosaicbizhub.com,*',
   });
   try {
-    assert.deepEqual(mod.getAllowedOrigins(), ['https://mosaicbizhub.com']);
+    assert.deepEqual(mod.getAllowedOrigins(), mod.DEFAULT_CREDENTIAL_ORIGINS);
   } finally {
     cleanup();
   }
@@ -90,9 +94,12 @@ test('getAllowedOrigins falls back to FRONTEND_URL and credentialed production o
   try {
     const origins = mod.getAllowedOrigins();
     assert.ok(origins.includes('https://mosaicbizhub.com'));
+    assert.ok(origins.includes('https://www.mosaicbizhub.com'));
     assert.ok(origins.includes('https://app.mosaicbizhub.com'));
     assert.ok(origins.includes('https://mosaic-biz-frontend-launch.vercel.app'));
-    assert.ok(!origins.includes('https://www.mosaicbizhub.com'));
+    assert.ok(origins.includes('https://mosaic-biz-frontend-launch-digital-builders.vercel.app'));
+    assert.ok(origins.includes('https://mosaic-biz-frontend-launch-git-main-digital-builders.vercel.app'));
+    assert.ok(origins.includes('https://mosaic-biz-frontend-launch-git-develop-digital-builders.vercel.app'));
     for (const origin of mod.DEFAULT_CREDENTIAL_ORIGINS) {
       assert.ok(origins.includes(origin));
     }

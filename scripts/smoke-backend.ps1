@@ -130,8 +130,12 @@ foreach ($p in $paths) {
 
 $corsOrigins = @(
     'https://mosaicbizhub.com',
+    'https://www.mosaicbizhub.com',
     'https://app.mosaicbizhub.com',
-    'https://mosaic-biz-frontend-launch.vercel.app'
+    'https://mosaic-biz-frontend-launch.vercel.app',
+    'https://mosaic-biz-frontend-launch-digital-builders.vercel.app',
+    'https://mosaic-biz-frontend-launch-git-main-digital-builders.vercel.app',
+    'https://mosaic-biz-frontend-launch-git-develop-digital-builders.vercel.app'
 )
 if ($env:FRONTEND_ORIGIN) {
     $corsOrigins = @($env:FRONTEND_ORIGIN)
@@ -159,11 +163,7 @@ foreach ($corsOrigin in $corsOrigins) {
 }
 
 $code = Get-StatusCode "$Base/api/admin/categories"
-if ($code -eq 200) {
-    Write-SmokePass "NOTE GET /api/admin/categories unauth ($code) - public exposure documented"
-} else {
-    Write-SmokeFail "NOTE GET /api/admin/categories $code - expected 200 on current main"
-}
+if ($code -eq 401) { Write-SmokePass "P3.2 GET /api/admin/categories unauth ($code)" } else { Write-SmokeFail "P3.2 GET /api/admin/categories $code - expected 401" }
 
 $code = Get-StatusCode "$Base/admin/api/products/test"
 if ($code -eq 200) {
