@@ -31,7 +31,7 @@ Tie the running API, Git commit, Elastic Beanstalk version label, smoke proof, r
 - `SENTRY_RELEASE=mosaic-<deployed-git-sha>`
 - `SENTRY_ENVIRONMENT=production`
 
-Deploy workflow already publishes EB version label `mosaic-${{ github.sha }}`. Align the four release variables to that label after each deploy.
+The production deploy workflow packages `release-manifest.json` with the Git SHA, environment, and EB version label. That packaged manifest is the canonical runtime identity for deployed builds and intentionally overrides stale EB release variables. EB release variables are still useful as fallbacks for manually deployed artifacts or local smoke runs.
 
 ---
 
@@ -83,8 +83,10 @@ When release variables are unset locally, `commit` and `deploymentVersion` fall 
 
 Configured in [`instrument.js`](../../instrument.js) via [`utils/releaseIdentity.js`](../../utils/releaseIdentity.js):
 
-- `release` → `SENTRY_RELEASE` or deployment label
-- `environment` → `RELEASE_ENVIRONMENT` → `SENTRY_ENVIRONMENT` → `NODE_ENV`
+For packaged deployments, the release manifest takes precedence before release-related environment variable fallbacks.
+
+- `release` -> packaged deployment label, then `SENTRY_RELEASE` / deployment label fallback
+- `environment` -> packaged environment, then `RELEASE_ENVIRONMENT` -> `SENTRY_ENVIRONMENT` -> `NODE_ENV`
 - Tags: `deployment_version`, `commit_sha`, `environment`
 - HTTP 5xx capture adds the same release tags
 
@@ -115,7 +117,7 @@ API_BASE_URL=http://127.0.0.1:3001 npm run smoke:backend
 ## Rollback notes
 
 1. Roll back EB to prior version label (e.g. `mosaic-<previous-sha>`).
-2. Update **all four** release variables to the rolled-back SHA/label.
+2. Confirm the rolled-back EB application version includes the matching packaged release manifest. If using a manual artifact without a manifest, update all four release variables to the rolled-back SHA/label.
 3. Confirm `/api/health` → `release.deploymentVersion` matches the active EB label.
 4. Confirm Sentry events group under the rolled-back `release` string.
 
