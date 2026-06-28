@@ -11,17 +11,17 @@ No secrets in this document.
 
 ## Auto-deploy status
 
-Push-to-`main` deploy is **disabled**. The workflow triggers **only** on `workflow_dispatch`:
+Push-to-`main` deploy is **enabled**. The workflow triggers on merges/pushes to `main` and can also be run manually with `workflow_dispatch`:
 
 ```yaml
 on:
   workflow_dispatch:
-  # push:
-  #   branches:
-  #     - main
+  push:
+    branches:
+      - main
 ```
 
-**Every merge to `main` requires a manual deploy** until push deploy is re-enabled.
+Agents should not manually trigger production deploys unless explicitly acting as the release owner. Normal staging-to-main PR merges deploy automatically.
 
 ---
 
@@ -48,14 +48,14 @@ Or: GitHub → Actions → **Deploy to Elastic Beanstalk** → Run workflow → 
 
 ### 3. Workflow steps (automated)
 
-1. `npm ci` + `npm test` (196 tests)
+1. `npm ci` + `npm test`
 2. Zip deploy bundle (excludes `tests/`, `docs/`, `.github/`)
 3. Deploy to EB version label `mosaic-<sha>`
-4. Post-deploy probes: `/`, `/api/users/auth/check` (401), `/api/health`, `/api/ready`, CORS for apex, transition app, and launch QA origins
+4. Post-deploy probes: `/`, `/api/users/auth/check` (401), `/api/health`, `/api/ready`, release identity, and CORS for the approved credentialed browser origins
 
 ### 4. Post-deploy manual verification
 
-GHA CORS probe checks the approved browser origins. After deploy, verify the apex, transition app, and launch QA origins:
+GHA CORS probe checks the approved browser origins. After deploy, verify the apex, transition app, and launch QA origins. `https://www.mosaicbizhub.com` is redirect-only and should not be a credentialed API origin.
 
 ```powershell
 $origins = @(
@@ -141,10 +141,10 @@ Full Sentry doc: [`docs/SENTRY_EB_DEPLOY_VERIFICATION.md`](SENTRY_EB_DEPLOY_VERI
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| `/api/health` 404 after merge | Deploy not run (push disabled) | Manual `workflow_dispatch` |
+| `/api/health` 404 after merge | Deploy did not run or did not finish | Check the merge-triggered deploy run; use manual `workflow_dispatch` only for release-owner redeploys |
 | Apex CORS 500 | `CORS_ORIGINS` unset or missing apex | Set EB env; apply config |
 | CORS 500 after env change | Instances not restarted | Apply config; wait for Green |
-| Deploy workflow fails CORS | Wrong origin in probe | Check EB `CORS_ORIGINS`; manual approved-origin probe |
+| Deploy workflow fails CORS | EB `CORS_ORIGINS` missing an approved browser origin or the probe drifted from policy | Check EB `CORS_ORIGINS`; manual approved-origin probe; keep `www` redirect-only |
 | Auth smoke BLOCKED | No test tokens | See [`docs/SMOKE_TEST_TOKENS.md`](SMOKE_TEST_TOKENS.md) |
 
 ---
