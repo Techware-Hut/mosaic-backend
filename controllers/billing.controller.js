@@ -17,7 +17,7 @@ exports.createBillingPortalSessionForBusiness = async (req, res) => {
     if (!biz) return res.status(404).json({ error: 'Business not found' });
     if (!biz.stripeCustomerId) return res.status(400).json({ error: 'Business missing stripeCustomerId' });
 
-    const defaultReturnPath = `/partner/${businessId}/my-account`;
+    const defaultReturnPath = `/partners/${businessId}/my-account`;
     const session = await stripe.billingPortal.sessions.create({
       customer: biz.stripeCustomerId,
       return_url: sanitizeFrontendRedirectUrl(

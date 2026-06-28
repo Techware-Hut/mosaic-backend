@@ -45,7 +45,7 @@ test('parseCorsOrigins trims and filters empty entries', () => {
   const { mod, cleanup } = loadCorsOrigins();
   try {
     assert.deepEqual(
-      mod.parseCorsOrigins(' https://a.com , https://b.com , , *, '),
+      mod.parseCorsOrigins(' https://a.com , https://b.com , , *, https://www.mosaicbizhub.com, '),
       ['https://a.com', 'https://b.com']
     );
   } finally {
@@ -62,7 +62,7 @@ test('getAllowedOrigins merges CORS_ORIGINS with approved launch origins when se
     const origins = mod.getAllowedOrigins();
     assert.ok(origins.includes('https://custom-preview.example'));
     assert.ok(origins.includes('https://mosaicbizhub.com'));
-    assert.ok(origins.includes('https://www.mosaicbizhub.com'));
+    assert.ok(!origins.includes('https://www.mosaicbizhub.com'));
     assert.ok(origins.includes('https://mosaic-biz-frontend-launch.vercel.app'));
     assert.ok(origins.includes('https://mosaic-biz-frontend-launch-digital-builders.vercel.app'));
     assert.ok(origins.includes('https://mosaic-biz-frontend-launch-git-main-digital-builders.vercel.app'));
@@ -94,7 +94,7 @@ test('getAllowedOrigins falls back to FRONTEND_URL and credentialed production o
   try {
     const origins = mod.getAllowedOrigins();
     assert.ok(origins.includes('https://mosaicbizhub.com'));
-    assert.ok(origins.includes('https://www.mosaicbizhub.com'));
+    assert.ok(!origins.includes('https://www.mosaicbizhub.com'));
     assert.ok(origins.includes('https://app.mosaicbizhub.com'));
     assert.ok(origins.includes('https://mosaic-biz-frontend-launch.vercel.app'));
     assert.ok(origins.includes('https://mosaic-biz-frontend-launch-digital-builders.vercel.app'));
@@ -103,6 +103,21 @@ test('getAllowedOrigins falls back to FRONTEND_URL and credentialed production o
     for (const origin of mod.DEFAULT_CREDENTIAL_ORIGINS) {
       assert.ok(origins.includes(origin));
     }
+  } finally {
+    cleanup();
+  }
+});
+
+test('getAllowedOrigins filters disallowed credential origins from explicit env config', () => {
+  const { mod, cleanup } = loadCorsOrigins({
+    NODE_ENV: 'production',
+    CORS_ORIGINS: 'https://www.mosaicbizhub.com,https://api.mosaicbizhub.com,https://mosaicbizhub.com',
+  });
+  try {
+    const origins = mod.getAllowedOrigins();
+    assert.ok(origins.includes('https://mosaicbizhub.com'));
+    assert.ok(!origins.includes('https://www.mosaicbizhub.com'));
+    assert.ok(!origins.includes('https://api.mosaicbizhub.com'));
   } finally {
     cleanup();
   }

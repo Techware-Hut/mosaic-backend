@@ -119,6 +119,8 @@ const toNum = (value) => {
   return value == null ? null : Number(value);
 };
 
+const getAuthenticatedUserId = (req) => req.user?.id || req.user?._id;
+
 const ADMIN_PAYMENT_BUCKETS = ["pending", "paid", "failed", "refunded"];
 const ADMIN_STATUS_BUCKETS = [
   "created",
@@ -932,7 +934,7 @@ exports.initiateOrder = async (req, res) => {
 
 exports.getUserOrders = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = getAuthenticatedUserId(req);
     const status = req.query.status; // optional query param
 
     const filter = { userId, status: { $ne: "created" } };
@@ -1238,7 +1240,7 @@ exports.deliverOrder = async (req, res) => {
 
 exports.initiateReturn = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = getAuthenticatedUserId(req);
     const orderId = req.params.orderId;
 
     const order = await Order.findOne({ _id: orderId, userId });
@@ -1495,7 +1497,7 @@ exports.getAdminSalesSummary = async (req, res) => {
 
 exports.cancelOrderByUser = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = getAuthenticatedUserId(req);
     const { orderId } = req.params;
 
     // Load the order for this user
@@ -1516,32 +1518,14 @@ exports.cancelOrderByUser = async (req, res) => {
     if (order.paymentStatus === "refunded") {
       return res.status(400).json({
         success: false,
-        message: 'all ready refunded',
+        message: "Order has already been refunded",
       });
-    }
-
-    // If status is 'accepted', we previously decremented stock. Restore it.
-    if (order.status === "accepted") {
-      for (const item of order.items) {
-        const variant = await ProductVariant.findById(item.variantId);
-        if (!variant) continue;
-
-        const selectedVariant = resolveVariantSelection(variant, item.size);
-        if (selectedVariant) {
-          selectedVariant.stockSource.stock =
-            Number(selectedVariant.stockSource.stock || 0) +
-            Number(item.quantity || 0);
-        }
-        await variant.save();
-      }
     }
 
     // If payment captured, refund the whole order
     // (Assumes single PaymentIntent for the order. Adjust for partial refunds if needed.)
     if (order.paymentStatus === "paid" && order.paymentId) {
       try {
-        const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-
         const refund = await stripe.refunds.create({
           payment_intent: order.paymentId,
           // amount: Math.round(order.totalAmount * 100), // optional; omit for full refund
@@ -1565,6 +1549,24 @@ exports.cancelOrderByUser = async (req, res) => {
     } else {
       // Not paid yet (e.g., pending) – ensure we reflect that:
       order.paymentStatus = order.paymentStatus || "pending";
+    }
+
+    // If status is 'accepted', we previously decremented stock. Restore it only
+    // after any required refund succeeds so retrying a failed refund cannot
+    // inflate inventory.
+    if (order.status === "accepted") {
+      for (const item of order.items) {
+        const variant = await ProductVariant.findById(item.variantId);
+        if (!variant) continue;
+
+        const selectedVariant = resolveVariantSelection(variant, item.size);
+        if (selectedVariant) {
+          selectedVariant.stockSource.stock =
+            Number(selectedVariant.stockSource.stock || 0) +
+            Number(item.quantity || 0);
+        }
+        await variant.save();
+      }
     }
 
     order.status = "cancelled";

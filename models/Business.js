@@ -88,6 +88,7 @@ const businessSchema = new mongoose.Schema(
       enum: ["active", "expired", "cancelled", "pending"],
       default: "active",
     },
+    stripeSubscriptionId: String,
     subscriptionStartDate: Date,
     subscriptionEndDate: Date,
     
@@ -256,8 +257,6 @@ const businessSchema = new mongoose.Schema(
 );
 
 // ===== INDEXES FOR PERFORMANCE =====
-businessSchema.index({ owner: 1 });
-businessSchema.index({ subscriptionId: 1 });
 businessSchema.index({ location: '2dsphere' });
 businessSchema.index({ tags: 1 });
 businessSchema.index({ isActive: 1, isApproved: 1 });

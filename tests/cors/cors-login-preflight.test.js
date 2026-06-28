@@ -125,3 +125,21 @@ test('OPTIONS /api/users/login rejects disallowed origin', async () => {
     cleanup();
   }
 });
+
+test('OPTIONS /api/users/login rejects www marketplace origin even if configured', async () => {
+  const { app, cleanup } = createCorsProbeApp({
+    NODE_ENV: 'production',
+    CORS_ORIGINS: 'https://mosaicbizhub.com,https://www.mosaicbizhub.com',
+  });
+
+  try {
+    const res = await supertest(app)
+      .options('/api/users/login')
+      .set('Origin', 'https://www.mosaicbizhub.com')
+      .set('Access-Control-Request-Method', 'POST');
+
+    assert.equal(res.status, 500);
+  } finally {
+    cleanup();
+  }
+});

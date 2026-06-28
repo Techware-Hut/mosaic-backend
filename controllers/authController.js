@@ -13,9 +13,6 @@ const { buildFrontendUrl, sanitizeFrontendRedirectUrl } = require('../utils/fron
 const {
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
-    // For localhost:
-    API_BASE_URL = 'http://localhost:8080',
-    FRONTEND_URL = 'http://localhost:3000',
     JWT_SECRET,
 
     // profile completion (optional)
@@ -23,6 +20,10 @@ const {
     TEMP_COOKIE_NAME = 'mbh_tmp',
     TEMP_COOKIE_TTL_SEC = 15 * 60,
 } = process.env;
+
+const isProductionRuntime = process.env.NODE_ENV === 'production';
+const API_BASE_URL = process.env.API_BASE_URL || (isProductionRuntime ? '' : 'http://localhost:8080');
+const FRONTEND_URL = process.env.FRONTEND_URL || (isProductionRuntime ? '' : 'http://localhost:3000');
 
 if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !API_BASE_URL || !FRONTEND_URL || !JWT_SECRET) {
     throw new Error('Missing env: GOOGLE_CLIENT_ID/SECRET, API_BASE_URL, FRONTEND_URL, JWT_SECRET');
