@@ -1,6 +1,24 @@
 // controllers/invoiceController.js
 const mongoose = require('mongoose');
+const Order = require('../models/Order');
 const { renderInvoicePdfById } = require('../services/invoiceService');
+
+function comparableId(value) {
+  if (!value) return null;
+  if (typeof value.toHexString === 'function') return value.toHexString();
+  if (value._id) return comparableId(value._id);
+  return String(value);
+}
+
+function canAccessOrderInvoice(user, order) {
+  if (!user || !order) return false;
+  if (user.role === 'admin') return true;
+
+  const userId = comparableId(user._id || user.id);
+  if (!userId) return false;
+
+  return [order.userId, order.vendorId].some((ownerId) => comparableId(ownerId) === userId);
+}
 
 async function getInvoicePdf(req, res) {
   try {
@@ -11,7 +29,16 @@ async function getInvoicePdf(req, res) {
       return res.status(400).json({ error: 'Invalid order id' });
     }
 
-    // TODO (auth): ensure the requester is the order's customer or the vendor
+    const order = await Order.findById(id).select('userId vendorId').lean();
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    if (!canAccessOrderInvoice(req.user, order)) {
+      return res.status(403).json({ error: 'Not authorized to access this invoice' });
+    }
+
     const pdf = await renderInvoicePdfById(id);
     const filename = `invoice-${id}.pdf`;
 
@@ -30,4 +57,4 @@ async function getInvoicePdf(req, res) {
   }
 }
 
-module.exports = { getInvoicePdf };
+module.exports = { getInvoicePdf, canAccessOrderInvoice };

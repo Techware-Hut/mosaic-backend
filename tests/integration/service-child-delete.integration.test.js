@@ -16,6 +16,7 @@ const {
 } = require('./helpers/factories');
 const User = require('../../models/User');
 const Service = require('../../models/Service');
+const Booking = require('../../models/Booking');
 
 test.before(async () => {
   await startHarness();
@@ -72,6 +73,40 @@ async function setupVendorWithTwoChildren(agent, { isPublished = false, business
     childBId,
     slug: service?.slug || null,
   };
+}
+
+async function createBookingCustomer() {
+  return User.create({
+    name: 'Integration Booking Customer',
+    email: `booking-customer-${Date.now()}-${Math.random().toString(16).slice(2)}@example.test`,
+    role: 'customer',
+    provider: 'google',
+    providerId: `google-booking-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    isOtpVerified: true,
+  });
+}
+
+async function seedActiveServiceBooking(setup, status = 'pending_vendor_action') {
+  const customer = await createBookingCustomer();
+  return Booking.create({
+    bookingType: 'service',
+    serviceId: setup.parentServiceId,
+    serviceTitle: twoChildPayload.title,
+    services: ['Basic Cut'],
+    serviceItems: ['Basic Cut'],
+    date: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    slot: '10:00 AM',
+    time: '10:00 AM',
+    status,
+    businessId: setup.business._id,
+    ownerId: setup.user._id,
+    customerId: customer._id,
+    customerInfo: {
+      name: customer.name,
+      email: customer.email,
+      phone: '555-0100',
+    },
+  });
 }
 
 function assertPublicSurfacesIncludeService(agent, serviceId, slug) {
@@ -199,6 +234,45 @@ test('another business_owner cannot delete child service', async () => {
   assert.equal(parentInDb.services.length, 2);
   assert.ok(parentInDb.services.some((child) => String(child._id) === setupA.childAId));
   assert.ok(parentInDb.services.some((child) => String(child._id) === setupA.childBId));
+});
+
+test('owner cannot delete child service while parent has active booking', async () => {
+  const agent = createAgent(getApp());
+  const setup = await setupVendorWithTwoChildren(agent, { isPublished: true });
+  assert.equal(setup.createRes.status, 201);
+
+  await seedActiveServiceBooking(setup, 'pending_vendor_action');
+
+  const deleteRes = await agent.delete(
+    `/api/service/${setup.parentServiceId}/child-services/${setup.childBId}`
+  );
+
+  assert.equal(deleteRes.status, 409);
+  assert.equal(deleteRes.body.success, false);
+  assert.match(deleteRes.body.message, /active bookings/i);
+
+  const parentInDb = await Service.findById(setup.parentServiceId);
+  assert.equal(parentInDb.services.length, 2);
+  assert.ok(parentInDb.services.some((child) => String(child._id) === setup.childAId));
+  assert.ok(parentInDb.services.some((child) => String(child._id) === setup.childBId));
+});
+
+test('owner cannot delete parent service while it has active booking', async () => {
+  const agent = createAgent(getApp());
+  const setup = await setupVendorWithTwoChildren(agent, { isPublished: true });
+  assert.equal(setup.createRes.status, 201);
+
+  await seedActiveServiceBooking(setup, 'approved');
+
+  const deleteRes = await agent.delete(`/api/service/delete-service/${setup.parentServiceId}`);
+
+  assert.equal(deleteRes.status, 409);
+  assert.equal(deleteRes.body.success, false);
+  assert.match(deleteRes.body.message, /active bookings/i);
+
+  const parentInDb = await Service.findById(setup.parentServiceId);
+  assert.ok(parentInDb, 'parent service must remain in database');
+  assert.equal(parentInDb.services.length, 2);
 });
 
 test('invalid parent or child id returns safe 404 without modifying parent', async () => {

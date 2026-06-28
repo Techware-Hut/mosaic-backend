@@ -4,6 +4,7 @@ const Subscription = require('../models/Subscription');
 const SubscriptionPlan = require('../models/SubscriptionPlan');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { hasActiveFoodBookings } = require('../utils/bookingDeleteGuards');
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -342,6 +343,18 @@ exports.deleteFood = async (req, res) => {
     const food = await Food.findOne({ _id: id, ownerId: userId });
     if (!food) {
       return res.status(404).json({ message: 'Food not found or unauthorized.' });
+    }
+
+    const hasActiveBookings = await hasActiveFoodBookings({
+      foodId: food._id,
+      ownerId: userId,
+    });
+
+    if (hasActiveBookings) {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot delete food item while active bookings are pending.',
+      });
     }
 
     await food.deleteOne();

@@ -632,7 +632,7 @@ const updateCartItem = async (req, res) => {
 // Remove Item from Cart
 const removeItemFromCart = async (req, res) => {
     const { cartItemId } = req.params;
-    const userId = req.user._id; // Assuming the user is authenticated and `req.user` contains user data
+    const userId = req.user._id;
 
     try {
         // Find the cart item by ID
@@ -643,20 +643,17 @@ const removeItemFromCart = async (req, res) => {
         }
 
         // Ensure the cart item belongs to the current user
-        const cart = await Cart.findOne({ userId: req.user._id });
-        if (!cart || !cart.items.includes(cartItemId)) {
+        const cart = await Cart.findOne({ userId });
+        const ownsCartItem = cart?.items?.some((id) => String(id) === String(cartItem._id));
+        if (!cart || !ownsCartItem) {
             return res.status(400).json({ message: 'Cart item does not belong to the user' });
         }
 
-        // Remove the cart item from the cart's items
-        cart.items.pull(cartItemId);
-        await cart.save();
+        cart.items.pull(cartItem._id);
+        await cartItem.deleteOne();
 
-        // Delete the CartItem document
-        await cartItem.remove();
-
-        // Update the total number of items in the cart
-        cart.totalItems = cart.items.length;
+        const quantities = await CartItem.find({ _id: { $in: cart.items } }).select('quantity');
+        cart.totalItems = quantities.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
         await cart.save();
 
         return res.status(200).json({ message: 'Item removed from cart', cart });
@@ -1019,7 +1016,7 @@ async function ensureSingleActiveCartReplace(userId, businessId) {
     // find any open cart for the user
     let cart = await Cart.findOne({ userId, isBooked: false });
 
-    // none â†’ create
+    // none -> create
     if (!cart) {
         return await Cart.create({
             userId,
@@ -1030,7 +1027,7 @@ async function ensureSingleActiveCartReplace(userId, businessId) {
         });
     }
 
-    // if cart is for a different business â†’ delete existing line items and reuse cart with new business
+    // if cart is for a different business -> delete existing line items and reuse cart with new business
     if (String(cart.businessId) !== String(businessId)) {
         if (Array.isArray(cart.items) && cart.items.length) {
             await CartItem.deleteMany({ _id: { $in: cart.items } });
@@ -1112,7 +1109,7 @@ mergeGuestCart = async (req, res) => {
         // upsert items (productId + variantId + size unique within THIS cart)
         for (const it of items) {
             if (!it || !it.productId || !it.variantId) continue;
-            // DB expects `variant` (string) â€” map incoming `size` â†’ `variant`
+            // DB expects `variant` (string) - map incoming `size` -> `variant`
             const variantStr = String(it.size ?? it?.variant?.size ?? "").trim();
             if (!variantStr) continue;
             const inc = Math.max(1, Number(it.quantity || 1))

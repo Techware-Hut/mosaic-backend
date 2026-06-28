@@ -14,6 +14,7 @@ const {
   formatValidationErrorResponse,
 } = require('../lib/service/serviceContract');
 const { normalizeImages } = require('../lib/listing/publicListingDto');
+const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -662,6 +663,18 @@ exports.deleteService = async (req, res) => {
     const service = await Service.findOne({ _id: serviceId, ownerId: userId });
     if (!service)
       return res.status(404).json({ error: 'Service not found or unauthorized.' });
+
+    const hasActiveBookings = await hasActiveServiceBookings({
+      serviceId: service._id,
+      ownerId: userId,
+    });
+
+    if (hasActiveBookings) {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot delete service while active bookings are pending.',
+      });
+    }
 
     const usedImages = [service.coverImage, ...service.images].filter(Boolean);
     for (const image of usedImages) {

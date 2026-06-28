@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Service = require('../models/Service');
 const Business = require('../models/Business');
 const deleteCloudinaryFile = require('../utils/deleteCloudinaryFile');
+const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
 const {
   getMinimumChildServicePrice,
   formatOwnerServiceResponse,
@@ -28,6 +29,18 @@ exports.deleteChildService = async (req, res) => {
 
     if (!parentService) {
       return res.status(404).json({ error: NOT_FOUND_MESSAGE });
+    }
+
+    const hasActiveBookings = await hasActiveServiceBookings({
+      serviceId: parentService._id,
+      ownerId: userId,
+    });
+
+    if (hasActiveBookings) {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot delete service while active bookings are pending.',
+      });
     }
 
     const childToDelete = parentService.services.id(childServiceId);

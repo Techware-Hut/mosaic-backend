@@ -4,6 +4,78 @@ const Subscription = require('../models/Subscription'); // adjust path if needed
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 
+function idString(value) {
+  if (!value) return '';
+  if (value._id) return String(value._id);
+  return String(value);
+}
+
+function getRequestUserId(req) {
+  return idString(req.user?.id || req.user?._id);
+}
+
+function userOwnsBusiness(req, biz) {
+  const userId = getRequestUserId(req);
+  return Boolean(userId && biz?.owner && idString(biz.owner) === userId);
+}
+
+async function findLocalSubscriptionForBusiness(biz, stripeSubscriptionId) {
+  if (!biz?._id) return null;
+
+  if (biz.subscriptionId) {
+    const byId = await Subscription.findById(biz.subscriptionId);
+    if (byId) return byId;
+  }
+
+  const query = { businessId: biz._id };
+  if (stripeSubscriptionId) {
+    query.stripeSubscriptionId = stripeSubscriptionId;
+  }
+
+  const result = Subscription.findOne(query);
+  if (result && typeof result.sort === 'function') {
+    return result.sort({ createdAt: -1 });
+  }
+
+  return result;
+}
+
+async function backfillStripePointers(biz, stripeSub) {
+  let changed = false;
+  if (!biz.stripeCustomerId && stripeSub?.customer) {
+    biz.stripeCustomerId = String(stripeSub.customer);
+    changed = true;
+  }
+  if (!biz.stripeSubscriptionId && stripeSub?.id) {
+    biz.stripeSubscriptionId = String(stripeSub.id);
+    changed = true;
+  }
+  if (changed && typeof biz.save === 'function') {
+    await biz.save();
+  }
+}
+
+function subscriptionBelongsToBusiness(biz, localSub, stripeSub) {
+  if (!stripeSub) return false;
+
+  const knownSubscriptionIds = [
+    biz?.stripeSubscriptionId,
+    localSub?.stripeSubscriptionId,
+  ].map(idString).filter(Boolean);
+
+  if (knownSubscriptionIds.length > 0) {
+    return Boolean(stripeSub.id && knownSubscriptionIds.includes(String(stripeSub.id)));
+  }
+
+  const stripeCustomerId = idString(stripeSub.customer);
+  const knownCustomerIds = [
+    biz?.stripeCustomerId,
+    localSub?.stripeCustomerId,
+  ].map(idString).filter(Boolean);
+
+  return Boolean(stripeCustomerId && knownCustomerIds.includes(stripeCustomerId));
+}
+
 // helper: pick a "display" subscription from a list
 function pickPreferredSubscription(list = []) {
   const preferredStatuses = ['active', 'trialing', 'past_due', 'incomplete'];
@@ -40,19 +112,21 @@ exports.getCurrentSubscriptionForBusiness = async (req, res) => {
 
     const biz = await Business.findById(businessId);
     if (!biz) return res.status(404).json({ success: false, message: 'Business not found' });
+    if (!userOwnsBusiness(req, biz)) {
+      return res.status(403).json({ success: false, message: 'Business does not belong to this user' });
+    }
+
+    const localSub = await findLocalSubscriptionForBusiness(biz);
+    const stripeSubscriptionId = biz.stripeSubscriptionId || localSub?.stripeSubscriptionId;
 
     // try direct by stored subscription id first
     let sub = null;
-    if (biz.stripeSubscriptionId) {
+    if (stripeSubscriptionId) {
       try {
-        sub = await stripe.subscriptions.retrieve(biz.stripeSubscriptionId, {
+        sub = await stripe.subscriptions.retrieve(stripeSubscriptionId, {
           expand: ['items.data.price.product'],
         });
-        // optional backfill customer if missing
-        if (!biz.stripeCustomerId && sub?.customer) {
-          biz.stripeCustomerId = String(sub.customer);
-          await biz.save();
-        }
+        await backfillStripePointers(biz, sub);
       } catch (_) { /* fall through */ }
     }
 
@@ -86,11 +160,16 @@ exports.cancelSubscriptionForBusiness = async (req, res) => {
 
     const biz = await Business.findById(businessId);
     if (!biz) return res.status(404).json({ success: false, message: 'Business not found' });
+    if (!userOwnsBusiness(req, biz)) {
+      return res.status(403).json({ success: false, message: 'Business does not belong to this user' });
+    }
 
+    const localSub = await findLocalSubscriptionForBusiness(biz, id);
     const sub = await stripe.subscriptions.retrieve(id);
-    if (biz.stripeCustomerId && String(sub.customer) !== biz.stripeCustomerId) {
+    if (!subscriptionBelongsToBusiness(biz, localSub, sub)) {
       return res.status(403).json({ success: false, message: 'Subscription does not belong to this business' });
     }
+    await backfillStripePointers(biz, sub);
 
     let updated;
     if (atPeriodEnd) {
@@ -119,11 +198,17 @@ exports.resumeSubscriptionForBusiness = async (req, res) => {
 
     const biz = await Business.findById(businessId);
     if (!biz) return res.status(404).json({ success: false, message: 'Business not found' });
+    if (!userOwnsBusiness(req, biz)) {
+      return res.status(403).json({ success: false, message: 'Business does not belong to this user' });
+    }
 
+    const localSub = await findLocalSubscriptionForBusiness(biz, id);
     const sub = await stripe.subscriptions.retrieve(id);
-    if (biz.stripeCustomerId && String(sub.customer) !== biz.stripeCustomerId) {
+    if (!subscriptionBelongsToBusiness(biz, localSub, sub)) {
       return res.status(403).json({ success: false, message: 'Subscription does not belong to this business' });
     }
+    await backfillStripePointers(biz, sub);
+
     if (!sub.cancel_at_period_end) {
       return res.status(400).json({ success: false, message: 'Subscription is not set to cancel at period end' });
     }

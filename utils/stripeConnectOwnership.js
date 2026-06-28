@@ -8,7 +8,7 @@ async function assertConnectAccountOwnedByUser(accountId, userId) {
   const business = await Business.findOne({
     stripeConnectAccountId: accountId,
     owner: userId,
-  }).select('_id owner stripeConnectAccountId');
+  }).select('_id owner slug stripeConnectAccountId');
 
   if (!business) {
     return {

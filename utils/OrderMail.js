@@ -2,9 +2,8 @@
 const nodemailer = require("nodemailer");
 const PDFDocument = require("pdfkit");
 const { renderInvoicePdfBufferForOrder } = require("../services/invoiceService");
-const { getFrontendBaseUrl, getFrontendLogoUrl } = require("./frontendUrl");
+const { buildFrontendUrl, getFrontendLogoUrl } = require("./frontendUrl");
 
-const APP_URL = getFrontendBaseUrl();
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || process.env.MAIL_USER;
 const LOGO_URL = getFrontendLogoUrl();
 
@@ -333,7 +332,10 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
 
   const businessName = order.businessId?.businessName || "Vendor";
   const businessSlug = order.businessId?.slug || "";
-  const partnersUrl = `${APP_URL}/partners/${encodeURIComponent(businessSlug)}`;
+  const customerOrdersUrl = buildFrontendUrl("/customer/order");
+  const partnerOrdersUrl = businessSlug
+    ? buildFrontendUrl(`/partners/${encodeURIComponent(businessSlug)}/orders`)
+    : buildFrontendUrl("/partners/dashboard");
 
   // Build PDF once
   const pdf = await renderInvoicePdfBufferForOrder(order);
@@ -349,7 +351,7 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
     const customerHtml = baseLayout({
       heading: "🧾 Payment received — your order is confirmed",
       introHtml: customerIntro({ order, businessName }),
-      ctaHref: `${APP_URL}/customer/orders/`, // TODO: adjust to your real customer order route
+      ctaHref: customerOrdersUrl,
       ctaText: "View Your Order",
     });
     const orderNo = order.groupOrderId || order._id?.toString();
@@ -358,7 +360,7 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
       ``,
       `Your payment to ${businessName} is confirmed.`,
       `Order #${orderNo} is placed.`,
-      `View your order: ${APP_URL}/orders/${order._id}`,
+      `View your order: ${customerOrdersUrl}`,
       ``,
       `Invoice attached (PDF).`,
       ``,
@@ -381,7 +383,7 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
     const vendorHtml = baseLayout({
       heading: "💸 You’ve received a paid order",
       introHtml: vendorIntro({ order, businessName }),
-      ctaHref: `${partnersUrl}/orders`, // TODO: adjust to your real partners order detail route
+      ctaHref: partnerOrdersUrl,
       ctaText: "Open Partners Dashboard",
     });
     const orderNo = order.groupOrderId || order._id?.toString();
@@ -389,7 +391,7 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
       `Hi ${businessName},`,
       ``,
       `You received a paid order #${orderNo}.`,
-      `Manage: ${partnersUrl}/orders/${order._id}`,
+      `Manage: ${partnerOrdersUrl}`,
       ``,
       `Customer invoice attached (PDF).`,
       ``,

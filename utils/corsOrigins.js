@@ -1,12 +1,16 @@
 const DEFAULT_CREDENTIAL_ORIGINS = [
   'https://mosaicbizhub.com',
-  'https://www.mosaicbizhub.com',
   'https://app.mosaicbizhub.com',
   'https://mosaic-biz-frontend-launch.vercel.app',
   'https://mosaic-biz-frontend-launch-digital-builders.vercel.app',
   'https://mosaic-biz-frontend-launch-git-main-digital-builders.vercel.app',
   'https://mosaic-biz-frontend-launch-git-develop-digital-builders.vercel.app',
 ];
+
+const DISALLOWED_CREDENTIAL_ORIGINS = new Set([
+  'https://www.mosaicbizhub.com',
+  'https://api.mosaicbizhub.com',
+]);
 
 const DEV_ORIGINS = [
   'http://localhost:3000',
@@ -22,7 +26,7 @@ function parseCorsOrigins(value) {
   return value
     .split(',')
     .map((o) => o.trim())
-    .filter((origin) => origin && origin !== '*');
+    .filter((origin) => origin && origin !== '*' && !DISALLOWED_CREDENTIAL_ORIGINS.has(origin));
 }
 
 function getAllowedOrigins() {
@@ -51,6 +55,7 @@ function getAllowedOrigins() {
 module.exports = {
   DEFAULT_CREDENTIAL_ORIGINS,
   DEV_ORIGINS,
+  DISALLOWED_CREDENTIAL_ORIGINS,
   parseCorsOrigins,
   getAllowedOrigins,
 };

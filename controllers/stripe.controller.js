@@ -3,6 +3,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
     apiVersion: '2024-06-20',
 });
 const { assertConnectAccountOwnedByUser } = require('../utils/stripeConnectOwnership');
+const { sanitizeFrontendRedirectUrl } = require('../utils/frontendUrl');
 
 /**
  * Create a Stripe Account Session for embedded Connect components
@@ -58,8 +59,20 @@ exports.createExpressLoginLink = async (req, res) => {
             return res.status(ownership.status).json({ error: ownership.message });
         }
 
+        const businessRouteId =
+            ownership.business?.slug ||
+            ownership.business?._id?.toString?.() ||
+            ownership.business?._id;
+        const fallbackPath = businessRouteId
+            ? `/partners/${businessRouteId}/finance`
+            : '/partners/dashboard';
+
         const link = await stripe.accounts.createLoginLink(account, {
-            redirect_url, // optional: send them back to your app after closing dashboard
+            redirect_url: sanitizeFrontendRedirectUrl(
+                redirect_url || fallbackPath,
+                process.env,
+                fallbackPath
+            ),
         });
 
         return res.status(200).json({ url: link.url });

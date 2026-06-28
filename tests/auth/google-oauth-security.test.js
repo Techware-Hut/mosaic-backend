@@ -200,6 +200,28 @@ test('Google OAuth start rejects hostile redirect query origins in production st
   );
 });
 
+test('Google OAuth controller fails fast in production when URL env is missing', () => {
+  const saved = snapshotEnv(AUTH_ENV_KEYS);
+
+  try {
+    process.env.NODE_ENV = 'production';
+    process.env.GOOGLE_CLIENT_ID = 'google-client-id';
+    process.env.GOOGLE_CLIENT_SECRET = 'google-client-secret';
+    process.env.JWT_SECRET = 'test-secret';
+    delete process.env.API_BASE_URL;
+    delete process.env.FRONTEND_URL;
+    delete require.cache[authControllerPath];
+
+    assert.throws(
+      () => require(authControllerPath),
+      /Missing env: GOOGLE_CLIENT_ID\/SECRET, API_BASE_URL, FRONTEND_URL, JWT_SECRET/
+    );
+  } finally {
+    delete require.cache[authControllerPath];
+    restoreEnv(saved);
+  }
+});
+
 test('Google OAuth callback rejects tampered hostile state redirect origins', async () => {
   await withTemporaryEnv(
     {
