@@ -37,6 +37,7 @@ For documentation drift cleanup see [DOCUMENTATION_CONSOLIDATION_2026_06_28.md](
 | Frontend/backend route contract | [BACKEND_FRONTEND_ROUTE_CONTRACT.md](BACKEND_FRONTEND_ROUTE_CONTRACT.md), [contracts/BACKEND_FRONTEND_CONTRACT_RISK_REPORT.md](contracts/BACKEND_FRONTEND_CONTRACT_RISK_REPORT.md) |
 | Auth/CORS/cookie behavior | [AUTH_FLOW.md](AUTH_FLOW.md), [backend/AUTH_CORS_COOKIE_AUDIT.md](backend/AUTH_CORS_COOKIE_AUDIT.md) |
 | Vendor eligibility | [MARKETPLACE_VENDOR_ELIGIBILITY.md](MARKETPLACE_VENDOR_ELIGIBILITY.md), [MARKETPLACE_VISIBILITY_MATRIX.md](MARKETPLACE_VISIBILITY_MATRIX.md) |
+| Lifecycle states and legacy route policy | [LIFECYCLE_STATE_AND_LEGACY_ROUTE_POLICY.md](LIFECYCLE_STATE_AND_LEGACY_ROUTE_POLICY.md) |
 | Deployment/runbook | [BACKEND_EB_DEPLOY_RUNBOOK.md](BACKEND_EB_DEPLOY_RUNBOOK.md), [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md), [../DEPLOYMENT.md](../DEPLOYMENT.md) |
 | QA gaps | [qa/FRESH_ACCOUNT_E2E_PLAN.md](qa/FRESH_ACCOUNT_E2E_PLAN.md), [qa/REGRESSION_CLAIM_LEDGER.md](qa/REGRESSION_CLAIM_LEDGER.md) |
 
@@ -55,20 +56,21 @@ Backend generated frontend links should use the apex marketplace origin unless a
 
 ---
 
-## Open Backend Work That Still Matters
+## Backend Work Tracking
 
 | Lane | Tracking |
 | --- | --- |
-| Production smoke proof for domain/API/auth | Backend [#84](https://github.com/Techware-Hut/mosaic-backend/issues/84) |
-| Isolated integration tests for auth/onboarding/orders/admin | Backend [#151](https://github.com/Techware-Hut/mosaic-backend/issues/151) |
-| Lifecycle state contracts and legacy route policy | Backend [#152](https://github.com/Techware-Hut/mosaic-backend/issues/152) |
-| Internal audit trail for sensitive admin/moderation actions | Backend [#153](https://github.com/Techware-Hut/mosaic-backend/issues/153) |
-| Refund, return, and dispute workflow audit | Backend [#154](https://github.com/Techware-Hut/mosaic-backend/issues/154) |
-| Route authorization matrix and negative-access contract tests | Backend [#155](https://github.com/Techware-Hut/mosaic-backend/issues/155) |
-| Validation/error response consistency | Backend [#46](https://github.com/Techware-Hut/mosaic-backend/issues/46) |
+| Production smoke proof for domain/API/auth | Backend [#84](https://github.com/Techware-Hut/mosaic-backend/issues/84), closed with soft-launch smoke evidence |
+| Isolated integration tests for auth/onboarding/orders/admin | Backend [#151](https://github.com/Techware-Hut/mosaic-backend/issues/151), closed with launch access integration evidence |
+| Lifecycle state contracts and legacy route policy | Backend [#152](https://github.com/Techware-Hut/mosaic-backend/issues/152), addressed in [LIFECYCLE_STATE_AND_LEGACY_ROUTE_POLICY.md](LIFECYCLE_STATE_AND_LEGACY_ROUTE_POLICY.md) pending promotion |
+| Internal audit trail for sensitive admin/moderation actions | Backend [#153](https://github.com/Techware-Hut/mosaic-backend/issues/153), closed with Phase 1 audit trail evidence |
+| Refund, return, and dispute workflow audit | Backend [#154](https://github.com/Techware-Hut/mosaic-backend/issues/154), closed as as-built audit |
+| Route authorization matrix and negative-access contract tests | Backend [#155](https://github.com/Techware-Hut/mosaic-backend/issues/155), closed with contract/integration coverage |
+| Validation/error response consistency | Backend [#46](https://github.com/Techware-Hut/mosaic-backend/issues/46), open |
 | OpenAPI/API contract documentation | Backend [#55](https://github.com/Techware-Hut/mosaic-backend/issues/55) |
-| Admin dashboard APIs | Backend [#34](https://github.com/Techware-Hut/mosaic-backend/issues/34) |
-| Ops/security audits | Backend [#19](https://github.com/Techware-Hut/mosaic-backend/issues/19), [#70](https://github.com/Techware-Hut/mosaic-backend/issues/70), [#71](https://github.com/Techware-Hut/mosaic-backend/issues/71), [#76](https://github.com/Techware-Hut/mosaic-backend/issues/76) |
+| Admin dashboard APIs | Backend [#34](https://github.com/Techware-Hut/mosaic-backend/issues/34), open |
+| Controller/service boundary refactor plan | Backend [#52](https://github.com/Techware-Hut/mosaic-backend/issues/52), open |
+| Ops/security audits | Backend [#19](https://github.com/Techware-Hut/mosaic-backend/issues/19), [#70](https://github.com/Techware-Hut/mosaic-backend/issues/70), [#71](https://github.com/Techware-Hut/mosaic-backend/issues/71), [#76](https://github.com/Techware-Hut/mosaic-backend/issues/76), open |
 
 ---
 

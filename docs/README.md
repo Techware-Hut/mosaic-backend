@@ -57,6 +57,7 @@ Repository root: [README.md](../README.md). Deployment entry point: [../DEPLOYME
 | [MARKETPLACE_VENDOR_ELIGIBILITY.md](MARKETPLACE_VENDOR_ELIGIBILITY.md) | Vendor visibility and checkout eligibility |
 | [MARKETPLACE_VISIBILITY_MATRIX.md](MARKETPLACE_VISIBILITY_MATRIX.md) | Public/admin/vendor visibility rules |
 | [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) | Vendor onboarding and approval states |
+| [LIFECYCLE_STATE_AND_LEGACY_ROUTE_POLICY.md](LIFECYCLE_STATE_AND_LEGACY_ROUTE_POLICY.md) | Backend lifecycle states and intentional legacy/duplicate route policy |
 
 ### Architecture, API, And Contracts
 
