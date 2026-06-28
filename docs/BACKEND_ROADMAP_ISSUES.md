@@ -1,5 +1,7 @@
 # Backend Roadmap Issues Plan
 
+> Historical roadmap context. This file preserves the 2026-06-18 issue planning snapshot and may reference old PRs, SHAs, or "prod verify pending" states. For current backend production posture and open work, start with [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) and verify live GitHub issues before acting.
+
 **Branch:** `main` @ `fbe3aac` (PR #78 merged)  
 **Date:** 2026-06-18 (Batch 3 audit update)  
 **Purpose:** GitHub-ready issue backlog grouped by priority lane. Maps to existing open issues where possible — do not duplicate filing without review.
