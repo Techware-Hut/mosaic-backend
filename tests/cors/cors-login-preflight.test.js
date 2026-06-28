@@ -46,7 +46,7 @@ function createCorsProbeApp(envOverrides) {
         if (allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
-        return callback(new Error('Not allowed by CORS'));
+        return callback(null, false);
       },
       credentials: true,
     })
@@ -108,7 +108,7 @@ test('OPTIONS /api/users/login allows Vercel preview origin when configured', as
   }
 });
 
-test('OPTIONS /api/users/login rejects disallowed origin', async () => {
+test('OPTIONS /api/users/login denies disallowed origin without server error', async () => {
   const { app, cleanup } = createCorsProbeApp({
     NODE_ENV: 'production',
     CORS_ORIGINS: 'https://mosaicbizhub.com',
@@ -120,13 +120,14 @@ test('OPTIONS /api/users/login rejects disallowed origin', async () => {
       .set('Origin', 'https://evil.example.com')
       .set('Access-Control-Request-Method', 'POST');
 
-    assert.equal(res.status, 500);
+    assert.notEqual(res.status, 500);
+    assert.equal(res.headers['access-control-allow-origin'], undefined);
   } finally {
     cleanup();
   }
 });
 
-test('OPTIONS /api/users/login rejects www marketplace origin even if configured', async () => {
+test('OPTIONS /api/users/login denies www marketplace origin even if configured', async () => {
   const { app, cleanup } = createCorsProbeApp({
     NODE_ENV: 'production',
     CORS_ORIGINS: 'https://mosaicbizhub.com,https://www.mosaicbizhub.com',
@@ -138,7 +139,8 @@ test('OPTIONS /api/users/login rejects www marketplace origin even if configured
       .set('Origin', 'https://www.mosaicbizhub.com')
       .set('Access-Control-Request-Method', 'POST');
 
-    assert.equal(res.status, 500);
+    assert.notEqual(res.status, 500);
+    assert.equal(res.headers['access-control-allow-origin'], undefined);
   } finally {
     cleanup();
   }
