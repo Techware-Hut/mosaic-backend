@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 const Business = require("../models/Business"); // Adjust path to your Business model
 
+// Local-only dummy data. Do not point this script at production data.
+
 // Import ObjectId from mongoose.Types
 const { ObjectId } = mongoose.Types;
 

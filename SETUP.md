@@ -97,6 +97,17 @@ npm run dev
 | `npm start` | Run with Node.js |
 | `npm test` | Run the local non-integration test suite with Node's built-in runner; see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) |
 
+## Local Seed Reset Guard
+
+`seed/seedCategories.js` deletes and recreates sample category records. It now refuses to run unless `ALLOW_SEED_RESET=true` is set. Use only against a local or disposable database:
+
+```powershell
+$env:MONGODB_URI = "mongodb://localhost:27017/mosaic"
+$env:ALLOW_SEED_RESET = "true"
+node seed/seedCategories.js
+Remove-Item Env:\ALLOW_SEED_RESET
+```
+
 ## Environment file guidance
 
 - Do not commit your real `.env`.
