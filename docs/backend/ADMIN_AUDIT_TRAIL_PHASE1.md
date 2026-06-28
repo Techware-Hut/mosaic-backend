@@ -3,6 +3,8 @@
 **Issue:** #169 (Wave 7) · **Parent:** #162  
 **Branch:** `feat/backend-admin-audit-trail-phase1`
 
+**Current backend issue:** #153
+
 ## Scope
 
 Immutable MongoDB audit events for launch-critical admin/moderation actions. No changes to business approval authority or payment behavior.

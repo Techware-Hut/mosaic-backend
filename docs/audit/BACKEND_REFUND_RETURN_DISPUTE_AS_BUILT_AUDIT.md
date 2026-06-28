@@ -4,6 +4,8 @@
 **Branch:** `audit/backend-refund-dispute-as-built`  
 **Scope:** Audit and documentation only — no changes to Stripe refund logic, transfer reversals, payment intents, application fees, Connect payouts, subscriptions, webhooks, or financial status transitions.
 
+**Current backend issue:** #154
+
 **Audit date:** 2026-06-21  
 **Repository:** `Techware-Hut/mosaic-backend`
 
