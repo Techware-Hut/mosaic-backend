@@ -213,6 +213,7 @@ Preferred PowerShell harness:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\production-stripe-webhook-runtime-smoke.ps1 -ValidateOnly
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\production-stripe-webhook-runtime-smoke.ps1 -SendUnsignedProbes
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-production-stripe-webhook-runtime-evidence.ps1
 ```
 
 The harness writes redacted status-only output under `docs/qa-redacted/production-stripe-webhook-runtime-2026-06-28/`. See [qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md](qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md).

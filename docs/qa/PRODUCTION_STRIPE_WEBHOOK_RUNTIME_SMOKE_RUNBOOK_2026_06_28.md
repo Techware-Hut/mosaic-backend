@@ -74,6 +74,12 @@ This writes a redacted skipped-results file without sending webhook probes.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\production-stripe-webhook-runtime-smoke.ps1
 ```
 
+Validate the dry-run output shape and redaction only:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-production-stripe-webhook-runtime-evidence.ps1 -AllowDryRun
+```
+
 ## Unsigned Rejection Runtime Proof
 
 Run this during controlled QA only. It sends five synthetic unsigned POST requests to production and expects HTTP `400` from every webhook route.
@@ -91,6 +97,12 @@ Expected result:
 - no payment method is submitted
 - no real Stripe event is sent
 - no order, vendor, subscription, or email mutation is expected
+
+Validate the unsigned runtime evidence before summarizing it in GitHub:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-production-stripe-webhook-runtime-evidence.ps1
+```
 
 If any route returns `200`, `404`, `500`, or `0`, stop and inspect EB logs without printing secrets. A `500` can indicate missing webhook env configuration. A `404` can indicate route/mount drift. A `200` would indicate signature enforcement is not behaving as expected.
 
@@ -127,6 +139,8 @@ Allowed evidence:
 - redacted screenshot with endpoint ID/event ID hidden or hashed
 - EB log line summary with secrets and IDs removed
 - order/status labels without private customer data
+
+The validator above proves only redacted unsigned-rejection smoke output. Valid Stripe Dashboard or Stripe CLI delivery still requires the manual signed-delivery proof in this section.
 
 ## Stop Conditions
 
