@@ -10,7 +10,7 @@ The prior `app.mosaicbizhub.com` canonical-domain plan is superseded. The apex-d
 | --- | --- | --- |
 | `https://mosaicbizhub.com` | Canonical production marketplace frontend | Primary frontend origin for generated links, redirects, and credentialed CORS |
 | `https://www.mosaicbizhub.com` | Alias/redirect target for the marketplace | Not a default credentialed app origin |
-| `https://app.mosaicbizhub.com` | Transition / historical app origin | Keep only for documented rollback or compatibility checks |
+| `https://app.mosaicbizhub.com` | Transition / historical app origin | Rejected by default for generated links and redirects; allow only with an explicit rollback flag |
 | `https://mosaic-biz-frontend-launch.vercel.app` | QA / preview origin | Approved QA origin |
 | `https://api.mosaicbizhub.com` | Canonical backend API | API host only; never a frontend redirect target |
 
@@ -18,7 +18,7 @@ The prior `app.mosaicbizhub.com` canonical-domain plan is superseded. The apex-d
 
 | Area | File | Behavior |
 | --- | --- | --- |
-| Frontend URL generation | `utils/frontendUrl.js` | Defaults generated links to `https://mosaicbizhub.com`; ignores stale `app.mosaicbizhub.com` env defaults; approves the app host only for transition/rollback compatibility; approves Vercel QA and dev localhost outside production; rejects `www`, API, and arbitrary origins |
+| Frontend URL generation | `utils/frontendUrl.js` | Defaults generated links to `https://mosaicbizhub.com`; ignores stale `app.mosaicbizhub.com` env defaults; rejects the app host by default for supplied absolute redirects; approves the app host only when `ALLOW_LEGACY_FRONTEND_ORIGIN=true` or `1`; approves Vercel QA and dev localhost outside production; rejects `www`, API, and arbitrary origins |
 | Stripe Connect return and refresh URLs | `lib/connect/connectUrls.js` | Uses the shared frontend URL allowlist and preserves approved full URL overrides |
 | Google OAuth redirect state | `controllers/authController.js` | Sanitizes supplied redirects before state creation and again before callback redirect |
 | Billing portal return URL | `controllers/billing.controller.js` | Sanitizes user-supplied or configured return URLs to an approved frontend origin or fallback account path |
@@ -27,7 +27,7 @@ The prior `app.mosaicbizhub.com` canonical-domain plan is superseded. The apex-d
 
 ## Redirect Security Evidence
 
-Generated backend URLs may keep their path while moving to an approved frontend origin. User-supplied redirects use `sanitizeFrontendRedirectUrl`, which returns the original URL only when the origin is approved; otherwise it returns a safe apex fallback path.
+Generated backend URLs may keep their path while moving to an approved frontend origin. User-supplied redirects use `sanitizeFrontendRedirectUrl`, which returns the original URL only when the origin is approved; otherwise it returns a safe apex fallback path. The legacy app host is not approved by default; use `ALLOW_LEGACY_FRONTEND_ORIGIN=true` or `1` only for a documented rollback window.
 
 Covered flows:
 
@@ -43,7 +43,7 @@ Covered flows:
 | --- | --- |
 | `https://mosaicbizhub.com` | Canonical production marketplace frontend |
 | `https://www.mosaicbizhub.com` | Redirect-only alias; explicitly rejected by backend URL sanitizer and omitted from default CORS |
-| `https://app.mosaicbizhub.com` | Transition / historical app origin; keep only while explicitly approved |
+| `https://app.mosaicbizhub.com` | Transition / historical app origin; rejected by default; keep only while explicitly approved through `ALLOW_LEGACY_FRONTEND_ORIGIN` |
 | `https://mosaic-biz-frontend-launch.vercel.app` | QA / preview origin |
 | `https://api.mosaicbizhub.com` | Backend API base URL only |
 
@@ -60,6 +60,7 @@ Names only; do not commit values.
 | `CONNECT_RETURN_URL`, `CONNECT_REFRESH_URL` | Optional full overrides; must resolve to an approved frontend origin; leave unset for canonical apex generated defaults |
 | `CONNECT_RETURN_PATH`, `CONNECT_REFRESH_PATH` | Optional Connect path overrides on approved frontend origin |
 | `BILLING_PORTAL_RETURN_URL` | Optional billing return override; sanitized before use |
+| `ALLOW_LEGACY_FRONTEND_ORIGIN` | Optional rollback flag; set only during a documented temporary rollback if backend-generated/sanitized redirects must preserve `https://app.mosaicbizhub.com` |
 | `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` | Release reporting; unchanged by hostname swap |
 
 ## Verification Commands

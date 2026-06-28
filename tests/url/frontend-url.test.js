@@ -64,9 +64,19 @@ test('normalizeFrontendUrl preserves apex links', () => {
   );
 });
 
-test('normalizeFrontendUrl preserves the legacy app subdomain during transition', () => {
+test('normalizeFrontendUrl moves the legacy app subdomain back to apex by default', () => {
   assert.equal(
     normalizeFrontendUrl('https://app.mosaicbizhub.com/partners/connect/return?businessId=abc'),
+    'https://mosaicbizhub.com/partners/connect/return?businessId=abc'
+  );
+});
+
+test('normalizeFrontendUrl preserves the legacy app subdomain only when rollback is explicit', () => {
+  assert.equal(
+    normalizeFrontendUrl('https://app.mosaicbizhub.com/partners/connect/return?businessId=abc', {
+      NODE_ENV: 'production',
+      ALLOW_LEGACY_FRONTEND_ORIGIN: 'true',
+    }),
     'https://app.mosaicbizhub.com/partners/connect/return?businessId=abc'
   );
 });
@@ -95,6 +105,33 @@ test('sanitizeFrontendRedirectUrl rejects unapproved user-supplied redirect orig
   );
 });
 
+test('sanitizeFrontendRedirectUrl rejects legacy app redirects unless rollback is explicit', () => {
+  assert.equal(
+    sanitizeFrontendRedirectUrl(
+      'https://app.mosaicbizhub.com/partners/dashboard?tab=payout-setup',
+      {
+        NODE_ENV: 'production',
+        FRONTEND_URL: 'https://mosaicbizhub.com',
+      },
+      '/partners/dashboard'
+    ),
+    'https://mosaicbizhub.com/partners/dashboard'
+  );
+
+  assert.equal(
+    sanitizeFrontendRedirectUrl(
+      'https://app.mosaicbizhub.com/partners/dashboard?tab=payout-setup',
+      {
+        NODE_ENV: 'production',
+        FRONTEND_URL: 'https://mosaicbizhub.com',
+        ALLOW_LEGACY_FRONTEND_ORIGIN: '1',
+      },
+      '/partners/dashboard'
+    ),
+    'https://app.mosaicbizhub.com/partners/dashboard?tab=payout-setup'
+  );
+});
+
 test('buildFrontendUrl keeps non-legacy preview origins', () => {
   const env = {
     NODE_ENV: 'production',
@@ -114,9 +151,16 @@ test('getFrontendLogoUrl points at the app frontend asset host', () => {
   );
 });
 
-test('isAllowedFrontendOrigin approves apex, transition app, launch Vercel, and dev origins outside production', () => {
+test('isAllowedFrontendOrigin approves apex, launch Vercel, explicit legacy rollback, and dev origins outside production', () => {
   assert.equal(isAllowedFrontendOrigin('https://mosaicbizhub.com', { NODE_ENV: 'production' }), true);
-  assert.equal(isAllowedFrontendOrigin('https://app.mosaicbizhub.com', { NODE_ENV: 'production' }), true);
+  assert.equal(isAllowedFrontendOrigin('https://app.mosaicbizhub.com', { NODE_ENV: 'production' }), false);
+  assert.equal(
+    isAllowedFrontendOrigin('https://app.mosaicbizhub.com', {
+      NODE_ENV: 'production',
+      ALLOW_LEGACY_FRONTEND_ORIGIN: 'true',
+    }),
+    true
+  );
   assert.equal(
     isAllowedFrontendOrigin('https://mosaic-biz-frontend-launch.vercel.app', { NODE_ENV: 'production' }),
     true

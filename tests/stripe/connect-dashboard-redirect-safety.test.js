@@ -108,3 +108,19 @@ test('createExpressLoginLink honors approved dashboard redirect URLs', async () 
     'https://mosaicbizhub.com/partners/launch-business/finance?tab=payouts'
   );
 });
+
+test('createExpressLoginLink does not preserve legacy app redirect URLs by default', async () => {
+  const { createExpressLoginLink, getLoginLinkCalls } = loadController();
+  const res = mockResponse();
+
+  await createExpressLoginLink(
+    baseRequest('https://app.mosaicbizhub.com/partners/dashboard?tab=payout-setup'),
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(
+    getLoginLinkCalls()[0].params.redirect_url,
+    'https://mosaicbizhub.com/partners/launch-business/finance'
+  );
+});
