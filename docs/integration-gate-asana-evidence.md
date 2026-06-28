@@ -6,6 +6,8 @@
 **Integration gate candidate (pre-evidence):** `28510cf`  
 **EB baseline (`main`):** `2dd52c4`
 
+> **Historical evidence:** This file records the 2026-06-14 integration gate. For current deploy workflow and CI rules, use [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md), [PUSH_TO_MAIN_DEPLOY_CRITERIA.md](PUSH_TO_MAIN_DEPLOY_CRITERIA.md), and [TEST_MATRIX.md](TEST_MATRIX.md).
+
 ---
 
 ## Asana status — mark **Evidence Added** / **Ready for Review**
@@ -61,7 +63,7 @@ Local boot verification passed. Production deployment verification (main → EB 
 | `origin/main` HEAD | `2e41cd6` (docs-only evidence; Wave 2 runtime code in `efbf0fb`) |
 | Local `main` synced | **PASS** @ `2e41cd6`; contains `645a282` |
 | `npm test` on `main` | **57/57 pass** |
-| Auto-deploy on merge | **No** — manual EB deploy per DEPLOYMENT.md |
+| Auto-deploy on merge | **Historical status:** absent in this gate; current workflow is GitHub Actions EB deploy from `main` |
 | EB deployed commit | **UNKNOWN** — _pending infra_ |
 | Latest `main` live on EB? | **UNKNOWN** — _pending infra_ |
 | Rollback target | `2dd52c4` (documented pre-PR #9 baseline) |

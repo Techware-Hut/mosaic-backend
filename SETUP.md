@@ -95,7 +95,7 @@ npm run dev
 | `npm install` | Install dependencies |
 | `npm run dev` | Run with nodemon for development |
 | `npm start` | Run with Node.js |
-| `npm test` | Run automated tests (57 cases, Node built-in runner) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) |
+| `npm test` | Run the local non-integration test suite with Node's built-in runner; see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) |
 
 ## Environment file guidance
 

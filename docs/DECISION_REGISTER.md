@@ -2,7 +2,7 @@
 
 Business and technical decisions for Mosaic Biz Hub backend MVP. Captures what is decided, what is deferred, and what blocks launch — so future work does not rely on chat history.
 
-**Last aligned with repo docs:** 2026-06 (scan `docs/`, `DEPLOYMENT.md`, launch-readiness report, controllers).
+**Last aligned with repo docs:** 2026-06-28 (scan `docs/`, `.github/workflows/`, `app.js`, `index.js`, `DEPLOYMENT.md`, launch-readiness report).
 
 **How to use:** Add a row when a decision changes. Link evidence (doc, proof pack, PR). Do not mark **Accepted** without recorded evidence.
 
@@ -14,10 +14,10 @@ Business and technical decisions for Mosaic Biz Hub backend MVP. Captures what i
 | --- | --- | --- | --- | --- |
 | Hosted staging backend is **deferred**; not part of MVP release strategy | **Accepted** | Avoid duplicate Stripe/Mongo/S3/mail config cost; production API already live; branch-level `staging` provides review gate | Release owner + infra owner | [hosted-staging-decision.md](hosted-staging-decision.md), [STAGING.md](../STAGING.md) |
 | `staging` branch is **integration-only** (no deploy target) | **Accepted** | PR review + local boot; runtime smoke runs post-prod deploy | Backend engineer | [STAGING.md](../STAGING.md) |
-| Production release path: `feature/*` → PR → `staging` → PR → `main` → **manual EB deploy** | **Accepted** | No CI auto-deploy in repo; controlled promotions | Release owner | [DEPLOYMENT.md](../DEPLOYMENT.md), [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) |
+| Production release path: `feature/*` → PR → `staging` → PR → `main` → GitHub Actions EB deploy | **Accepted** | CI runs tests on PR/push and production deploy workflow gates EB promotion from `main` | Release owner | [DEPLOYMENT.md](../DEPLOYMENT.md), [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md), [TEST_MATRIX.md](TEST_MATRIX.md) |
 | **No direct commits to `main`** | **Accepted** | Production branch protection | Reviewer / release owner | [DEPLOYMENT.md](../DEPLOYMENT.md) |
 | Deploy platform: **AWS Elastic Beanstalk** | **Accepted** | Current production hosting | Infrastructure owner | [DEPLOYMENT.md](../DEPLOYMENT.md) |
-| **Manual** production deployment (merge ≠ deploy) | **Accepted** | Infra owner deploys approved `main` SHA to EB | Infrastructure owner | [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md), [production-proof-pack-template.md](production-proof-pack-template.md) |
+| Production deployment is automated from `main`, with manual `workflow_dispatch` available | **Accepted** | Merge/push to `main` triggers the EB deploy workflow; deployment owner still confirms EB SHA before final smoke | Infrastructure owner | [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md), [production-proof-pack-template.md](production-proof-pack-template.md) |
 | Supported production API URL: **`https://api.mosaicbizhub.com`** | **Accepted** | Custom domain with valid TLS; used for smoke, OAuth, Stripe webhooks | Infrastructure owner | [DEPLOYMENT.md](../DEPLOYMENT.md), [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) |
 | Raw EB hostname **HTTPS** must **not** be used for production smoke | **Accepted** | TLS certificate CN mismatch on `mosaic-backend.us-east-1.elasticbeanstalk.com` | Release owner | [production-smoke-checklist.md](production-smoke-checklist.md) |
 | EB HTTP hostname acceptable for optional raw health probe only | **Accepted** | `http://mosaic-backend.us-east-1.elasticbeanstalk.com/` | Infrastructure owner | [production-smoke-checklist.md](production-smoke-checklist.md) |
@@ -96,8 +96,8 @@ Business and technical decisions for Mosaic Biz Hub backend MVP. Captures what i
 
 | Decision | Status | Reason | Owner | Evidence/Link |
 | --- | --- | --- | --- | --- |
-| Automated tests: **Node built-in runner**, `npm test` (57 tests) | **Accepted** | No Jest/Mocha; mock-based unit/integration style | Backend engineer | [TEST_MATRIX.md](TEST_MATRIX.md), `package.json` |
-| **No CI pipeline** in repo (tests run locally pre-merge) | **Accepted** | Documented gap; manual gate | Release owner | [launch-readiness-report.md](launch-readiness-report.md) §9 |
+| Automated tests: Node built-in runner via `npm test`, plus contract and integration suites | **Accepted** | Test counts drift by release; commands are canonical, not historical counts | Backend engineer | [TEST_MATRIX.md](TEST_MATRIX.md), `package.json` |
+| CI pipeline runs on PR/push to `staging` and `main` | **Accepted** | `.github/workflows/ci.yml` runs unit, contract, and integration suites | Release owner | [TEST_MATRIX.md](TEST_MATRIX.md), `.github/workflows/ci.yml` |
 | `npm test` pass **does not** equal launch sign-off | **Accepted** | Live Stripe/S3/email/EB not exercised | Release owner | [TEST_MATRIX.md](TEST_MATRIX.md), [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) |
 | Deploy Go vs **launch sign-off** are separate gates | **Accepted** | Deploy healthy ≠ unrestricted public launch | Release owner | [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) |
 
@@ -129,8 +129,8 @@ Distinct from **deferred** decisions. These are **open risks** documented in the
 
 | Item | Status | Reason | Owner | Evidence/Link |
 | --- | --- | --- | --- | --- |
-| No CI / automated deploy regression | **Open** | No `.github/workflows/` | Release owner | [launch-readiness-report.md](launch-readiness-report.md) |
-| `mongoSanitize` / `xss-clean` imported but **not mounted** | **Open** | [app.js](../app.js) imports only | Backend engineer | [launch-readiness-report.md](launch-readiness-report.md), [ARCHITECTURE.md](ARCHITECTURE.md) |
+| CI / automated deploy regression | **Closed / monitor** | CI and EB deploy workflows exist; keep workflow checks green per release | Release owner | [TEST_MATRIX.md](TEST_MATRIX.md), `.github/workflows/ci.yml`, `.github/workflows/deploy-eb-production.yml` |
+| Payload sanitizer mounting | **Closed** | `mongoSanitize` and `xss-clean` are mounted after JSON parsing and after raw Stripe webhook routes | Backend engineer | [ARCHITECTURE.md](ARCHITECTURE.md), [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md), [app.js](../app.js) |
 | Unauthenticated payment/order attack surface | **Open** | e.g. `/api/payments/create-payment-intent`, `/stripe/*` | Backend engineer | [production-smoke-checklist.md](production-smoke-checklist.md) P0-7, P0-8 |
 | Order confirmation emails **before** payment succeeds | **Open** | `initiateOrder` sends emails pre-payment | Backend engineer | [launch-readiness-report.md](launch-readiness-report.md) |
 | `POST /api/business` trusts client `paymentStatus` | **Open** | Legacy create path | Backend engineer | [launch-readiness-report.md](launch-readiness-report.md) |
@@ -141,7 +141,7 @@ Distinct from **deferred** decisions. These are **open risks** documented in the
 | Frontend admin Blog/FAQ dead links | **Open** | Frontend repo | Frontend owner | [launch-readiness-report.md](launch-readiness-report.md) |
 | `backend27may.zip` on `main`/`staging` | **Open** | Repo hygiene | Backend engineer | [launch-readiness-report.md](launch-readiness-report.md) |
 
-**Note:** Automated tests (**57**) exist locally; the blocker is **lack of CI**, not lack of tests entirely.
+**Note:** Historical readiness reports mention the original 57-test/no-CI baseline. Current truth lives in [TEST_MATRIX.md](TEST_MATRIX.md) and the GitHub workflow files.
 
 ---
 
@@ -152,9 +152,9 @@ Planned improvements from [launch-readiness-report.md](launch-readiness-report.m
 | Decision | Status | Reason | Owner | Evidence/Link |
 | --- | --- | --- | --- | --- |
 | **Hosted staging** EB environment | **Deferred** | Cost/complexity; see future runbook when approved | Infrastructure owner | [hosted-staging-decision.md](hosted-staging-decision.md) |
-| **CI pipeline** (GitHub Actions or equivalent) | **Deferred** | Not in repo today | Release owner | [launch-readiness-report.md](launch-readiness-report.md) |
+| **CI pipeline** (GitHub Actions or equivalent) | **Superseded** | Implemented; see Testing and quality section above | Release owner | [TEST_MATRIX.md](TEST_MATRIX.md), `.github/workflows/ci.yml` |
 | Migrate to **Jest/Vitest** (optional) | **Deferred** | Currently Node `node:test` | Backend engineer | [launch-readiness-report.md](launch-readiness-report.md) |
-| Security hardening pass (sanitization, auth on payment routes) | **Deferred** | P0 items tracked separately | Backend engineer | [security-remediation-notes.md](security-remediation-notes.md) |
+| Additional payment-route auth hardening | **Deferred** | Sanitizers are mounted; remaining payment/order auth work is tracked separately | Backend engineer | [security-remediation-notes.md](security-remediation-notes.md), [production-smoke-checklist.md](production-smoke-checklist.md) |
 | Admin Blog/FAQ UI (frontend) | **Deferred** | Frontend scope | Frontend owner | [launch-readiness-report.md](launch-readiness-report.md) |
 | Frontend `.env.example` alignment | **Deferred** | Doc drift | Frontend owner | [launch-readiness-report.md](launch-readiness-report.md) |
 | Remove committed zip artifacts | **Deferred** | Repo cleanup | Backend engineer | [launch-readiness-report.md](launch-readiness-report.md) |
@@ -177,7 +177,7 @@ Documented in feature-specific refs. **Not** launch blockers unless promoted.
 | Relocate admin vendor routes off shared vendor router | **Deferred** | Cleaner boundary | Backend engineer | [admin-read-mutation.md](admin-read-mutation.md) |
 | Consolidate or document **dual order webhook** operational runbook | **Deferred** | Reduce operator confusion | Backend engineer | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) |
 | Facebook OAuth (`provider` enum exists; no routes) | **Deferred** | Not implemented | Product | [AUTH_FLOW.md](AUTH_FLOW.md) |
-| Wire **`express-mongo-sanitize`** and **`xss-clean`** middleware | **Deferred** | Imported but not applied | Backend engineer | [app.js](../app.js) |
+| Payload sanitizer middleware | **Superseded** | Implemented; `express-mongo-sanitize` and `xss-clean` are mounted in `app.js` | Backend engineer | [ARCHITECTURE.md](ARCHITECTURE.md), [app.js](../app.js) |
 
 ---
 

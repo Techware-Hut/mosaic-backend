@@ -4,6 +4,8 @@
 **Date:** 2026-06-18  
 **Production API checked:** `https://api.mosaicbizhub.com` (pre-deploy baseline SHA `7d01011`)
 
+> **Historical proof pack:** Counts and branch/SHA references below are evidence from the June 18 stability sprint. Use [TEST_MATRIX.md](TEST_MATRIX.md) and [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for current test commands, deploy posture, and live status.
+
 ---
 
 ## Files changed
@@ -46,7 +48,7 @@ npm test
 
 ## Test results summary
 
-- **Before sprint:** 173 tests on `main`
+- **Before sprint:** 173-test snapshot on `main`
 - **After sprint:** **178 tests** (+5 new marketplace tests)
 - **Failures:** None
 - **Pre-existing failures:** None introduced

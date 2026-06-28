@@ -1,18 +1,18 @@
-# Push-to-Main Deploy Re-Enable Criteria
+# Push-to-Main Deploy Operating Criteria
 
 **Issue:** [#23 Define criteria for re-enabling push-to-main deployment](https://github.com/Techware-Hut/mosaic-backend/issues/23)  
 **Workflow:** [`.github/workflows/deploy-eb-production.yml`](../.github/workflows/deploy-eb-production.yml)  
-**Current state:** `push:` to `main` is **enabled** — deploy runs automatically on push/merge to `main`. Manual `workflow_dispatch` also available.
+**Current state:** `push:` to `main` is **enabled** — deploy runs automatically on push/merge to `main`. Manual `workflow_dispatch` is also available for controlled redeploys.
 
 ---
 
-## Prerequisites checklist
+## Operating checklist
 
-All must be true before uncommenting `push: branches: [main]` in the deploy workflow.
+These guardrails must remain true while push-to-main deploy is enabled. If they regress, disable `push:` until the release owner and deployment owner approve re-enablement.
 
 | # | Criterion | Owner | Evidence |
 | --- | --- | --- | --- |
-| 1 | **3 consecutive successful manual EB deploys** from `main` with no rollback | Deployment owner | GHA run URLs + EB version labels |
+| 1 | **Recent successful EB deploy history** from `main` with no rollback | Deployment owner | GHA run URLs + EB version labels |
 | 2 | **Post-deploy probes pass** — `/`, `/api/health`, `/api/ready`, auth 401, CORS | GHA deploy workflow | Workflow logs |
 | 3 | **`npm test` green** on `main` before each deploy | CI | GHA test job |
 | 4 | **IAM OIDC policy tightened** (#19) — least privilege for EB deploy role | DevOps | AWS IAM policy review |
@@ -35,9 +35,9 @@ Both deployment owner and backend lead must approve re-enabling push-to-main in 
 
 ---
 
-## How to re-enable
+## If push-to-main must be re-enabled after a disable
 
-1. Complete prerequisites table above.
+1. Complete the operating checklist above.
 2. Open PR that uncomments in `.github/workflows/deploy-eb-production.yml`:
 
 ```yaml
@@ -49,7 +49,7 @@ on:
 ```
 
 3. PR description must link:
-   - Last 3 successful manual deploy SHAs
+   - Recent successful deploy workflow SHAs
    - Rollback procedure
    - Smoke evidence for most recent deploy
 4. Merge only after backend lead + deployment owner approval.

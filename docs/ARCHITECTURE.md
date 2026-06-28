@@ -59,7 +59,7 @@ mosaic-backend/
 
 - [`routes/cms/cmsRoutes.js`](../routes/cms/cmsRoutes.js) exists but is **not mounted** in [`app.js`](../app.js). Active CMS routes use [`routes/admin/cmsRoutes.js`](../routes/admin/cmsRoutes.js).
 - [`vendorOnboarding.routes.js`](../routes/vendorOnboarding.routes.js) is mounted **twice**: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same router, two prefixes).
-- `express-mongo-sanitize` and `xss-clean` are imported in [`app.js`](../app.js) but are **not currently applied** as middleware.
+- `express-mongo-sanitize` and `xss-clean` are mounted in [`app.js`](../app.js) after `express.json()` and after the raw Stripe webhook routes.
 - There is **no central router file** beyond `app.js`. Each feature exports `express.Router()` and is mounted with `app.use(prefix, router)`.
 
 ---
@@ -99,11 +99,12 @@ sequenceDiagram
 2. **Global middleware** — [`app.js`](../app.js) sets `trust proxy`, CORS (allowed origins include `FRONTEND_URL`), and `cookieParser`.
 3. **Webhook routes (before JSON)** — Stripe webhooks mount with `express.raw({ type: 'application/json' })` **before** `express.json()`. Stripe signature verification requires the raw body. See [Webhook endpoints](#webhook-endpoints).
 4. **JSON parsing** — `express.json()` applies to all routes registered after it.
-5. **Route matching** — `app.use(prefix, router)` dispatches to a feature router in `routes/`.
-6. **Per-route middleware** — Applied inside route files: `authenticate`, role gates (`isAdmin`, `isCustomer`, `isBusinessOwner`), `requireVerifiedVendor`, `upload`, validators.
-7. **Controller** — Handler in `controllers/` orchestrates validation, Stripe/AWS/mail calls, and persistence.
-8. **Model / database** — Mongoose models in `models/` perform `find`, `save`, `findByIdAndUpdate` against MongoDB.
-9. **Response** — Controller returns JSON (or streams files for invoices/PDFs).
+5. **Payload sanitizing** — `express-mongo-sanitize` and `xss-clean` sanitize body/query/params for normal JSON routes without touching raw webhook bodies.
+6. **Route matching** — `app.use(prefix, router)` dispatches to a feature router in `routes/`.
+7. **Per-route middleware** — Applied inside route files: `authenticate`, role gates (`isAdmin`, `isCustomer`, `isBusinessOwner`), `requireVerifiedVendor`, `upload`, validators.
+8. **Controller** — Handler in `controllers/` orchestrates validation, Stripe/AWS/mail calls, and persistence.
+9. **Model / database** — Mongoose models in `models/` perform `find`, `save`, `findByIdAndUpdate` against MongoDB.
+10. **Response** — Controller returns JSON (or streams files for invoices/PDFs).
 
 There is **no global auth middleware**. Protection is applied per-route or via `router.use(authenticate, isAdmin)` inside admin routers.
 
@@ -397,8 +398,8 @@ Database connection: [`config/Db.js`](../config/Db.js) reads `MONGODB_URI` (fall
 | Item | Detail |
 |------|--------|
 | Runner | Node.js built-in (`node:test`, `node:assert/strict`) |
-| Command | `npm test` → `node --test tests/**/*.test.js` |
-| Pattern | Module loading with mocks; env vars set in test setup |
+| Command | `npm test` runs `scripts/run-unit-tests.js`; CI also runs `npm run test:contract` and `npm run test:integration` |
+| Pattern | Unit/module tests with mocks plus isolated integration tests using `mongodb-memory-server` |
 
 ### Layout
 
@@ -434,8 +435,8 @@ When adding tests, mirror the domain folder under `tests/` and follow existing m
 |------|--------|
 | Platform | AWS Elastic Beanstalk |
 | Production API | `https://api.mosaicbizhub.com` |
-| Deploy flow | `feature/*` → `staging` → `main` → manual EB deploy |
-| CI/CD | None in-repo (no `.github/workflows/`) |
+| Deploy flow | `feature/*` → `staging` → `main` → GitHub Actions EB deploy; manual workflow dispatch remains available |
+| CI/CD | `.github/workflows/ci.yml` validates PRs/pushes to `staging`/`main`; `.github/workflows/deploy-eb-production.yml` deploys `main` to EB |
 | Docker | None in-repo |
 | Database migrations | MongoDB via Mongoose; `seed/migrate.js` for data migration only |
 

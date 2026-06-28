@@ -2,6 +2,8 @@
 
 Records post-deploy verification for Mosaic Biz Hub backend. For the full release workflow see [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md). For smoke tiers see [production-smoke-checklist.md](production-smoke-checklist.md).
 
+> **Evidence log note:** Older sections preserve the release facts and blockers from the date they were written. For current deploy workflow, CI gates, and smoke requirements, use [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md), [TEST_MATRIX.md](TEST_MATRIX.md), and [docs/README.md](README.md).
+
 ---
 
 ## MVP deploy target
@@ -144,7 +146,7 @@ PR [#9](https://github.com/DeveloperTWH/backend/pull/9) merged to `main` at `202
 | `origin/main` HEAD | `2e41cd6` — post-merge evidence docs (docs-only vs `efbf0fb`) |
 | Local `main` synced | **PASS** @ `2e41cd6`; `645a282` contained |
 | `npm test` on `main` | **57/57 pass** |
-| Auto-deploy on merge | **No** — manual EB deploy per [DEPLOYMENT.md](../DEPLOYMENT.md); no CI workflows |
+| Auto-deploy on merge | **Historical status:** absent in this entry; later replaced by the GitHub Actions EB deploy workflow |
 | EB deployed commit | **UNKNOWN** — pending infra owner confirmation |
 | Rollback target (documented) | `2dd52c4` |
 
@@ -408,7 +410,7 @@ Workflow post-deploy probes: root **200**, unauth auth/check **401**.
 | GHA deploy + health/auth probes | HTTP 200 `/`, HTTP 401 auth/check | **PENDING** deploy |
 | Tier C live charge | Written approval still required | **BLOCKED** |
 
-**Conclusion:** Code merged to `main`. No production deploy claim until manual EB deploy completes and smoke evidence is recorded below.
+**Conclusion:** Code merged to `main`. No production deploy claim until EB deployment completes and smoke evidence is recorded below.
 
 ---
 

@@ -2,7 +2,7 @@
 
 Route → controller → model ownership for AI agents and reviewers. This is a **focused map** — deep lifecycle detail lives in [ARCHITECTURE.md](ARCHITECTURE.md) and [API_SURFACE.md](API_SURFACE.md).
 
-**Last updated:** 2026-06-18 (issue #50)
+**Last updated:** 2026-06-28
 
 ---
 
@@ -227,9 +227,9 @@ Optional env: `STORAGE_PROVIDER`, `CLOUDINARY_*`
 | --- | --- |
 | Unmounted CMS duplicate | [routes/cms/cmsRoutes.js](../routes/cms/cmsRoutes.js) is **not** mounted — active CMS uses [routes/admin/cmsRoutes.js](../routes/admin/cmsRoutes.js) |
 | Double-mounted onboarding router | [vendorOnboarding.routes.js](../routes/vendorOnboarding.routes.js) at `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` |
-| Sanitize middleware imported but unused | `express-mongo-sanitize` and `xss-clean` in [app.js](../app.js) not applied (#57 follow-up) |
+| Payload sanitizers | `express-mongo-sanitize` and `xss-clean` are mounted after `express.json()` and after raw webhook routes in [app.js](../app.js) |
 | No global auth | Each route applies middleware explicitly |
-| Sentry (#18) | Planned on unmerged `chore/post-deploy-hardening` branch — not on current `main` |
+| Sentry | `instrument.js`, Express error handling, and 5xx response capture are wired; capture depends on Sentry env being enabled |
 
 ---
 

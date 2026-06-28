@@ -6,6 +6,8 @@
 **Audited against `main` commit:** `4c77bf6` (2026-06-18)  
 **Production base URL:** `https://api.mosaicbizhub.com`
 
+**Status note (2026-06-28):** This remains useful frontend/backend reconciliation evidence, but it is an audited snapshot. For current route registration, verify [`app.js`](../app.js), [API_SURFACE.md](API_SURFACE.md), and [contracts/BACKEND_ROUTE_MANIFEST.md](contracts/BACKEND_ROUTE_MANIFEST.md).
+
 ---
 
 ## Quick reference — featured and ranked (Batch D)

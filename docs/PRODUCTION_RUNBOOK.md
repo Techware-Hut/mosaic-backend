@@ -17,7 +17,7 @@ Operational guide for release owners: deployment verification, rollback confirma
 | [stripe-webhook-registration.md](stripe-webhook-registration.md) | Webhook Dashboard setup |
 | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) | Webhook smoke curl commands |
 | [hosted-staging-decision.md](hosted-staging-decision.md) | Why there is no staging host |
-| [launch-readiness-report.md](launch-readiness-report.md) | Open P0 blockers |
+| [launch-readiness-report.md](launch-readiness-report.md) | Historical launch audit; current blockers live in status docs and issue trackers |
 | [production-env-checklist.md](production-env-checklist.md) § Observability | Sentry env var names |
 
 ---
@@ -46,7 +46,7 @@ Frontend (canonical): `https://mosaicbizhub.com` (transition/historical fallback
 
 Runtime validation happens **after** `main` is deployed to production, using **dedicated test accounts**. See [hosted-staging-decision.md](hosted-staging-decision.md).
 
-Pre-merge checks on `staging` (local boot, `npm test`, code review) are **provisional** — they do not replace post-deploy production smoke.
+Pre-merge checks on `staging` (CI, local boot when needed, code review) are **provisional** — they do not replace post-deploy production smoke.
 
 ---
 
@@ -57,7 +57,7 @@ flowchart LR
   F[feature branch] -->|PR| S[staging branch]
   S -->|integration checklist| S
   S -->|PR + approval| M[main branch]
-  M -->|manual EB deploy| EB[AWS Elastic Beanstalk]
+  M -->|GitHub Actions EB deploy| EB[AWS Elastic Beanstalk]
   EB --> API[api.mosaicbizhub.com]
   API --> Smoke[post-deploy smoke]
   Smoke --> Proof[proof pack]
@@ -95,13 +95,13 @@ flowchart LR
 
 ## Phase 1 — Pre-deploy checklist
 
-Complete **before** infrastructure owner deploys to EB.
+Complete **before** the `main` deploy workflow promotes the release to EB.
 
 ### Integration (on `staging` branch)
 
 - [ ] PR `feature/*` → `staging` reviewed and merged
 - [ ] [STAGING.md](../STAGING.md) integration checklist complete
-- [ ] `npm test` pass recorded (local)
+- [ ] CI pass recorded; run `npm test` locally when the change needs extra branch-specific proof
 - [ ] App boots locally with `.env` ([SETUP.md](../SETUP.md)) — not `.env.local`
 - [ ] No secrets committed; new env vars documented in [production-env-checklist.md](production-env-checklist.md) and [README.md](../README.md)
 - [ ] Security behavior changes noted in [security-remediation-notes.md](security-remediation-notes.md) if applicable
@@ -133,11 +133,11 @@ Complete **before** infrastructure owner deploys to EB.
 
 ## Phase 2 — Deploy execution
 
-**Owner:** Infrastructure / AWS owner
+**Owner:** GitHub Actions for deploy execution; infrastructure / deployment owner for EB confirmation.
 
-1. Deploy the approved **`main` commit SHA** to AWS Elastic Beanstalk.
-2. Verify EB application health is green.
-3. Review boot logs:
+1. Confirm the deploy workflow is running for the approved **`main` commit SHA**.
+2. Verify EB application health is green after the workflow deploys.
+3. Review workflow and EB boot logs:
    - MongoDB connected
    - Server listening on expected port
    - No missing-env crash (especially Google OAuth, JWT, Stripe)

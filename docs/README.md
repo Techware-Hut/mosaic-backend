@@ -16,12 +16,10 @@ Repository root: [README.md](../README.md). Deployment entry point: [../DEPLOYME
 | Production API | `https://api.mosaicbizhub.com` |
 | Production branch | `main` |
 | Integration branch | `staging` |
-| Latest production promotion | PR #150, merged 2026-06-28 |
-| Production deployed SHA | `7c2b10d` |
-| EB deployment version | `mosaic-7c2b10dca32c746311ee79e9179c312b1c3743b9` |
 | Canonical frontend | `https://mosaicbizhub.com` |
 | Current mode | Vendor soft launch and product build phase |
 | Payments | Stripe test-mode flows are allowed for controlled QA; do not present as unrestricted live commerce |
+| Release evidence | Exact deployed SHA, EB version, and latest promotion live in [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) and dated proof packs |
 | Main status hub | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) |
 
 ---
