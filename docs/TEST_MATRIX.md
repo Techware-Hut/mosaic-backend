@@ -42,7 +42,7 @@ Automated tests do not replace production smoke. Run smoke after deploys that to
 | Smoke area | Why manual |
 | --- | --- |
 | Production deploy identity | Confirms EB is serving the intended commit/version |
-| Live Stripe payments and webhooks | Requires Stripe Dashboard/test-mode events against the deployed API |
+| Live Stripe payments and webhooks | Requires Stripe Dashboard/test-mode events against the deployed API; use [qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md](qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md) for unsigned rejection proof and valid-delivery evidence |
 | Email delivery | Mailers are mocked/stubbed in tests |
 | S3 uploads | AWS SDK and presigned upload flows need live credentials/CORS |
 | Google OAuth browser flow | Redirect/cookie behavior depends on provider config and production domains |
@@ -70,5 +70,6 @@ Record results in [production-proof-pack-template.md](production-proof-pack-temp
 - [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md)
 - [production-smoke-checklist.md](production-smoke-checklist.md)
 - [production-proof-pack-template.md](production-proof-pack-template.md)
+- [qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md](qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md)
 - [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md)
 - [backend/BACKEND_INTEGRATION_TEST_RUNBOOK.md](backend/BACKEND_INTEGRATION_TEST_RUNBOOK.md)

@@ -83,6 +83,7 @@ Repository root: [README.md](../README.md). Deployment entry point: [../DEPLOYME
 | [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) | Release-owner runbook |
 | [TEST_MATRIX.md](TEST_MATRIX.md) | Automated tests mapped to manual smoke |
 | [SMOKE_TEST_TOKENS.md](SMOKE_TEST_TOKENS.md) | How token-protected smoke tiers work |
+| [qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md](qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md) | Controlled Stripe webhook runtime smoke and valid delivery proof |
 | [qa/FRESH_ACCOUNT_E2E_PLAN.md](qa/FRESH_ACCOUNT_E2E_PLAN.md) | Fresh account production QA plan |
 | [qa/REGRESSION_CLAIM_LEDGER.md](qa/REGRESSION_CLAIM_LEDGER.md) | Runtime claims and gaps ledger |
 | [release/WORK_ORDER_2026_06_26_MOSAIC_LAUNCH_HARDENING.md](release/WORK_ORDER_2026_06_26_MOSAIC_LAUNCH_HARDENING.md) | June 26 work order evidence |
