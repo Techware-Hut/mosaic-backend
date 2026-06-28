@@ -56,6 +56,7 @@ Repository root: [README.md](../README.md). Deployment entry point: [../DEPLOYME
 | [PLATFORM_OPERATING_MODEL.md](PLATFORM_OPERATING_MODEL.md) | Cross-role platform behavior |
 | [MARKETPLACE_VENDOR_ELIGIBILITY.md](MARKETPLACE_VENDOR_ELIGIBILITY.md) | Vendor visibility and checkout eligibility |
 | [MARKETPLACE_VISIBILITY_MATRIX.md](MARKETPLACE_VISIBILITY_MATRIX.md) | Public/admin/vendor visibility rules |
+| [VENDOR_PLAN_ENTITLEMENT_AUDIT_2026_06_28.md](VENDOR_PLAN_ENTITLEMENT_AUDIT_2026_06_28.md) | Silver/Gold/Platinum limits, subscription lifecycle, and MVP vs future-phase entitlement rules |
 | [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) | Vendor onboarding and approval states |
 | [LIFECYCLE_STATE_AND_LEGACY_ROUTE_POLICY.md](LIFECYCLE_STATE_AND_LEGACY_ROUTE_POLICY.md) | Backend lifecycle states and intentional legacy/duplicate route policy |
 
