@@ -4,9 +4,13 @@
 
 Files are not physically moved in this PR to avoid breaking links. Treat older proof and audit docs as historical evidence, not current operating rules. For current behavior, start with:
 
+- [../MVP_BACKEND_PROGRAM_STATUS.md](../MVP_BACKEND_PROGRAM_STATUS.md)
+- [../DOCUMENTATION_CONSOLIDATION_2026_06_28.md](../DOCUMENTATION_CONSOLIDATION_2026_06_28.md)
 - [../PLATFORM_OPERATING_MODEL.md](../PLATFORM_OPERATING_MODEL.md)
 - [../MARKETPLACE_VENDOR_ELIGIBILITY.md](../MARKETPLACE_VENDOR_ELIGIBILITY.md)
 - [../README.md](../README.md)
+
+Current production/domain state lives in the status and consolidation docs above. Older proof packs may name previous SHAs, old preview domains, app-domain transition wording, or pre-cutover gates.
 
 ## Archive Categories
 

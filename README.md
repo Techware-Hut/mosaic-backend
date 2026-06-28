@@ -83,7 +83,7 @@ npm run dev
 | `npm install` | Install project dependencies |
 | `npm run dev` | Start the API with `nodemon` |
 | `npm start` | Start the API with `node index.js` |
-| `npm test` | Run automated tests (`node --test tests/**/*.test.js`) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) and [docs/MVP_BACKEND_PROGRAM_STATUS.md](docs/MVP_BACKEND_PROGRAM_STATUS.md) for current count |
+| `npm test` | Run automated tests (`node --test tests/**/*.test.js`) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) for coverage and [docs/MVP_BACKEND_PROGRAM_STATUS.md](docs/MVP_BACKEND_PROGRAM_STATUS.md) for release posture |
 | `./scripts/smoke-backend.ps1` | Post-deploy smoke (PowerShell) — public P0/P1 checks; optional auth with `SMOKE_TEST_*` env vars |
 | `./scripts/smoke-backend.sh` | Same smoke helper for bash/Linux/macOS |
 | `npm run smoke:backend` | Cross-platform wrapper (runs `.ps1` on Windows, `.sh` elsewhere) |
@@ -113,13 +113,16 @@ Full matrix: [docs/BACKEND_FULL_SMOKE_PROOF_PACK.md](docs/BACKEND_FULL_SMOKE_PRO
 
 **Documentation home:** [docs/README.md](docs/README.md) — full index, read-first guides, and maintenance rules.
 
-**MVP sprint status:** [docs/MVP_BACKEND_PROGRAM_STATUS.md](docs/MVP_BACKEND_PROGRAM_STATUS.md) — production deploy, open PRs, issue #26–#35 roadmap.
+**Backend program status:** [docs/MVP_BACKEND_PROGRAM_STATUS.md](docs/MVP_BACKEND_PROGRAM_STATUS.md) — current production release, open backend work, and domain/CORS posture.
+
+**Documentation consolidation:** [docs/DOCUMENTATION_CONSOLIDATION_2026_06_28.md](docs/DOCUMENTATION_CONSOLIDATION_2026_06_28.md) — current vs historical docs map.
 
 Key entry points:
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — backend map for contributors and LLMs
 - [docs/API_SURFACE.md](docs/API_SURFACE.md) — HTTP route map, auth boundaries, smoke notes
 - [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md) — production deploy, smoke, rollback, sign-off
+- [docs/DOMAIN_MIGRATION_URL_INVENTORY.md](docs/DOMAIN_MIGRATION_URL_INVENTORY.md) — canonical, alias, transition, preview, and API origin policy
 - [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) — automated tests vs manual smoke mapping
 - [docs/DECISION_REGISTER.md](docs/DECISION_REGISTER.md) — MVP decisions, deferrals, and launch assumptions
 - [SETUP.md](SETUP.md) · [STAGING.md](STAGING.md) · [DEPLOYMENT.md](DEPLOYMENT.md)

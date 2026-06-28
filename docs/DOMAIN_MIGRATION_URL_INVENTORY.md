@@ -1,29 +1,29 @@
 # Domain Migration URL Inventory
 
-Updated: 2026-06-24
+Updated: 2026-06-28
 
 ## Current Architecture Truth
 
-The prior `app.mosaicbizhub.com` canonical-domain plan is superseded. Do not promote `staging -> main` until this correction is integrated with the frontend correction and external cutover verification is complete.
+The prior `app.mosaicbizhub.com` canonical-domain plan is superseded. The apex-domain correction has been integrated and promoted; current production generated links, redirects, and credentialed CORS should treat `https://mosaicbizhub.com` as canonical. See [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for the current production release and soft-launch mode.
 
 | URL | Role | Backend Policy |
 | --- | --- | --- |
 | `https://mosaicbizhub.com` | Canonical production marketplace frontend | Primary frontend origin for generated links, redirects, and credentialed CORS |
-| `https://www.mosaicbizhub.com` | Alias for the marketplace | Should redirect to apex; not a default credentialed app origin |
-| `https://app.mosaicbizhub.com` | Temporary transition / legacy app origin | Temporarily approved for safe cutover; remove after apex auth/payment smoke passes and redirect strategy is approved |
-| `https://mosaic-biz-frontend-launch.vercel.app` | Temporary QA / preview origin | Approved QA origin |
+| `https://www.mosaicbizhub.com` | Alias/redirect target for the marketplace | Not a default credentialed app origin |
+| `https://app.mosaicbizhub.com` | Transition / historical app origin | Keep only for documented rollback or compatibility checks |
+| `https://mosaic-biz-frontend-launch.vercel.app` | QA / preview origin | Approved QA origin |
 | `https://api.mosaicbizhub.com` | Canonical backend API | API host only; never a frontend redirect target |
 
 ## Runtime References
 
 | Area | File | Behavior |
 | --- | --- | --- |
-| Frontend URL generation | `utils/frontendUrl.js` | Defaults generated links to `https://mosaicbizhub.com`; ignores stale `app.mosaicbizhub.com` env defaults; approves temporary app only for transition redirects/CORS preservation; approves Vercel QA and dev localhost outside production; rejects `www`, API, and arbitrary origins |
+| Frontend URL generation | `utils/frontendUrl.js` | Defaults generated links to `https://mosaicbizhub.com`; ignores stale `app.mosaicbizhub.com` env defaults; approves the app host only for transition/rollback compatibility; approves Vercel QA and dev localhost outside production; rejects `www`, API, and arbitrary origins |
 | Stripe Connect return and refresh URLs | `lib/connect/connectUrls.js` | Uses the shared frontend URL allowlist and preserves approved full URL overrides |
 | Google OAuth redirect state | `controllers/authController.js` | Sanitizes supplied redirects before state creation and again before callback redirect |
 | Billing portal return URL | `controllers/billing.controller.js` | Sanitizes user-supplied or configured return URLs to an approved frontend origin or fallback account path |
-| Credentialed CORS defaults | `utils/corsOrigins.js` | Defaults to apex + temporary app + Vercel QA; dev origins are appended outside production; wildcard origins are filtered out |
-| Production smoke probes | `.github/workflows/deploy-eb-production.yml`, `scripts/smoke-backend.ps1`, `scripts/smoke-backend.sh` | Probe apex, temporary app, and Vercel QA for credentialed CORS |
+| Credentialed CORS defaults | `utils/corsOrigins.js` | Defaults to apex plus approved transition/QA origins; dev origins are appended outside production; wildcard origins are filtered out |
+| Production smoke probes | `.github/workflows/deploy-eb-production.yml`, `scripts/smoke-backend.ps1`, `scripts/smoke-backend.sh` | Probe apex and approved transition/QA origins for credentialed CORS |
 
 ## Redirect Security Evidence
 
@@ -43,7 +43,7 @@ Covered flows:
 | --- | --- |
 | `https://mosaicbizhub.com` | Canonical production marketplace frontend |
 | `https://www.mosaicbizhub.com` | Redirect-only alias; explicitly rejected by backend URL sanitizer and omitted from default CORS |
-| `https://app.mosaicbizhub.com` | Temporary transition / legacy app origin; keep only until cutover smoke passes |
+| `https://app.mosaicbizhub.com` | Transition / historical app origin; keep only while explicitly approved |
 | `https://mosaic-biz-frontend-launch.vercel.app` | QA / preview origin |
 | `https://api.mosaicbizhub.com` | Backend API base URL only |
 
