@@ -1,9 +1,10 @@
 # Stripe Connect Domain Verification
 
-**Issue:** [#82 Stripe Connect return and refresh URL domain alignment](https://github.com/Techware-Hut/mosaic-backend/issues/82)  
-**Branch:** `release/backend-post-merge-production-stabilization`  
-**Frontend routes:** `/partners/connect/return`, `/partners/connect/refresh`  
-**Evidence date:** 2026-06-22  
+**Issue:** [#82 Stripe Connect return and refresh URL domain alignment](https://github.com/Techware-Hut/mosaic-backend/issues/82)
+**Branch:** `release/backend-post-merge-production-stabilization`
+**Frontend routes:** `/partners/connect/return`, `/partners/connect/refresh`
+**Evidence date:** 2026-06-22
+**Domain policy updated:** 2026-06-28
 
 No secrets in this document.
 
@@ -30,7 +31,7 @@ Unit tests: [`tests/connect/connect-urls.test.js`](../tests/connect/connect-urls
 | Environment | `FRONTEND_URL` (expected) | Return URL shape |
 |-------------|---------------------------|------------------|
 | Production | `https://mosaicbizhub.com` | `https://mosaicbizhub.com/partners/connect/return?businessId=<id>` |
-| Transition | `https://app.mosaicbizhub.com` | Temporary only until apex smoke passes |
+| Transition / rollback | `https://app.mosaicbizhub.com` | Use only while explicitly approved for rollback or compatibility checks |
 | QA / launch Vercel | `https://mosaic-biz-frontend-launch.vercel.app` | Same path on launch host (via override or FRONTEND_URL) |
 
 **Note:** Production EB should use the apex marketplace origin. Use `CONNECT_RETURN_URL` / `CONNECT_REFRESH_URL` only when a full override is intentionally required.
@@ -43,7 +44,7 @@ CONNECT_RETURN_PATH=/partners/connect/return
 CONNECT_REFRESH_PATH=/partners/connect/refresh
 ```
 
-Full URL overrides are valid for intentional QA or cutover windows, but they should not point at `https://app.mosaicbizhub.com` after apex launch except during a documented temporary rollback window.
+Full URL overrides are valid for intentional QA or rollback windows, but they should not point at `https://app.mosaicbizhub.com` during normal production operation.
 
 ---
 
