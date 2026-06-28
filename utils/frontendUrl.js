@@ -3,7 +3,6 @@ const LEGACY_FRONTEND_URL = 'https://app.mosaicbizhub.com';
 const LAUNCH_QA_FRONTEND_URL = 'https://mosaic-biz-frontend-launch.vercel.app';
 const APPROVED_FRONTEND_ORIGINS = [
   DEFAULT_FRONTEND_URL,
-  LEGACY_FRONTEND_URL,
   LAUNCH_QA_FRONTEND_URL,
 ];
 const GENERATED_FRONTEND_ORIGINS = [
@@ -44,6 +43,10 @@ function isProductionEnv(env = process.env) {
 
 function getAllowedFrontendOrigins(env = process.env) {
   const origins = [...APPROVED_FRONTEND_ORIGINS];
+
+  if (env.ALLOW_LEGACY_FRONTEND_ORIGIN === 'true' || env.ALLOW_LEGACY_FRONTEND_ORIGIN === '1') {
+    origins.push(LEGACY_FRONTEND_URL);
+  }
 
   if (!isProductionEnv(env)) {
     origins.push(...DEV_FRONTEND_ORIGINS);

@@ -31,7 +31,7 @@ Unit tests: [`tests/connect/connect-urls.test.js`](../tests/connect/connect-urls
 | Environment | `FRONTEND_URL` (expected) | Return URL shape |
 |-------------|---------------------------|------------------|
 | Production | `https://mosaicbizhub.com` | `https://mosaicbizhub.com/partners/connect/return?businessId=<id>` |
-| Transition / rollback | `https://app.mosaicbizhub.com` | Use only while explicitly approved for rollback or compatibility checks |
+| Transition / rollback | `https://app.mosaicbizhub.com` | Rejected by default; use only with `ALLOW_LEGACY_FRONTEND_ORIGIN=true` or `1` during an explicitly approved rollback |
 | QA / launch Vercel | `https://mosaic-biz-frontend-launch.vercel.app` | Same path on launch host (via override or FRONTEND_URL) |
 
 **Note:** Production EB should use the apex marketplace origin. Use `CONNECT_RETURN_URL` / `CONNECT_REFRESH_URL` only when a full override is intentionally required.
@@ -44,7 +44,7 @@ CONNECT_RETURN_PATH=/partners/connect/return
 CONNECT_REFRESH_PATH=/partners/connect/refresh
 ```
 
-Full URL overrides are valid for intentional QA or rollback windows, but they should not point at `https://app.mosaicbizhub.com` during normal production operation.
+Full URL overrides are valid for intentional QA or rollback windows, but they should not point at `https://app.mosaicbizhub.com` during normal production operation. The helper rewrites legacy app overrides back to the apex host unless `ALLOW_LEGACY_FRONTEND_ORIGIN` is intentionally enabled for rollback.
 
 ---
 
@@ -78,6 +78,7 @@ Connect **code** aligns with frontend route expectations. No connect controller 
 3. Confirm 200 + Stripe onboarding URL (do not complete onboarding in production without approval).
 4. Verify EB `FRONTEND_URL` matches intended frontend host before relying on default URL builder.
 5. If `CONNECT_RETURN_URL` / `CONNECT_REFRESH_URL` are set, verify they point to the intended apex or QA host and not an accidental legacy app default.
+6. Keep `ALLOW_LEGACY_FRONTEND_ORIGIN` unset/false unless a documented rollback temporarily requires preserving `https://app.mosaicbizhub.com`.
 
 ---
 

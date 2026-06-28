@@ -1,377 +1,75 @@
 # Test Matrix
 
-Maps backend features to automated tests (`npm test`), manual smoke checks, and proof-pack evidence.
+**Last updated:** 2026-06-28
 
-**Runner:** `npm test` → `node --test tests/**/*.test.js` (173 tests, Node built-in runner)
-
-**Test style:** Unit/integration-style tests with mocked Mongoose models and module hooks. They prove **handler logic and wiring** — not full end-to-end flows against live MongoDB, Stripe, or AWS in CI.
-
-**Related:** [production-smoke-checklist.md](production-smoke-checklist.md), [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md), [production-proof-pack-template.md](production-proof-pack-template.md), [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md)
+This matrix maps backend validation commands to what they prove. It intentionally does **not** hard-code total test counts; counts change as coverage grows and should be recorded in PR descriptions, CI runs, and release proof packs.
 
 ---
 
-## Coverage summary
+## Commands
 
-| Layer | Count | What it validates |
-|-------|-------|-------------------|
-| Automated (`tests/`) | **173** | DTOs, middleware, controller logic, webhook wiring, search filters, vendor listing/order/stock, **Stripe Connect checkout guards** (mocked), **checkout approval gate + sanitized PI**, **email notification safety**, **Sentry env gating + PII scrub** |
-| Manual smoke script | 1 | Live API + DB auth/check per role |
-| Production smoke tiers | P0–P6 | Post-deploy on `https://api.mosaicbizhub.com` |
-| Proof pack | Per release | Redacted evidence matrix |
-
-**Not covered by automation:** Live Stripe payments, S3 uploads, email delivery, full order checkout, admin finalize against real DB, CI pipeline (none in repo).
-
----
-
-## Auth tests
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Auth response DTO | [`tests/auth/auth-check-payload.test.js`](../tests/auth/auth-check-payload.test.js) | `toPublicAuthUser` exposes only safe fields; `/auth/check` handler uses whitelist | Live login, cookie flags, CORS | Yes — P1.4, P1.5 |
-| JWT shape | same | `buildSessionToken` uses `sub` claim (not `userId`) | Token expiry in production, refresh flow | No (logic only) |
-| Google OAuth cookie TTL | [`tests/auth/google-oauth-security.test.js`](../tests/auth/google-oauth-security.test.js) | `mbh_tmp` cookie `maxAge` matches temp JWT lifetime when profile completion required | Full Google redirect flow, live Google tokens | Yes — P1.8 |
-| Google OAuth rate limits | same | Rate limit middleware precedes OAuth handlers on `/google`, `/callback`, `/complete` | Rate limit effectiveness under load | No |
-| Admin self-registration block | — | *(no automated test)* | Register with `role: admin` rejected | Yes — P1.6 |
-
----
-
-## Password reset tests
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Email enumeration | [`tests/auth/password-reset-abuse-protection.test.js`](../tests/auth/password-reset-abuse-protection.test.js) | `forgotPassword` returns generic message for unknown emails | Email actually sent, SMTP config | Yes — P1.7 |
-| OTP lockout | same | `resetPassword` clears reset OTP after 5 failed attempts | Lockout timing in production | Yes — P1.7 |
-| Expired reset OTP | same | Expired OTP fields cleared before rejection | — | Yes — P1.7 |
-| Rate limiting wiring | same | `forgot-password` and `reset-password` routes have rate limiter before handler | 429 responses at limit threshold | Partial — optional abuse test |
-
----
-
-## Session invalidation tests
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Password reset invalidation | [`tests/auth/password-reset-session-invalidation.test.js`](../tests/auth/password-reset-session-invalidation.test.js) | `resetPassword` increments `sessionVersion` | User must re-login after reset (no auto JWT) | Yes — P1.7 |
-| Stale JWT rejection | same | `authenticate` rejects JWT when `sessionVersion` mismatch; clears cookies | Logout invalidation (logout does not bump version) | Yes — P1.4 |
-| Valid session acceptance | same | `authenticate` accepts matching `sessionVersion` | Bearer vs cookie transport in production | Yes — P1.4, P1.5 |
-
----
-
-## Vendor onboarding tests
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Rejected resubmit (draft) | [`tests/vendor/rejected-application-resubmit.test.js`](../tests/vendor/rejected-application-resubmit.test.js) | `saveDraft` on rejected → `draft`, not auto-`submitted` | Full rejected → revise → resubmit E2E | Yes — P2.1, P2.5 |
-| Explicit resubmit | same | `submitForReview` on rejected → `submitted` when paid | Payment gate (`402`) with live Stripe | Yes — P2.3–P2.5 |
-| Draft submit | same | `submitForReview` on draft → `submitted` | `validateStage1Payload` strictness (mostly disabled in code) | Yes — P2.5 |
-| Protected fields on draft | same | `saveDraft` strips badge/status/points from payload | All PUT paths without allowlist | Partial |
-| Verified vendor middleware | [`tests/vendor/require-verified-vendor.test.js`](../tests/vendor/require-verified-vendor.test.js) | 401/403 for missing user, wrong role, unverified OTP, blocked paths | Live vendor routes with real JWT | Yes — P2.1 |
-| Stage-1 verified gate | same | `requireStage1Verified` requires `onboarding.status === verified` | Business profile PUT against prod | Yes — after P3.4 |
-| Auth on vendor routes | same | Unauthenticated request blocked on onboarding route | All vendor route permutations | Yes — P2.1 |
-| Verification payment | — | *(no automated test)* | $24.99 PI create, webhook paid status | Yes — P2.2–P2.4 |
-| Submit without payment | — | *(no automated test)* | `402` when verification unpaid | Yes — P2.5 |
-
----
-
-## Admin review tests
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Pending queue filter | [`tests/admin/vendorOnboardVerifyStage1.pending-applications.test.js`](../tests/admin/vendorOnboardVerifyStage1.pending-applications.test.js) | `getPendingApplications` returns only `submitted` | Live admin UI, pagination | Yes — P3.1 |
-| Resubmitted in queue | same | Resubmitted apps appear when status returns to `submitted` | Email notifications on resubmit | Yes — P3.1 |
-| Excludes payment_pending | same | `payment_pending` apps excluded from queue | `draft`/`rejected`/`verified` exclusion | Yes — P3.1 |
-| Allowlist constant | same | `PENDING_REVIEW_STATUSES = ['submitted']` frozen | — | No |
-| Admin route guard | same | Pending route blocks non-admin via `isAdmin` | All admin routes (`/admin/*`) | Yes — P3.1–P3.5 |
-| Admin user DTO | [`tests/admin/admin-users-response.test.js`](../tests/admin/admin-users-response.test.js) | `toAdminUser` whitelist; `getAllUsers` maps through it | Live `GET /admin/users` against prod | Yes — P3.x |
-| isAdmin middleware | same | `isAdmin` blocks non-admin roles | Admin JWT from prod login | Yes — P3.1 |
-| verifyAndAllocatePoints | — | *(no automated test)* | Document checklist, points allocation | Yes — P3.3 |
-| finalizeVerification | — | *(no automated test)* | Approve/reject, badge, emails | Yes — P3.4 |
-| Business approve | — | *(no automated test)* | `POST /admin/api/business/approve/:id` | Yes — P3.5 |
-
----
-
-## Upload / MIME tests
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| MIME allowlist constants | [`tests/vendor/vendor-onboarding-upload-mime.test.js`](../tests/vendor/vendor-onboarding-upload-mime.test.js) | JPEG, PNG, WebP, PDF accepted; unsafe types rejected | S3 presigned URL actually works | Yes — P2.6 |
-| Upload handler MIME gate | same | `getStage1UploadUrl` returns 400 for unsafe MIME | File content validation (magic bytes) | Yes — P2.6 |
-| Upload auth | same | Upload route blocked without auth; blocks non-vendor | `requireVerifiedVendor` OTP gate live | Yes — P2.6 |
-| documentType allowlist | — | *(tested in controller, not every type)* | All 7 `documentType` values end-to-end | Yes — P2.6 |
-| S3 upload completion | — | *(no automated test)* | Client PUT to presigned URL succeeds | Yes — human; live CORS proof in [`S3_UPLOAD_CORS.md`](S3_UPLOAD_CORS.md) (**PASS** 2026-06-19) |
-
----
-
-## Stripe webhook tests
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Mount order | [`tests/stripe/stripe-webhook-routing-signature.test.js`](../tests/stripe/stripe-webhook-routing-signature.test.js) | All 5 webhook mounts before `express.json()` in `app.js` | EB/nginx body buffering | Yes — P4.1 (Dashboard delivery) |
-| Raw body middleware | same | `express.raw` on webhook POST paths | — | No (static analysis) |
-| Per-route secrets | same | Each handler uses correct `STRIPE_*_WEBHOOK_SECRET` | EB env values match Dashboard | Yes — P4.1 |
-| Missing signature | same | 400 when `stripe-signature` absent (incl. vendor in production) | All 5 routes via live curl | Yes — P4.5 |
-| Invalid / wrong secret | same | 400 on bad signature or mismatched secret | — | Yes — P4.5 (spot check) |
-| Raw body guard (order) | same | Canonical order webhook rejects parsed JSON body | Other routes raw-body edge cases | Partial |
-| Secret uniqueness | same | Five env secrets are distinct values in test fixture | Production secrets not reused | Yes — infra review |
-| Event handling logic | — | *(no automated test)* | Order paid, subscription active, vendor fee paid | Yes — P4.2–P4.4, P5.3 |
-| Signed Dashboard delivery | — | *(no automated test)* | Stripe → EB HTTP 200 end-to-end | Yes — P4.1 |
-
-See [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) for route ownership and curl smoke commands.
-
----
-
-## Stripe Connect checkout tests (#32)
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Missing Connect account | [`tests/stripe/order-initiate-connect.test.js`](../tests/stripe/order-initiate-connect.test.js) | 400 when `stripeConnectAccountId` absent; no PI create | Live Stripe account state on prod | Yes — P5.2 |
-| Incomplete Connect onboarding | same | 400 when `charges_enabled` false or transfers inactive | Dashboard onboarding UX | Yes — P5.1 |
-| Connect PI params | same | `transfer_data.destination`, `application_fee_amount`, metadata, idempotency key | Actual split payout on Stripe | Yes — P5.3 Dashboard |
-| Platform fee env | same | `PLATFORM_FEE_CENTS` maps to `application_fee_amount` | EB env value in prod | Yes — infra review |
-| Cent rounding | same | `Math.round(total * 100)` for PI amount | All tax/shipping edge cases | Partial |
-| Price / vendor guards | same | Price mismatch 400; single-vendor only | Live cart E2E | Yes — P5.2 |
-| Safe error responses | same | No `sk_`/`whsec_` in JSON; generic 500 on Stripe API errors | All error paths | Partial |
-| Order status webhook | [`tests/stripe/order-webhook-handlers.test.js`](../tests/stripe/order-webhook-handlers.test.js) | `payment_intent.succeeded` → paid/ordered; failed → cancelled | Signed Dashboard delivery | Yes — P4.4, P5.3 |
-| Post-payment webhook | same | Stores charge/transfer/fee IDs; duplicate succeed idempotent | Email dedup on retry | Yes — P5.3 |
-| Full checkout E2E | — | *(no automated test)* | Client Stripe.js confirm + live webhooks | Yes — P5.2–P5.5 (test mode) |
-
-See [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md).
-
----
-
-## Checkout approval + PaymentIntent safety tests (#42)
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Business approval gate | [`tests/stripe/order-initiate-connect.test.js`](../tests/stripe/order-initiate-connect.test.js) | Blocks unapproved/inactive/missing business; allows approved+active | Live MongoDB business states | Yes — Tier B |
-| Retrieve-intent safety | [`tests/stripe/checkout-approval-paymentintent-safety.test.js`](../tests/stripe/checkout-approval-paymentintent-safety.test.js) | Sanitized PI, ownership 403, safe Stripe error mapping | Live Stripe retrieve | Yes — Tier B |
-| Response helpers | [`tests/utils/checkout-paymentintent-response.test.js`](../tests/utils/checkout-paymentintent-response.test.js) | Guard + sanitizer unit contracts | HTTP integration | No |
-
----
-
-## Vendor listing / order / stock tests (#31)
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Product+variant tier quota | [`tests/vendor/listing-tier-limits.test.js`](../tests/vendor/listing-tier-limits.test.js) | Usage count + 403 quota messages | Live subscription plan on prod | Yes — create until limit |
-| Product ownership | [`tests/vendor/vendor-listing-ownership.test.js`](../tests/vendor/vendor-listing-ownership.test.js) | `updateProduct` 403 wrong owner, 404 deleted | Service/food update paths | Yes — P6 vendor dashboard |
-| Variant stock PATCH | [`tests/vendor/vendor-variant-stock.test.js`](../tests/vendor/vendor-variant-stock.test.js) | set/increment/decrement; negative + unknown op rejected | Order accept stock decrement | Yes — stock update on test variant |
-| Vendor order inbox | [`tests/vendor/vendor-orders.test.js`](../tests/vendor/vendor-orders.test.js) | `getVendorOrders` vendorId filter; accept 404/400 guards | Live paid order E2E | Yes — P5.5 |
-
-See [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md).
-
----
-
-## Business sync tests
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Create Business | [`tests/vendor/vendor-onboarding-business-sync.test.js`](../tests/vendor/vendor-onboarding-business-sync.test.js) | `syncBusinessFromOnboarding` creates `Business` when none exists | Requires active `Subscription` in prod | Yes — after P3.4 + subscription |
-| Update Business | same | Sync updates existing `Business` fields | PATCH profile path (no sync) | Yes — P2.1 + profile flow |
-| Sync failure propagation | same | `Business.save()` failure throws; `updateBusinessProfile` returns 500 | Swallowed sync on other code paths | Partial |
-| Profile PUT success path | same | `updateBusinessProfile` succeeds when sync succeeds | Live MongoDB validation errors | Yes — post-verify profile |
-| finalizeVerification → Business | — | *(no automated test)* | Admin approve does not call sync (by design) | Yes — P3.4 |
-
----
-
-## Vendor profile / field protection tests
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Protected field strip | [`tests/vendor/vendor-profile-field-allowlist.test.js`](../tests/vendor/vendor-profile-field-allowlist.test.js) | `stripProtectedVendorFields` removes payment/status/badge fields | Crafted PUT bypass in prod | Partial |
-| Profile allowlist | same | PUT/PATCH apply only `VENDOR_BUSINESS_PROFILE_ALLOWLIST` | Fields outside allowlist on draft save | Partial |
-| Media verified flag | same | Vendor cannot overwrite admin `verified` on media subdocs | Document array `verified` on minority docs | Partial |
-| User scoping | same | Profile updates query by `req.user._id` only | IDOR across users | Yes — security review |
-
----
-
-## Production smoke probes
-
-Manual checks run **after EB deploy** on `https://api.mosaicbizhub.com`. Full tier list: [production-smoke-checklist.md](production-smoke-checklist.md).
-
-| Area | Test File / Source | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Health | P0.1 | API reachable; JSON health response | Correct commit deployed | **Yes** — always |
-| EB boot logs | P0.2 | Mongo connected; no crash | Performance, memory leaks | **Yes** — infra owner |
-| Log hygiene | P0.3 | No OTP in logs after auth tests | All PII log scrubbing | **Yes** |
-| Auth full tier | P1.1–P1.8 | Register, OTP, login, OAuth, reset | Automated regression between releases | **Yes** |
-| Vendor tier | P2.1–P2.6 | Draft, pay, submit, upload URL | Admin approval path | **Yes** |
-| Admin tier | P3.1–P3.5 | Queue, verify, finalize, business approve | All admin CMS routes | **Yes** |
-| Stripe tier | P4.1–P4.5 | Dashboard deliveries; unsigned rejection | Every event type handler | **Yes** |
-| Orders tier | P5.1–P5.5 | Connect, initiate, pay, retrieve | Refunds, partial captures | **Yes** |
-| Public tier | P6.1–P6.5 | Search, listings, plans | Load/performance | **Yes** — launch scope |
-
-Record results in [production-proof-pack-template.md](production-proof-pack-template.md).
-
----
-
-## Manual QA still requiring human verification
-
-These launch-critical areas have **no** meaningful automated coverage. They require human execution each release (or per [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) scope).
-
-| Area | Why manual | Smoke IDs | Proof-pack field |
-| --- | --- | --- | --- |
-| **Deployed commit on EB** | Tests do not deploy or verify SHA | Runbook gate | EB deployed commit confirmed |
-| **Live Stripe payments** | No test hits Stripe API | P2.3, P4.2–P4.4, P5.3 | Stripe Dashboard screenshot (redacted) |
-| **Email delivery** | Mailer mocked in all tests | P1.1–P1.2, P2.3, P3.4 | Optional: inbox check note |
-| **S3 presigned upload** | AWS SDK mocked | P2.6 | Manual upload + URL in draft |
-| **Google OAuth E2E** | Redirect flow not automated | P1.8 | OAuth callback success note |
-| **Connect onboarding** | No Connect tests | P5.1 | Connect status in Dashboard |
-| **Subscription billing E2E** | Webhook logic mocked | P4.3 | Invoice payment delivery |
-| **Order checkout E2E** | Order controller not tested | P5.2–P5.5 | Test order `paymentStatus: paid` |
-| **Admin finalize + emails** | Yes (5 finalize tests) | P3.4 | Live approval/rejection email received |
-| **Frontend integration** | Backend tests only | Script + P6 | `verify-auth-check-smoke.js` page loads |
-| **Cross-domain cookies** | Cookie helper unit-tested only | P1.4 | Browser session on `mosaicbizhub.com` |
-| **Open P0 blockers** | Documented gaps, not tested | Launch review | [launch-readiness-report.md](launch-readiness-report.md) §9 |
-
-### Manual smoke script (not `npm test`)
-
-| Script | Command | What It Proves | What It Does Not Prove |
-| --- | --- | --- | --- |
-| Auth smoke | `node scripts/verify-auth-check-smoke.js` | Live `/auth/check` per role; unauth 401; optional frontend page HTTP status | Full register/login flow; does not replace P1 tier |
-
-Requires `.env`, MongoDB with seeded users per role, and running API (local or `API_BASE_URL`).
-
-### Production negative probes (safe, no secrets)
-
-Unsigned webhook POST → expect `400` on all five routes. Commands in [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md). Record in proof pack as P4.5 evidence.
-
----
-
-## Marketplace tests (issue #28)
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Public listing DTO | [`tests/marketplace/public-listing-dto.test.js`](../tests/marketplace/public-listing-dto.test.js) | Null-safe card/detail fields; legacy key preservation; price/image/vendor normalization | Live MongoDB list/detail responses | Yes — P6.1 featured-products |
-| Featured products wiring | [`tests/marketplace/featured-products-response.test.js`](../tests/marketplace/featured-products-response.test.js) | `getFeaturedProducts` maps through `toPublicListingCard`; preserves `{ products, pagination }` wrapper | Full featured feed against prod DB | Yes — deploy smoke `GET /api/featured-products` |
-
-**Contract doc:** [MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md](MVP_BACKEND_MARKETPLACE_DATA_CONTRACT.md)
-
----
-
-## Search/filter tests (issue #29)
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Public search filters | [`tests/marketplace/public-search-filters.test.js`](../tests/marketplace/public-search-filters.test.js) | Query parsing, tag/ZIP resolution, verified DTO fix, empty-result safety, unsupported geo echo, listingType scoping | Live MongoDB queries; radius search | Yes — P6.1–P6.2 after merge |
-| Shared filter module | same | `resolveBusinessIdsByTags`, `resolveBusinessIdsByZip`, intersection logic | VendorOnboarding + Business join against prod DB | Partial |
-
-**Readiness doc:** [MVP_BACKEND_SEARCH_FILTER_READINESS.md](MVP_BACKEND_SEARCH_FILTER_READINESS.md)
-
----
-
-## Email notification tests (issue #33)
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Submit email flags | [`tests/vendor/vendor-onboarding-submit-email.test.js`](../tests/vendor/vendor-onboarding-submit-email.test.js) | `emailSent`/`emailSkipped`, SMTP skip/failure, idempotent resubmit | Live SMTP delivery | Yes — Tier C |
-| Delivery helper | [`tests/utils/vendor-onboarding-email-delivery.test.js`](../tests/utils/vendor-onboarding-email-delivery.test.js) | Config gate, aggregation, message-only logging | Nodemailer transport | No |
-| Logging + review gap | [`tests/email/email-notification-safety.test.js`](../tests/email/email-notification-safety.test.js) | No review follow-up mailer; OTP not logged | Runtime log capture | No |
-| Order email safety | [`tests/stripe/order-email-safety.test.js`](../tests/stripe/order-email-safety.test.js) | Post-payment email call; webhook ack on mail failure | Live inbox | Yes — Tier B |
-
-**Readiness doc:** [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md)
-
----
-
-## Vendor onboarding email tests (issue #30)
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Submit validation | [`tests/vendor/vendor-onboarding-validation.test.js`](../tests/vendor/vendor-onboarding-validation.test.js) | MVP required fields at submit | Live MongoDB draft/submit | Yes — P2.5 after merge |
-| Finalize approve/reject | [`tests/admin/vendor-onboarding-finalize.test.js`](../tests/admin/vendor-onboarding-finalize.test.js) | Status transitions, email helper wiring, SMTP skip/failure | Live SMTP delivery | Yes — P3.4 after merge |
-
-**Readiness doc:** [MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md](MVP_BACKEND_VENDOR_ONBOARDING_EMAIL_FLOW.md)
-
----
-
-## Observability tests (issue #18)
-
-| Area | Test File | What It Proves | What It Does Not Prove | Manual Smoke Needed? |
-| --- | --- | --- | --- | --- |
-| Sentry env gating + scrub | [`tests/sentry/instrument.test.js`](../tests/sentry/instrument.test.js) | `isSentryEnabled` gates on DSN; sensitive keys redacted in scrub helper | Live Sentry dashboard delivery | Yes — after EB `SENTRY_DSN` set |
-
----
-
-## Launch-critical area → coverage map
-
-| Launch-critical area | Automated | Manual smoke | Gap / honest limit |
-| --- | --- | --- | --- |
-| Auth DTO / session shape | Yes (12 tests) | P1.x | No live login E2E |
-| Password reset security | Yes (7 tests) | P1.7 | No SMTP proof |
-| Vendor status machine | Yes (resubmit + middleware) | P2.x | Payment/webhook E2E manual |
-| Admin pending queue | Yes (5 tests) | P3.1 | Finalize live SMTP manual |
-| Admin finalize approve/reject | Yes (5 tests) | P3.4 | Live email delivery |
-| Field protection | Yes (6 tests) | Partial | Theoretical PUT bypass untested live |
-| Upload MIME | Yes (5 tests) | P2.6 | No real S3 |
-| Webhook wiring | Yes (9 tests) | P4.x | Event DB side-effects manual |
-| Business sync | Yes (5 tests) | Post-verify | Subscription dependency manual |
-| Marketplace card/detail DTO | Yes (20 tests) | P6.x | Live browse/detail E2E manual |
-| Public search/filter helpers | Yes (15 tests) | P6.1–P6.2 | No live ZIP/tag prod smoke |
-| Subscriptions (API) | **No** | P4.3 | Billing E2E manual |
-| CI/CD regression | **No** | `npm test` local pre-merge | No GitHub Actions |
-
----
-
-## How to run
-
-```bash
-# All automated tests (173)
-npm test
-
-# Manual auth smoke (live API + DB)
-node scripts/verify-auth-check-smoke.js
-
-# Production health (post-deploy)
-# See production-smoke-checklist.md Tier 0
-```
-
----
-
-## Proof-pack evidence mapping
-
-| Evidence type | Source | Automated equivalent |
+| Command | Scope | Source |
 | --- | --- | --- |
-| `npm test` 173/173 pass | Pre-merge local/CI | Yes — full suite (see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for prod vs branch) |
-| Auth smoke script output | `scripts/verify-auth-check-smoke.js` | Partial — live auth/check only |
-| Smoke matrix P0–P6 | [production-smoke-checklist.md](production-smoke-checklist.md) | No — human execution |
-| Webhook unsigned 400 | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) curl | Partial — 9 tests cover handler logic |
-| Stripe Dashboard deliveries | Manual | No |
-| EB commit SHA | Deployment owner | No |
+| `npm test` | Non-integration unit and module tests under `tests/`, excluding `tests/integration/` | `scripts/run-unit-tests.js` |
+| `npm run test:contract` | Launch route/static contract checks | `tests/launch/backend-launch-contract.test.js` |
+| `npm run test:integration` | Isolated Express/Mongo integration suite with `mongodb-memory-server` and provider stubs | `scripts/run-integration-tests.js`, `tests/integration/**` |
+| `npm run smoke:backend` | Live or local HTTP smoke wrapper | `scripts/run-smoke-backend.js`, `scripts/smoke-backend.ps1`, `scripts/smoke-backend.sh` |
 
-**Do not overclaim:** Passing `npm test` proves code-level contracts and wiring with mocks. It does **not** prove production deploy health, live payments, or launch readiness. See [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) for Deploy Go vs launch sign-off.
+CI (`.github/workflows/ci.yml`) runs install, `npm test`, `npm run test:contract`, and `npm run test:integration` on PRs/pushes to `staging` and `main`. Production deploy (`.github/workflows/deploy-eb-production.yml`) runs `npm test` before packaging and then performs post-deploy health, auth, readiness, CORS, and featured-products probes.
 
 ---
 
-## Test file index
+## Automated Coverage By Area
 
-| File | Tests | Domain |
-| --- | ---: | --- |
-| `tests/auth/auth-check-payload.test.js` | 3 | Auth DTO, JWT `sub` |
-| `tests/auth/google-oauth-security.test.js` | 2 | OAuth cookie + rate limits |
-| `tests/auth/password-reset-abuse-protection.test.js` | 4 | Reset abuse + rate limits |
-| `tests/auth/password-reset-session-invalidation.test.js` | 3 | Session invalidation |
-| `tests/admin/admin-users-response.test.js` | 3 | Admin user DTO + guard |
-| `tests/admin/vendorOnboardVerifyStage1.pending-applications.test.js` | 5 | Admin pending queue |
-| `tests/admin/vendor-onboarding-finalize.test.js` | 5 | Finalize approve/reject + email graceful failure |
-| `tests/vendor/rejected-application-resubmit.test.js` | 5 | Resubmit state machine |
-| `tests/vendor/vendor-onboarding-validation.test.js` | 10 | Submit-time validation |
-| `tests/vendor/require-verified-vendor.test.js` | 6 | Vendor middleware |
-| `tests/vendor/vendor-onboarding-upload-mime.test.js` | 5 | Upload MIME + auth |
-| `tests/vendor/vendor-onboarding-business-sync.test.js` | 5 | Business sync |
-| `tests/vendor/vendor-profile-field-allowlist.test.js` | 6 | Field allowlists |
-| `tests/vendor/listing-tier-limits.test.js` | 5 | Product+variant tier quota util |
-| `tests/vendor/vendor-listing-ownership.test.js` | 2 | Product update ownership |
-| `tests/vendor/vendor-variant-stock.test.js` | 5 | Variant stock PATCH |
-| `tests/vendor/vendor-orders.test.js` | 4 | Vendor order filter + accept guards |
-| `tests/vendor/vendor-onboarding-submit-email.test.js` | 4 | Submit email flags + graceful failure |
-| `tests/utils/vendor-onboarding-email-delivery.test.js` | 6 | Onboarding email delivery helper |
-| `tests/email/email-notification-safety.test.js` | 4 | Logging safety + review gap audit |
-| `tests/stripe/order-email-safety.test.js` | 3 | Post-payment email safe failure |
-| `tests/stripe/stripe-webhook-routing-signature.test.js` | 9 | Webhook routing + signatures |
-| `tests/stripe/order-initiate-connect.test.js` | 15 | Connect checkout guards + approval gate |
-| `tests/stripe/checkout-approval-paymentintent-safety.test.js` | 4 | Sanitized retrieve-intent + canonical route |
-| `tests/utils/checkout-paymentintent-response.test.js` | 4 | Checkout guard + PI sanitizer units |
-| `tests/stripe/order-webhook-handlers.test.js` | 5 | Order payment webhook handlers |
-| `tests/marketplace/public-listing-dto.test.js` | 18 | Marketplace DTO normalization |
-| `tests/marketplace/featured-products-response.test.js` | 2 | Featured products wiring |
-| `tests/marketplace/public-search-filters.test.js` | 15 | Search/filter helpers + handler |
-| **Total** | **173** | |
+| Area | Primary tests | Proves | Does not prove |
+| --- | --- | --- | --- |
+| Auth/session | `tests/auth/**`, `tests/integration/auth.integration.test.js`, `tests/integration/roles.integration.test.js` | Safe auth DTOs, JWT/sessionVersion behavior, password reset safeguards, Google OAuth guardrails, role checks in isolated integration | Live email delivery, live OAuth redirect, production cookie/CORS behavior |
+| Admin | `tests/admin/**`, `tests/integration/vendor-onboarding.integration.test.js` | Admin user DTOs, admin guards, pending applications, finalize behavior, audit trail pieces | Full production admin dashboard UX or live email delivery |
+| Vendor onboarding | `tests/vendor/**`, `tests/integration/vendor-onboarding.integration.test.js` | Vendor state transitions, protected field allowlists, upload MIME checks, business sync, listing limits | Live S3 presigned upload, live Stripe verification payment |
+| Marketplace/search | `tests/marketplace/**`, `tests/integration/marketplace.integration.test.js` | Public listing DTOs, featured products, ranking/search filters, business eligibility | Production data quality, search performance under load |
+| Orders/commerce | `tests/orders/**`, `tests/integration/commerce.integration.test.js`, `tests/integration/connect.integration.test.js` | Customer/vendor order safety, invoice auth, Connect URL helpers, checkout guard behavior | Full live Stripe payment and payout reconciliation |
+| Stripe/webhooks | `tests/stripe/**` | Raw-body mount order, signature handling, webhook logic, Checkout/Connect guardrails, safe PaymentIntent response shaping | Stripe Dashboard delivery, EB/proxy body behavior, real money movement |
+| Email/logging | `tests/email/**`, `tests/utils/vendor-onboarding-email-delivery.test.js` | Mail helper behavior, safe failure, logging hygiene | Inbox receipt or SMTP provider health |
+| Sentry/release identity | `tests/sentry/**`, `tests/release/**`, `tests/health/**` | Env gating, release identity payloads, health/readiness contracts | Live Sentry issue creation unless the Sentry debug route/manual capture is run in an approved environment |
+| Security/payload safety | `tests/security/**`, route guard tests across admin/vendor/stripe | Sanitizer expectations, authorization failures, negative route contracts | Full penetration testing |
+
+---
+
+## Manual Smoke Still Required
+
+Automated tests do not replace production smoke. Run smoke after deploys that touch auth, payments, uploads, CORS, release identity, or public marketplace routes.
+
+| Smoke area | Why manual |
+| --- | --- |
+| Production deploy identity | Confirms EB is serving the intended commit/version |
+| Live Stripe payments and webhooks | Requires Stripe Dashboard/test-mode events against the deployed API; use [qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md](qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md) for unsigned rejection proof and valid-delivery evidence |
+| Email delivery | Mailers are mocked/stubbed in tests |
+| S3 uploads | AWS SDK and presigned upload flows need live credentials/CORS |
+| Google OAuth browser flow | Redirect/cookie behavior depends on provider config and production domains |
+| Cross-domain cookies and CORS | Browser behavior depends on deployed frontend/API origins |
+| Admin/vendor production data flows | Tests use mocks or isolated MongoDB fixtures |
+
+Record results in [production-proof-pack-template.md](production-proof-pack-template.md) or the active release proof pack. Use [production-smoke-checklist.md](production-smoke-checklist.md) for the P0-P6 sequence.
+
+---
+
+## Evidence Rules
+
+1. Treat current command output, CI logs, and dated proof packs as evidence.
+2. Do not copy an old pass count into living docs; paste it into the PR or proof pack for that run.
+3. Passing `npm test` proves mocked/unit/module behavior, not production deploy health.
+4. Passing CI proves the branch validation workflow, not EB runtime behavior.
+5. Passing post-deploy probes proves only the probed endpoints; still run tiered smoke for launch-critical flows.
+
+---
+
+## Related Docs
+
+- [README.md](README.md)
+- [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md)
+- [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md)
+- [production-smoke-checklist.md](production-smoke-checklist.md)
+- [production-proof-pack-template.md](production-proof-pack-template.md)
+- [qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md](qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md)
+- [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md)
+- [backend/BACKEND_INTEGRATION_TEST_RUNBOOK.md](backend/BACKEND_INTEGRATION_TEST_RUNBOOK.md)

@@ -33,7 +33,7 @@ Node.js/Express backend for Mosaic Biz Hub. This service exposes marketplace, on
 The application follows a conventional Express layered structure:
 
 1. `index.js` loads environment variables, connects to MongoDB, and starts the server.
-2. `app.js` configures transport middleware (CORS, cookies, JSON parsing). `express-mongo-sanitize` and `xss-clean` are imported but not currently mounted — see [launch-readiness-report.md](docs/launch-readiness-report.md) §8.
+2. `app.js` configures transport middleware (CORS, cookies, raw Stripe webhook mounts, JSON parsing, payload sanitizers, and route registration). Keep Stripe raw-body routes before `express.json()` and sanitizers after JSON parsing.
 3. Route modules in `routes/` map URL namespaces to controller functions.
 4. Controllers orchestrate validation, Stripe/AWS/mail integrations, and persistence through Mongoose models.
 5. Models in `models/` define the MongoDB document structure for users, businesses, orders, subscriptions, onboarding, and related entities.
@@ -83,7 +83,7 @@ npm run dev
 | `npm install` | Install project dependencies |
 | `npm run dev` | Start the API with `nodemon` |
 | `npm start` | Start the API with `node index.js` |
-| `npm test` | Run automated tests (`node --test tests/**/*.test.js`) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) for coverage and [docs/MVP_BACKEND_PROGRAM_STATUS.md](docs/MVP_BACKEND_PROGRAM_STATUS.md) for release posture |
+| `npm test` | Run the non-integration unit suite through `scripts/run-unit-tests.js`; see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) for contract/integration/smoke coverage and [docs/MVP_BACKEND_PROGRAM_STATUS.md](docs/MVP_BACKEND_PROGRAM_STATUS.md) for release posture |
 | `./scripts/smoke-backend.ps1` | Post-deploy smoke (PowerShell) — public P0/P1 checks; optional auth with `SMOKE_TEST_*` env vars |
 | `./scripts/smoke-backend.sh` | Same smoke helper for bash/Linux/macOS |
 | `npm run smoke:backend` | Cross-platform wrapper (runs `.ps1` on Windows, `.sh` elsewhere) |
@@ -228,7 +228,7 @@ See [docs/security-remediation-notes.md](docs/security-remediation-notes.md) for
 - The root health-style route is `GET /` and returns a simple JSON message.
 - The codebase uses a flat JavaScript Express structure, not TypeScript and not a formal service container.
 - Create a `.env` file in the project root (the app loads `.env` only — not `.env.local`).
-- `npm test` runs 57 mocked unit/integration-style tests locally; passing does **not** replace post-deploy smoke on [production-smoke-checklist.md](docs/production-smoke-checklist.md).
+- `npm test` runs the local non-integration test suite. Exact counts change as coverage grows; record counts in release evidence instead of hard-coding them here. Passing tests do **not** replace post-deploy smoke on [production-smoke-checklist.md](docs/production-smoke-checklist.md).
 
 ## Key route groups
 

@@ -84,6 +84,10 @@ exports.getStatus = async (req, res) => {
     const business = await Business.findById(businessId);
     if (!business) return res.status(404).json({ success: false, message: 'Business not found' });
 
+    if (business.owner.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Not allowed' });
+    }
+
     if (!business.stripeConnectAccountId) {
       return res.status(200).json({
         success: true,

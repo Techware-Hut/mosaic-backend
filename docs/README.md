@@ -16,12 +16,10 @@ Repository root: [README.md](../README.md). Deployment entry point: [../DEPLOYME
 | Production API | `https://api.mosaicbizhub.com` |
 | Production branch | `main` |
 | Integration branch | `staging` |
-| Latest production promotion | PR #150, merged 2026-06-28 |
-| Production deployed SHA | `7c2b10d` |
-| EB deployment version | `mosaic-7c2b10dca32c746311ee79e9179c312b1c3743b9` |
 | Canonical frontend | `https://mosaicbizhub.com` |
 | Current mode | Vendor soft launch and product build phase |
 | Payments | Stripe test-mode flows are allowed for controlled QA; do not present as unrestricted live commerce |
+| Release evidence | Exact deployed SHA, EB version, and latest promotion live in [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) and dated proof packs |
 | Main status hub | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) |
 
 ---
@@ -59,6 +57,7 @@ Repository root: [README.md](../README.md). Deployment entry point: [../DEPLOYME
 | [MARKETPLACE_VENDOR_ELIGIBILITY.md](MARKETPLACE_VENDOR_ELIGIBILITY.md) | Vendor visibility and checkout eligibility |
 | [MARKETPLACE_VISIBILITY_MATRIX.md](MARKETPLACE_VISIBILITY_MATRIX.md) | Public/admin/vendor visibility rules |
 | [VENDOR_LIFECYCLE.md](VENDOR_LIFECYCLE.md) | Vendor onboarding and approval states |
+| [LIFECYCLE_STATE_AND_LEGACY_ROUTE_POLICY.md](LIFECYCLE_STATE_AND_LEGACY_ROUTE_POLICY.md) | Backend lifecycle states and intentional legacy/duplicate route policy |
 
 ### Architecture, API, And Contracts
 
@@ -84,6 +83,7 @@ Repository root: [README.md](../README.md). Deployment entry point: [../DEPLOYME
 | [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) | Release-owner runbook |
 | [TEST_MATRIX.md](TEST_MATRIX.md) | Automated tests mapped to manual smoke |
 | [SMOKE_TEST_TOKENS.md](SMOKE_TEST_TOKENS.md) | How token-protected smoke tiers work |
+| [qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md](qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md) | Controlled Stripe webhook runtime smoke, redacted evidence validation, and valid delivery proof |
 | [qa/FRESH_ACCOUNT_E2E_PLAN.md](qa/FRESH_ACCOUNT_E2E_PLAN.md) | Fresh account production QA plan |
 | [qa/REGRESSION_CLAIM_LEDGER.md](qa/REGRESSION_CLAIM_LEDGER.md) | Runtime claims and gaps ledger |
 | [release/WORK_ORDER_2026_06_26_MOSAIC_LAUNCH_HARDENING.md](release/WORK_ORDER_2026_06_26_MOSAIC_LAUNCH_HARDENING.md) | June 26 work order evidence |

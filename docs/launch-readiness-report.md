@@ -5,7 +5,9 @@
 - Backend: `mosaic-backend` (DeveloperTWH/backend)
 - Frontend: `mosaic-biz-frontend` (DeveloperTWH/mosaic-biz-frontend)
 
-**Production context:** API live at `https://api.mosaicbizhub.com`; EB hostname `mosaic-backend.us-east-1.elasticbeanstalk.com`; no hosted staging environment; no CI workflows in either repo.
+> **Historical snapshot:** This report captures the repo state on 2026-06-07. Do not use it as current truth for CI, deploy workflow, sanitizer wiring, Sentry, or test counts. Current truth lives in [README.md](../README.md), [docs/README.md](README.md), [TEST_MATRIX.md](TEST_MATRIX.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [BACKEND_ARCHITECTURE_MAP.md](BACKEND_ARCHITECTURE_MAP.md).
+
+**Production context at audit time:** API live at `https://api.mosaicbizhub.com`; EB hostname `mosaic-backend.us-east-1.elasticbeanstalk.com`; hosted staging and CI workflows were absent in the audit snapshot.
 
 **Related operational docs:**
 - [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) — current MVP sprint state (supersedes this report for live deploy/issue status)
@@ -132,7 +134,7 @@ See [production-env-checklist.md](production-env-checklist.md) for production EB
 
 | Repo | `npm test` | `npm run build` | `npm run lint` | CI |
 |------|------------|-----------------|----------------|-----|
-| **Backend** | **57 tests** via Node built-in runner (`node --test tests/**/*.test.js`); mock-based | N/A | Not defined | None |
+| **Backend** | **57-test audit snapshot** via Node built-in runner (`node --test tests/**/*.test.js`); mock-based | N/A | Not defined | None |
 | **Frontend** | Not defined | Defined | Defined | None |
 
 **Verdict:** Backend has local automated tests (see [TEST_MATRIX.md](TEST_MATRIX.md)) but **no CI pipeline** and no lint gate; tests do not exercise live MongoDB, Stripe, or AWS.
@@ -156,7 +158,7 @@ See [production-env-checklist.md](production-env-checklist.md) for production EB
 
 ### P0 launch blockers
 
-1. No CI pipeline (local `npm test` exists — 57 mocked tests — but not gated in GitHub Actions)
+1. CI pipeline absent in the audit snapshot (local `npm test` existed; see current [TEST_MATRIX.md](TEST_MATRIX.md) for today's commands and coverage)
 2. Security middleware not wired (`mongoSanitize` / `xss-clean`)
 3. Unauthenticated payment/order attack surface
 4. Order emails before payment

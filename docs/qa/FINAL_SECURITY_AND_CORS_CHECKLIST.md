@@ -13,7 +13,7 @@ This checklist records source/test verification for final-domain backend safety.
 | --- | --- | --- |
 | Apex frontend is canonical | `utils/frontendUrl.js` defaults to `https://mosaicbizhub.com` | Confirmed |
 | API remains API host | Mission target is `https://api.mosaicbizhub.com`; `utils/frontendUrl.js` disallows API host as frontend origin | Confirmed |
-| Transition app origin remains allowed | `APPROVED_FRONTEND_ORIGINS` includes `https://app.mosaicbizhub.com` | Confirmed |
+| Transition app redirects require explicit rollback | `utils/frontendUrl.js` rejects `https://app.mosaicbizhub.com` by default and allows it only when `ALLOW_LEGACY_FRONTEND_ORIGIN=true` or `1` | Confirmed |
 | Transition Vercel origin remains allowed | `APPROVED_FRONTEND_ORIGINS` and CORS defaults include `https://mosaic-biz-frontend-launch.vercel.app` | Confirmed |
 | `www.mosaicbizhub.com` not accepted as app origin | `DISALLOWED_FRONTEND_ORIGINS` includes `https://www.mosaicbizhub.com` | Confirmed |
 | Arbitrary redirect hosts rejected | `sanitizeFrontendRedirectUrl` falls back to approved base URL | Confirmed by URL tests |
@@ -46,7 +46,7 @@ This checklist records source/test verification for final-domain backend safety.
 | OAuth callback state redirect sanitization | Google OAuth tests reject tampered hostile state redirect origins | Confirmed |
 | Stripe Connect return URL sanitization | Connect URL tests sanitize unsafe full URL overrides back to approved frontend host | Confirmed |
 | Email links use approved frontend URL helpers | Email/logo helpers call `buildFrontendUrl`/`getFrontendLogoUrl` | Confirmed by source review |
-| Transition-origin handling | `normalizeFrontendUrl` preserves approved transition origins while replacing unapproved origins | Confirmed by URL tests |
+| Transition-origin handling | `normalizeFrontendUrl` replaces legacy app redirects with apex by default and preserves them only during explicit rollback | Confirmed by URL tests |
 
 ## Stripe Webhooks
 
@@ -75,6 +75,7 @@ Relevant names observed in `.env.example` and source/test coverage:
 - `API_BASE_URL`
 - `APP_NAME`
 - `APP_URL`
+- `ALLOW_LEGACY_FRONTEND_ORIGIN`
 - `AWS_ACCESS_KEY_ID`
 - `AWS_REGION`
 - `AWS_S3_BUCKET`

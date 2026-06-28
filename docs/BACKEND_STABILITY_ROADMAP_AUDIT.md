@@ -7,6 +7,8 @@
 
 This document synthesizes the MVP doc set, open GitHub issues, and a targeted code scan. For live sprint state, see [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md).
 
+> **Historical audit:** Counts and deployment/Sentry status below reflect the June 18 scan. Use [TEST_MATRIX.md](TEST_MATRIX.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) for current truth.
+
 ---
 
 ## What exists
@@ -21,9 +23,9 @@ This document synthesizes the MVP doc set, open GitHub issues, and a targeted co
 | Vendor self-service APIs | Merged (#31) | [MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md](MVP_BACKEND_VENDOR_SELF_SERVICE_APIS.md) |
 | Stripe Connect runtime | Merged (#32, #42) | [MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md](MVP_BACKEND_STRIPE_CONNECT_RUNTIME_VERIFICATION.md) |
 | Email notification audit | Merged (#33) | [MVP_BACKEND_EMAIL_NOTIFICATIONS.md](MVP_BACKEND_EMAIL_NOTIFICATIONS.md) |
-| Automated tests | 173 tests (`npm test`) | [TEST_MATRIX.md](TEST_MATRIX.md) |
+| Automated tests | Historical 173-test snapshot (`npm test`) | [TEST_MATRIX.md](TEST_MATRIX.md) |
 | Agent guardrails | Documented | [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md), [LLM_CONTEXT.md](LLM_CONTEXT.md) |
-| Sentry SDK | On `main`, not prod-verified | [instrument.js](../instrument.js), issue #18 |
+| Sentry SDK | Historical June 18 status; now verify via current architecture/status docs | [instrument.js](../instrument.js), [ARCHITECTURE.md](ARCHITECTURE.md) |
 
 ---
 

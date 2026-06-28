@@ -38,7 +38,7 @@ For **each** row above:
 5. After creating the endpoint, reveal **Signing secret** (`whsec_...`).
 6. Set the corresponding env var in AWS EB (see [production-env-checklist.md](production-env-checklist.md)).
 7. Redeploy/restart EB so the new secret is loaded.
-8. Use **Send test webhook** in Dashboard; confirm HTTP 200 and no signature errors in EB logs.
+8. Use **Send test webhook** in Dashboard; confirm HTTP 200 and no signature errors in EB logs. Use [qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md](qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md) for the current redacted runtime proof format.
 
 ---
 
@@ -75,3 +75,4 @@ Local `.env` must be named **`.env`** (not `.env.local`) — see [SETUP.md](../S
 - [ ] Test order payment updates order `paymentStatus` via route #1
 
 Record results in [production-proof-pack-template.md](production-proof-pack-template.md).
+For current launch QA, also attach the redacted status-only output described in [qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md](qa/PRODUCTION_STRIPE_WEBHOOK_RUNTIME_SMOKE_RUNBOOK_2026_06_28.md).
