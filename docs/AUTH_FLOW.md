@@ -12,7 +12,7 @@ Implementation reference for Mosaic Biz Hub backend auth. Documents **actual cod
 | Controllers | [`controllers/userController.js`](../controllers/userController.js), [`controllers/authController.js`](../controllers/authController.js) |
 | Middleware | [`middlewares/authenticate.js`](../middlewares/authenticate.js), role gates in [`middlewares/`](../middlewares/) |
 | Model | [`models/User.js`](../models/User.js) |
-| Helpers | [`utils/cookieHelper.js`](../utils/cookieHelper.js), [`utils/toPublicAuthUser.js`](../utils/toPublicAuthUser.js) |
+| Helpers | [`utils/cookieHelper.js`](../utils/cookieHelper.js), [`utils/toPublicAuthUser.js`](../utils/toPublicAuthUser.js), [`utils/authEmailDelivery.js`](../utils/authEmailDelivery.js), [`utils/mailer.js`](../utils/mailer.js) |
 | Tests | [`tests/auth/`](../tests/auth/) |
 
 ---
@@ -48,7 +48,7 @@ Auth is **stateless JWT** with optional **HTTP-only cookies**. There is no serve
 7. `sendOtpEmail(email, otp)` — OTP delivered by **email** (Nodemailer + Gmail SMTP).
 8. On successful send: `otpPending` cookie set (10 min, via `getCookieOptions`).
 9. Returns **201** with message *"OTP sent to email"* — no JWT until OTP verified.
-10. On SMTP failure after user save: **502** `{ success: false, code: 'OTP_DELIVERY_FAILED', message: '...' }` — account preserved; no `otpPending` cookie; user may call `POST /api/users/resend-otp` after mail recovery.
+10. On SMTP failure after user save: **502** `{ success: false, code: 'OTP_DELIVERY_FAILED', message: '...', otpPending: true, accountCreated: true, user: { email, role } }` — account preserved; `otpPending` cookie set; user may call `POST /api/users/resend-otp` after mail recovery.
 
 ### Diagram
 
@@ -107,14 +107,14 @@ OTP is used for **email verification after registration** and for **re-verificat
 - Rejects if user not found, deleted, blocked, or already verified.
 - Generates new OTP, updates hash/expiry, emails OTP.
 - On successful send: sets `otpPending` cookie, returns **200**.
-- On SMTP failure after OTP saved: **502** `{ success: false, code: 'OTP_DELIVERY_FAILED' }` — no `otpPending` cookie; OTP hash remains in DB for verify/resend after recovery.
+- On SMTP failure after OTP saved: **502** `{ success: false, code: 'OTP_DELIVERY_FAILED', otpPending: true, user: { email, role } }` — OTP hash remains in DB for verify/resend after recovery.
 
 ### Login-triggered OTP
 
 If `loginUser` finds valid credentials but `!user.isOtpVerified`, it generates a **new** OTP, saves hash/expiry, then emails OTP.
 
 - On successful send: sets `otpPending`, returns **403** with `otpPending: true` (no JWT).
-- On SMTP failure: **502** `{ success: false, code: 'OTP_DELIVERY_FAILED' }` — no session, no `otpPending` cookie; account preserved for resend.
+- On SMTP failure: **502** `{ success: false, code: 'OTP_DELIVERY_FAILED', otpPending: true, user: { email, role } }` — no session; account preserved for resend.
 
 ---
 

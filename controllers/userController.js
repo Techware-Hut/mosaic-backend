@@ -85,12 +85,34 @@ const OTP_DELIVERY_FAILED_MESSAGES = {
         'Your account still needs verification, but we could not send the verification email. Please try again later.',
 };
 
-function respondOtpDeliveryFailed(res, context) {
-    return res.status(502).json({
+function respondOtpDeliveryFailed(res, context, { user } = {}) {
+    const body = {
         success: false,
         code: 'OTP_DELIVERY_FAILED',
         message: OTP_DELIVERY_FAILED_MESSAGES[context],
-    });
+        otpPending: true,
+    };
+
+    if (user) {
+        body.user = {
+            email: user.email,
+            role: user.role,
+        };
+    }
+
+    if (context === 'register') {
+        body.accountCreated = true;
+        res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
+    }
+
+    return res.status(502).json(body);
+}
+
+function logOtpDeliveryFailure(context, emailError) {
+    const reason = emailError && emailError.message
+        ? String(emailError.message)
+        : 'Unknown email error';
+    console.error(`Auth OTP email delivery failed (${context}):`, reason);
 }
 
 exports.registerUser = async (req, res) => {
@@ -130,10 +152,12 @@ exports.registerUser = async (req, res) => {
         await newUser.save();
 
         try {
-            await sendOtpEmail(email, otp);
+            await sendOtpEmail(email, otp, 'register');
         } catch (emailError) {
-            console.error('Failed to send OTP email:', emailError);
-            return respondOtpDeliveryFailed(res, 'register');
+            logOtpDeliveryFailure('register', emailError);
+            return respondOtpDeliveryFailed(res, 'register', {
+                user: { email, role: safeRole },
+            });
         }
 
         res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
@@ -243,10 +267,10 @@ exports.resendOtp = async (req, res) => {
         await user.save();
 
         try {
-            await sendOtpEmail(user.email, otp);
+            await sendOtpEmail(user.email, otp, 'resend');
         } catch (emailError) {
-            console.error('Failed to send OTP email:', emailError);
-            return respondOtpDeliveryFailed(res, 'resend');
+            logOtpDeliveryFailure('resend', emailError);
+            return respondOtpDeliveryFailed(res, 'resend', { user });
         }
 
         res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
@@ -408,10 +432,10 @@ exports.loginUser = async (req, res) => {
             await user.save();
 
             try {
-                await sendOtpEmail(user.email, otp);
+                await sendOtpEmail(user.email, otp, 'unverifiedLogin');
             } catch (emailError) {
-                console.error('Failed to send OTP email:', emailError);
-                return respondOtpDeliveryFailed(res, 'unverifiedLogin');
+                logOtpDeliveryFailure('unverifiedLogin', emailError);
+                return respondOtpDeliveryFailed(res, 'unverifiedLogin', { user });
             }
 
             res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
