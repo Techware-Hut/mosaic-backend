@@ -155,6 +155,8 @@ test('registerUser returns OTP_DELIVERY_FAILED when sendOtpEmail throws', async 
   }
   SavingMockUser.findOne = async () => null;
 
+  const vendorBody = { ...registerBody, role: 'business_owner' };
+
   const userController = withMocks(userControllerPath, {
     ...buildControllerMocks({
       mailer: {
@@ -167,13 +169,17 @@ test('registerUser returns OTP_DELIVERY_FAILED when sendOtpEmail throws', async 
   });
 
   const res = createResponse();
-  await userController.registerUser({ body: registerBody }, res);
+  await userController.registerUser({ body: vendorBody }, res);
 
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.success, false);
   assert.equal(res.body.code, 'OTP_DELIVERY_FAILED');
   assert.match(res.body.message, /account was created/i);
-  assert.equal(res.cookies.otpPending, undefined);
+  assert.equal(res.body.otpPending, true);
+  assert.equal(res.body.accountCreated, true);
+  assert.equal(res.body.user.email, vendorBody.email);
+  assert.equal(res.body.user.role, 'business_owner');
+  assert.equal(res.cookies.otpPending, 'true');
   assert.ok(savedUser && savedUser.saveCalled, 'unverified account should be preserved');
   assertNoOtpInBody(res.body);
 });
@@ -202,6 +208,9 @@ test('resendOtp returns OTP_DELIVERY_FAILED when sendOtpEmail throws', async () 
   assert.equal(res.body.success, false);
   assert.equal(res.body.code, 'OTP_DELIVERY_FAILED');
   assert.match(res.body.message, /try again later/i);
+  assert.equal(res.body.otpPending, true);
+  assert.equal(res.body.user.email, unverifiedUser.email);
+  assert.equal(res.body.user.role, unverifiedUser.role);
   assert.equal(res.cookies.otpPending, undefined);
   assertNoOtpInBody(res.body);
 });
@@ -259,6 +268,9 @@ test('loginUser returns OTP_DELIVERY_FAILED for unverified user when sendOtpEmai
     res.body.message,
     'Your account still needs verification, but we could not send the verification email. Please try again later.'
   );
+  assert.equal(res.body.otpPending, true);
+  assert.equal(res.body.user.email, unverifiedUser.email);
+  assert.equal(res.body.user.role, unverifiedUser.role);
   assert.equal(res.cookies.otpPending, undefined);
   assert.equal(res.authCookies, null);
   assert.equal(getSetAuthCookiesCalled(), false);

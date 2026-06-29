@@ -14,6 +14,7 @@ const {
   registerUser,
   verifyRegistrationOtp,
 } = require('./helpers/factories');
+const { setOtpEmailFailCount } = require('./helpers/providerStubs');
 const User = require('../../models/User');
 
 test.before(async () => {
@@ -128,4 +129,61 @@ test('register sets otpPending cookie', async () => {
   const cookies = parseCookies(res.headers['set-cookie']);
   assert.equal(cookies.otpPending, 'true');
   assert.ok(email);
+});
+
+test('business_owner register OTP delivery failure → resend → verify → login → auth/check', async () => {
+  setOtpEmailFailCount(1);
+
+  const agent = createAgent(getApp());
+  const password = 'Secret123!';
+  const email = `business_owner-${Date.now()}-${Math.random().toString(16).slice(2)}@example.test`;
+  const mobile = `+1415555${String(Date.now()).slice(-4)}`;
+
+  const registerRes = await agent.post('/api/users/register').send({
+    name: 'business_owner Integration',
+    email,
+    password,
+    mobile,
+    role: 'business_owner',
+  });
+
+  assert.equal(registerRes.status, 502);
+  assert.equal(registerRes.body.code, 'OTP_DELIVERY_FAILED');
+  assert.equal(registerRes.body.accountCreated, true);
+  assert.equal(registerRes.body.otpPending, true);
+  assert.equal(registerRes.body.user.role, 'business_owner');
+  assert.equal(registerRes.body.user.email, email);
+
+  const cookies = parseCookies(registerRes.headers['set-cookie']);
+  assert.equal(cookies.otpPending, 'true');
+
+  const resendRes = await agent.post('/api/users/resend-otp').send({ email });
+  assert.equal(resendRes.status, 200);
+  assert.equal(resendRes.body.success, true);
+
+  const verifyRes = await verifyRegistrationOtp(agent, email);
+  assert.equal(verifyRes.status, 200);
+  assert.equal(verifyRes.body.user.role, 'business_owner');
+
+  const loginRes = await login(agent, email, password);
+  assert.equal(loginRes.status, 200);
+  assert.equal(loginRes.body.user.role, 'business_owner');
+
+  const authCheck = await agent.get('/api/users/auth/check');
+  assert.equal(authCheck.status, 200);
+  assert.equal(authCheck.body.user.role, 'business_owner');
+  assert.equal(authCheck.body.user.isOtpVerified, true);
+});
+
+test('verify-otp rejects invalid OTP with 400', async () => {
+  const agent = createAgent(getApp());
+  const { email } = await registerUser(agent, { role: 'business_owner' });
+
+  const verifyRes = await agent.post('/api/users/verify-otp').send({
+    email,
+    otp: '000000',
+  });
+
+  assert.equal(verifyRes.status, 400);
+  assert.equal(verifyRes.body.success, false);
 });

@@ -1,15 +1,56 @@
 const nodemailer = require('nodemailer');
 const { buildFrontendUrl } = require('./frontendUrl');
+const { deliverAuthOtpEmail } = require('./authEmailDelivery');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.MAIL_USER,     // your email
-    pass: process.env.MAIL_PASSWORD, // app password
-  },
-});
+let transporter = null;
+let verifyPromise = null;
 
-exports.sendOtpEmail = async (to, otp) => {
+function getTransporter() {
+  if (!transporter) {
+    transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.MAIL_USER,
+        pass: process.env.MAIL_PASSWORD,
+      },
+    });
+  }
+  return transporter;
+}
+
+function verifyTransporterOnce() {
+  if (!verifyPromise) {
+    verifyPromise = getTransporter().verify().catch((err) => {
+      verifyPromise = null;
+      throw err;
+    });
+  }
+  return verifyPromise;
+}
+
+async function sendMailWithAuthDelivery(context, mailOptions) {
+  const delivery = await deliverAuthOtpEmail({
+    context,
+    send: async () => {
+      await verifyTransporterOnce();
+      await getTransporter().sendMail(mailOptions);
+    },
+  });
+
+  if (delivery.skipped) {
+    const err = new Error('Auth email not configured');
+    err.code = 'EMAIL_NOT_CONFIGURED';
+    throw err;
+  }
+
+  if (!delivery.sent) {
+    const err = new Error(delivery.error || 'Auth email delivery failed');
+    err.code = 'EMAIL_DELIVERY_FAILED';
+    throw err;
+  }
+}
+
+exports.sendOtpEmail = async (to, otp, context = 'register') => {
   const mailOptions = {
     from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
     to,
@@ -17,7 +58,7 @@ exports.sendOtpEmail = async (to, otp) => {
     text: `Your OTP is ${otp}. It will expire in 10 minutes.`,
   };
 
-  await transporter.sendMail(mailOptions);
+  await sendMailWithAuthDelivery(context, mailOptions);
 };
 
 exports.sendPasswordResetOtpEmail = async (to, otp) => {
@@ -28,7 +69,7 @@ exports.sendPasswordResetOtpEmail = async (to, otp) => {
     text: `Your password reset OTP is ${otp}. It will expire in 10 minutes.`,
   };
 
-  await transporter.sendMail(mailOptions);
+  await sendMailWithAuthDelivery('passwordReset', mailOptions);
 };
 
 exports.sendWelcomeEmail = async (to, firstName, role) => {
@@ -39,7 +80,6 @@ exports.sendWelcomeEmail = async (to, firstName, role) => {
     let html = '';
 
     if (role === 'business_owner') {
-      // Vendor Email
       subject = 'Welcome to Mosaic Biz Hub — Grow your business and build generational wealth';
 
       html = `
@@ -73,7 +113,6 @@ exports.sendWelcomeEmail = async (to, firstName, role) => {
       `;
 
     } else {
-      // Customer Email
       subject = "You just joined a movement — here's what happens next";
 
       html = `
@@ -89,7 +128,7 @@ exports.sendWelcomeEmail = async (to, firstName, role) => {
           <h3>Here's what you can do right now:</h3>
           <ul>
             <li>Browse categories like beauty, wellness, food, fashion, and services.</li>
-            <li>Discover unique vendors you won’t find elsewhere.</li>
+            <li>Discover unique vendors you won't find elsewhere.</li>
             <li>Shop with confidence — every listing is verified.</li>
           </ul>
 
@@ -120,59 +159,10 @@ exports.sendWelcomeEmail = async (to, firstName, role) => {
 
     console.log(`Sending ${role || 'customer'} welcome email`);
 
-    await transporter.sendMail(mailOptions);
+    await getTransporter().sendMail(mailOptions);
 
   } catch (error) {
     console.error('Error sending welcome email:', error);
-    throw error; // optional: rethrow if you want upstream handling
+    throw error;
   }
 };
-
-// exports.sendWelcomeEmail = async (to, firstName) => {
-//   const mailOptions = {
-//     from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
-//     to,
-//     subject: 'Welcome to Mosaic Biz Hub — Grow your business and build generational wealth',
-//     html: `
-//       <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-//         <p>Hi ${firstName},</p>
-        
-//         <p>Welcome to <strong>Mosaic Biz Hub</strong> — we're glad you joined. You didn't just create an account; you joined a purpose-driven marketplace built to help businesses gain visibility, attract loyal customers, and scale confidently.</p>
-        
-//         <h3>How Mosaic will help your business grow</h3>
-//         <ul>
-//           <li><strong>Get discovered</strong> — curated placement, searchable profiles, and category features that put your business in front of buyers actively looking to support independent brands.</li>
-//           <li><strong>Sell smarter</strong> — conversion-focused storefront tools, simplified onboarding, and clear analytics so you can increase revenue without extra guesswork.</li>
-//           <li><strong>Build credibility</strong> — verified badges, peer reviews, and an outcomes-driven recognition system that increases trust and repeat business.</li>
-//           <li><strong>Access resources and networks</strong> — including educational materials, mentorship initiatives, and partnership opportunities that facilitate connections to funding, expert guidance, and expanded markets.</li>
-//           <li><strong>Track progress</strong> — an easy vendor dashboard with starter KPIs so you can measure growth, test offers, and celebrate milestones.</li>
-//         </ul>
-        
-//         <h3>How joining supports our community and long-term wealth</h3>
-//         <ul>
-//           <li>We design features to strengthen local economies and circulate value within neighborhoods.</li>
-//           <li>We amplify founder stories through editorial spotlights and community events that drive customers to mission-led businesses.</li>
-//           <li>We focus on sustainable growth: more customers, stronger brands, and steps toward generational wealth for business owners and their families.</li>
-//         </ul>
-        
-//         <h3>Quick next steps</h3>
-//         <ol>
-//           <li>Complete your profile and upload a primary product or service to improve discoverability.</li>
-//           <li>Explore your vendor dashboard and review the starter analytics we prepared for you.</li>
-//           <li>Reply to this email with the single biggest challenge you want to solve in the next 90 days so we can connect you to targeted resources and partners.</li>
-//         </ol>
-        
-//         <p>Your feedback shapes Mosaic Biz Hub. If you want to be an early voice in building this movement, reply now and tell us where to focus first.</p>
-        
-//         <p>Welcome to the movement — let's build something that lasts.</p>
-        
-//         <p>Warm regards,<br>
-//         <strong>Bryan Harris</strong><br>
-//         Founder, Mosaic Biz Hub</p>
-//       </div>
-//     `,
-//   };
-
-//   await transporter.sendMail(mailOptions);
-// };
-

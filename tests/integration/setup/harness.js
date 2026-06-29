@@ -3,6 +3,7 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const {
   installProviderStubs,
   resetStripeStub,
+  resetOtpEmailFailCount,
 } = require('../helpers/providerStubs');
 const { resetOtpCapture } = require('../helpers/otpCapture');
 
@@ -64,6 +65,7 @@ async function startHarness() {
 async function resetDatabase() {
   resetOtpCapture();
   resetStripeStub();
+  resetOtpEmailFailCount();
 
   if (mongoose.connection.readyState !== 1) {
     return;

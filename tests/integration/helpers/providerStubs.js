@@ -4,9 +4,18 @@ const { captureOtp } = require('./otpCapture');
 
 let originalLoad = null;
 let stripeShouldFail = false;
+let otpEmailFailCount = 0;
 
 function setStripeShouldFail(value) {
   stripeShouldFail = Boolean(value);
+}
+
+function setOtpEmailFailCount(count) {
+  otpEmailFailCount = Math.max(0, Number(count) || 0);
+}
+
+function resetOtpEmailFailCount() {
+  otpEmailFailCount = 0;
 }
 
 function createStripeClient() {
@@ -73,6 +82,12 @@ function createStripeClient() {
 function createMailerStub() {
   return {
     sendOtpEmail: async (email, otp) => {
+      if (otpEmailFailCount > 0) {
+        otpEmailFailCount -= 1;
+        const err = new Error('SMTP connection failed (integration stub)');
+        err.code = 'EMAIL_DELIVERY_FAILED';
+        throw err;
+      }
       captureOtp(email, otp);
     },
     sendWelcomeEmail: async () => {},
@@ -117,6 +132,8 @@ function installProviderStubs() {
 module.exports = {
   installProviderStubs,
   setStripeShouldFail,
+  setOtpEmailFailCount,
+  resetOtpEmailFailCount,
   resetStripeStub: () => {
     stripeShouldFail = false;
   },
