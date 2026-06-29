@@ -6,8 +6,8 @@
 #   ./scripts/auth-email-smoke.ps1 -DisposableDomain your-disposable.testmail.app
 #
 # Optional env (session-only — do not commit):
-#   SMOKE_TEST_CUSTOMER_EMAIL — known customer for forgot-password probe
-#   SMOKE_TEST_VENDOR_EMAIL   — known vendor for forgot-password probe
+#   SMOKE_TEST_CUSTOMER_EMAIL or MBH_TEST_CUSTOMER_EMAIL — known customer for forgot-password probe
+#   SMOKE_TEST_VENDOR_EMAIL or MBH_TEST_VENDOR_EMAIL   — known vendor for forgot-password probe
 
 param(
     [string]$ApiBaseUrl = $(if ($env:API_BASE_URL) { $env:API_BASE_URL } else { "https://api.mosaicbizhub.com" }),
@@ -54,6 +54,18 @@ function Wait-ProbeDelay {
     }
 }
 
+function Get-TestAccountEmail($smokeVarName, $mbhVarName) {
+    $smoke = [Environment]::GetEnvironmentVariable($smokeVarName)
+    if ($smoke -and [string]::IsNullOrWhiteSpace($smoke) -eq $false) {
+        return $smoke.Trim()
+    }
+    $mbh = [Environment]::GetEnvironmentVariable($mbhVarName)
+    if ($mbh -and [string]::IsNullOrWhiteSpace($mbh) -eq $false) {
+        return $mbh.Trim()
+    }
+    return $null
+}
+
 Write-Host "=== Auth Email Smoke ==="
 Write-Host "API_BASE_URL=$Base"
 Write-Host "PROBE_DELAY_SECONDS=$ProbeDelaySeconds"
@@ -82,27 +94,27 @@ catch {
 Wait-ProbeDelay
 
 # 3. Known customer forgot-password
-$customerEmail = $env:SMOKE_TEST_CUSTOMER_EMAIL
+$customerEmail = Get-TestAccountEmail 'SMOKE_TEST_CUSTOMER_EMAIL' 'MBH_TEST_CUSTOMER_EMAIL'
 if ($customerEmail) {
     $body = @{ email = $customerEmail } | ConvertTo-Json -Compress
     $code = Get-StatusCode "$Base/api/users/forgot-password" -Method POST -Body $body
     if ($code -eq 200) { Write-ProbePass "A3 POST forgot-password customer ($code)" } else { Write-ProbeFail "A3 POST forgot-password customer ($code, expected 200)" }
 }
 else {
-    Write-ProbeSkip "A3 POST forgot-password customer", "set SMOKE_TEST_CUSTOMER_EMAIL"
+    Write-ProbeSkip "A3 POST forgot-password customer", "set SMOKE_TEST_CUSTOMER_EMAIL or MBH_TEST_CUSTOMER_EMAIL"
 }
 
 Wait-ProbeDelay
 
 # 4. Known vendor forgot-password
-$vendorEmail = $env:SMOKE_TEST_VENDOR_EMAIL
+$vendorEmail = Get-TestAccountEmail 'SMOKE_TEST_VENDOR_EMAIL' 'MBH_TEST_VENDOR_EMAIL'
 if ($vendorEmail) {
     $body = @{ email = $vendorEmail } | ConvertTo-Json -Compress
     $code = Get-StatusCode "$Base/api/users/forgot-password" -Method POST -Body $body
     if ($code -eq 200) { Write-ProbePass "A4 POST forgot-password vendor ($code)" } else { Write-ProbeFail "A4 POST forgot-password vendor ($code, expected 200)" }
 }
 else {
-    Write-ProbeSkip "A4 POST forgot-password vendor", "set SMOKE_TEST_VENDOR_EMAIL"
+    Write-ProbeSkip "A4 POST forgot-password vendor", "set SMOKE_TEST_VENDOR_EMAIL or MBH_TEST_VENDOR_EMAIL"
 }
 
 Wait-ProbeDelay
