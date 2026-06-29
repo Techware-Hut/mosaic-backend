@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const { getPublicReleaseInfo } = require('../utils/releaseIdentity');
+const { isAuthEmailConfigured } = require('../utils/authEmailDelivery');
 
 const router = express.Router();
 const SERVICE_NAME = 'mosaic-backend';
@@ -21,6 +22,9 @@ router.get('/ready', (_req, res) => {
   res.status(connected ? 200 : 503).json({
     status: connected ? 'ready' : 'not_ready',
     database: connected ? 'connected' : 'disconnected',
+    authEmail: {
+      configured: isAuthEmailConfigured(),
+    },
     timestamp: new Date().toISOString(),
     release: getPublicReleaseInfo(),
   });

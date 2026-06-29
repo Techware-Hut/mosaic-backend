@@ -6,6 +6,22 @@ const Module = require('node:module');
 
 const healthRoutesPath = path.resolve(__dirname, '../../routes/healthRoutes.js');
 
+const originalMailUser = process.env.MAIL_USER;
+const originalMailPassword = process.env.MAIL_PASSWORD;
+
+function restoreMailEnv() {
+  if (originalMailUser === undefined) {
+    delete process.env.MAIL_USER;
+  } else {
+    process.env.MAIL_USER = originalMailUser;
+  }
+  if (originalMailPassword === undefined) {
+    delete process.env.MAIL_PASSWORD;
+  } else {
+    process.env.MAIL_PASSWORD = originalMailPassword;
+  }
+}
+
 function mockResponse() {
   return {
     statusCode: null,
@@ -56,6 +72,8 @@ test('GET /health returns ok without database dependency', () => {
 });
 
 test('GET /ready returns 200 when database is connected', async () => {
+  process.env.MAIL_USER = 'mail@example.com';
+  process.env.MAIL_PASSWORD = 'app-password';
   const router = loadHealthRouter({ connection: { readyState: 1 } });
   const handler = getRouteHandler(router, 'get', '/ready');
   const res = mockResponse();
@@ -65,6 +83,22 @@ test('GET /ready returns 200 when database is connected', async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.status, 'ready');
   assert.equal(res.body.database, 'connected');
+  assert.equal(res.body.authEmail.configured, true);
+  restoreMailEnv();
+});
+
+test('GET /ready reports authEmail.configured false when SMTP env missing', async () => {
+  delete process.env.MAIL_USER;
+  delete process.env.MAIL_PASSWORD;
+  const router = loadHealthRouter({ connection: { readyState: 1 } });
+  const handler = getRouteHandler(router, 'get', '/ready');
+  const res = mockResponse();
+
+  await handler({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.authEmail.configured, false);
+  restoreMailEnv();
 });
 
 test('GET /ready returns 503 when database is disconnected', async () => {
@@ -84,4 +118,6 @@ test('healthRoutes source does not expose secrets', () => {
   const source = fs.readFileSync(healthRoutesPath, 'utf8');
   assert.ok(!source.includes('process.env.MONGODB_URI'));
   assert.ok(!source.includes('JWT_SECRET'));
+  assert.ok(!source.includes('MAIL_PASSWORD'));
+  assert.ok(!source.includes('MAIL_USER'));
 });

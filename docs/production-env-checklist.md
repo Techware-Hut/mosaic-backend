@@ -70,20 +70,41 @@ Webhook URL registration: [stripe-webhook-registration.md](stripe-webhook-regist
 |----------|--------------|
 | `MAIL_USER` | OTP, order, onboarding mail (Gmail address; also used as From header) |
 | `MAIL_PASSWORD` | SMTP auth — must be a **Google App Password**, not the account login password |
-| `ADMIN_EMAIL` | Admin notifications |
+| `ADMIN_EMAIL` | Admin notifications (vendor onboarding, contact form) — **not** required for auth OTP |
 | `SUPPORT_EMAIL` | Optional; email templates |
 | `APP_NAME` | Optional branding |
 | `APP_URL` | Optional order email links |
+
+**After changing mail env vars on EB:** restart the environment (or redeploy) so Node processes reload `process.env`. Env-only updates do not always reach running instances without restart.
+
+**Readiness probe:** After deploy of `authEmail.configured` on `GET /api/ready`, `authEmail.configured: false` means `MAIL_USER` or `MAIL_PASSWORD` is missing/empty in the running process (names only — no SMTP probe, no secrets).
 
 ### Auth OTP email (registration / resend / unverified login)
 
 OTP is sent **by email only** via Nodemailer + Gmail (`utils/mailer.js`). There is no SMS/mobile OTP channel.
 
+**Auth OTP requires only `MAIL_USER` and `MAIL_PASSWORD`.** `ADMIN_EMAIL` does not gate registration or forgot-password OTP delivery.
+
 **Production inbox smoke (disposable test account only):**
 
-1. Set `MAIL_USER` and `MAIL_PASSWORD` (App Password) on Elastic Beanstalk; redeploy.
-2. `POST /api/users/register` with a disposable email you control — expect **201** and inbox delivery within ~2 minutes.
-3. Do **not** paste OTP values or credentials into tickets, Slack, or logs.
+1. Set `MAIL_USER` and `MAIL_PASSWORD` (App Password) on Elastic Beanstalk; **restart** the environment.
+2. Run spaced probes (≥30s apart to avoid 429 rate limits): `./scripts/auth-email-smoke.ps1 -ApiBaseUrl https://api.mosaicbizhub.com -DisposableDomain <your-disposable-domain>`
+3. Optional known-account forgot-password: set session-only `SMOKE_TEST_CUSTOMER_EMAIL` and `SMOKE_TEST_VENDOR_EMAIL` before running the script.
+4. `POST /api/users/register` with a disposable email you control — expect **201** and inbox delivery within ~2 minutes.
+5. Do **not** paste OTP values or credentials into tickets, Slack, or logs.
+
+**Spaced probe matrix (status codes only in automation):**
+
+| Probe | Route | Expected on success | Mail failure |
+| --- | --- | ---: | ---: |
+| Customer forgot-password | `POST /api/users/forgot-password` | 200 | 500 |
+| Vendor forgot-password | `POST /api/users/forgot-password` | 200 | 500 |
+| Customer register | `POST /api/users/register` | 201 | 502 `OTP_DELIVERY_FAILED` |
+| Vendor register | `POST /api/users/register` (`role: business_owner`) | 201 | 502 |
+| Resend OTP | `POST /api/users/resend-otp` | 200 | 502 |
+| Unknown forgot-password | `POST /api/users/forgot-password` | 200 (generic body) | 200 (no enumeration) |
+
+Wait **≥15 minutes** after a burst of failed probes that returned **429** before re-running auth email smoke from the same IP.
 
 **When SMTP delivery fails**, auth endpoints return **502** with `code: OTP_DELIVERY_FAILED` (account may still be saved; user can retry via `POST /api/users/resend-otp` after mail recovery).
 
