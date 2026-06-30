@@ -39,6 +39,12 @@ function createResponse() {
   };
 }
 
+function assertNoOtpOrProviderLeakInBody(body) {
+  const serialized = JSON.stringify(body);
+  assert.doesNotMatch(serialized, /\b\d{6}\b/);
+  assert.doesNotMatch(serialized, /EAUTH|535|api[_-]?key|smtp-password|credential/i);
+}
+
 test('forgotPassword returns a generic success response for unknown emails', async () => {
   const userController = withMocks(userControllerPath, {
     '../models/User': {
@@ -72,6 +78,58 @@ test('forgotPassword returns a generic success response for unknown emails', asy
     success: true,
     message: 'If an account with that email exists, a password reset OTP will be sent.',
   });
+});
+
+test('forgotPassword returns a generic safe response when reset OTP email fails', async () => {
+  const user = {
+    email: 'vendor@example.com',
+    passwordHash: 'hashed-password',
+    isDeleted: false,
+    isBlocked: false,
+    saveCalls: 0,
+    async save() {
+      this.saveCalls += 1;
+    },
+  };
+
+  const userController = withMocks(userControllerPath, {
+    '../models/User': {
+      findOne: async () => user,
+    },
+    bcryptjs: {
+      hash: async (value) => `hashed:${value}`,
+      compare: async () => false,
+    },
+    'express-validator': {
+      validationResult: () => ({ isEmpty: () => true, array: () => [] }),
+    },
+    '../utils/mailer': {
+      sendOtpEmail: async () => {},
+      sendWelcomeEmail: async () => {},
+      sendPasswordResetOtpEmail: async () => {
+        const err = new Error('EAUTH 535 smtp-password rejected');
+        err.code = 'EAUTH';
+        throw err;
+      },
+    },
+    '../utils/cookieHelper': {
+      getCookieOptions: () => ({}),
+      clearCookie: () => {},
+      setAuthCookies: () => {},
+      clearAuthCookies: () => {},
+    },
+  });
+
+  const res = createResponse();
+  await userController.forgotPassword({ body: { email: user.email } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    success: true,
+    message: 'If an account with that email exists, a password reset OTP will be sent.',
+  });
+  assert.equal(user.saveCalls, 1);
+  assertNoOtpOrProviderLeakInBody(res.body);
 });
 
 test('resetPassword invalidates the reset OTP after the maximum failed attempts', async () => {

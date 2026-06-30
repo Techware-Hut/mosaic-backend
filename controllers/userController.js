@@ -109,9 +109,9 @@ function respondOtpDeliveryFailed(res, context, { user } = {}) {
 }
 
 function logOtpDeliveryFailure(context, emailError) {
-    const reason = emailError && emailError.message
-        ? String(emailError.message)
-        : 'Unknown email error';
+    const reason = emailError && emailError.code
+        ? `code=${String(emailError.code)}`
+        : 'delivery_failed';
     console.error(`Auth OTP email delivery failed (${context}):`, reason);
 }
 
@@ -312,8 +312,8 @@ exports.forgotPassword = async (req, res) => {
         try {
             await sendPasswordResetOtpEmail(user.email, otp);
         } catch (emailError) {
-            console.error('Failed to send password reset OTP email:', emailError);
-            return res.status(500).json({ success: false, message: 'Failed to send reset OTP' });
+            logOtpDeliveryFailure('passwordReset', emailError);
+            return res.status(200).json(FORGOT_PASSWORD_RESPONSE);
         }
 
         return res.status(200).json(FORGOT_PASSWORD_RESPONSE);

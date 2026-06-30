@@ -223,7 +223,7 @@ Dual mount: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (
 | [`utils/bookingMailer.js`](../utils/bookingMailer.js) | Service booking notifications |
 | [`utils/BuisnessprofileMail.js`](../utils/BuisnessprofileMail.js) | Business profile Step-3 admin notification |
 
-**Transport:** Nodemailer + Gmail (`MAIL_USER`, `MAIL_PASSWORD` on Elastic Beanstalk).
+**Transport:** Nodemailer SMTP. Auth OTP/password-reset mail supports provider-neutral SMTP via `MAIL_HOST` and keeps Gmail fallback when `MAIL_HOST` is unset; other legacy mailers still use the existing Gmail-style transport.
 
 ### 1.12 Models index (Mongoose)
 
@@ -294,7 +294,7 @@ Cannot be proven by CI alone (mocked MongoDB/Stripe/email):
 |------|-----------------|
 | Live Stripe PaymentIntent checkout + Connect destination/split | P4 in [production-smoke-checklist.md](production-smoke-checklist.md) |
 | All 5 webhook endpoints with Stripe Dashboard test events | [STRIPE_WEBHOOKS.md](STRIPE_WEBHOOKS.md) |
-| Email delivery (Gmail via EB env vars) | P5 |
+| Email delivery (auth SMTP via EB env vars) | P5 |
 | S3 presigned uploads (onboarding docs, product images) | P2–P3 |
 | Full order: cart → initiate → pay → webhook → order emails + PDF | P4 |
 | Admin finalize approve/reject with real MongoDB | P2.6 |

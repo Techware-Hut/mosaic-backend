@@ -6,6 +6,7 @@ const path = require('node:path');
 const {
   isAuthEmailConfigured,
   deliverAuthOtpEmail,
+  getSafeAuthEmailError,
 } = require('../../utils/authEmailDelivery');
 
 const deliveryPath = path.resolve(__dirname, '../../utils/authEmailDelivery.js');
@@ -84,7 +85,7 @@ test('deliverAuthOtpEmail returns sent on success', async () => {
   assert.equal(result.skipped, false);
 });
 
-test('deliverAuthOtpEmail logs message only on failure', async () => {
+test('deliverAuthOtpEmail logs sanitized provider details only on failure', async () => {
   process.env.MAIL_USER = 'mail@example.com';
   process.env.MAIL_PASSWORD = 'app-password';
 
@@ -95,7 +96,10 @@ test('deliverAuthOtpEmail logs message only on failure', async () => {
   const result = await deliverAuthOtpEmail({
     context: 'unverifiedLogin',
     send: async () => {
-      throw new Error('EAUTH invalid credentials');
+      const err = new Error('SMTP password leaked in provider message');
+      err.code = 'EAUTH';
+      err.responseCode = 535;
+      throw err;
     },
   });
 
@@ -104,14 +108,23 @@ test('deliverAuthOtpEmail logs message only on failure', async () => {
 
   assert.equal(result.sent, false);
   assert.equal(result.skipped, false);
-  assert.equal(result.error, 'EAUTH invalid credentials');
+  assert.equal(result.error, 'code=EAUTH responseCode=535');
   assert.ok(errorLogs.some((line) => line.includes('unverifiedLogin')));
   assert.ok(!errorLogs.some((line) => line.includes('app-password')));
+  assert.ok(!errorLogs.some((line) => line.includes('SMTP password leaked')));
+});
+
+test('getSafeAuthEmailError does not return raw provider messages', () => {
+  const err = new Error('535 credentials rejected for smtp-password');
+  err.code = 'EAUTH';
+  err.responseCode = 535;
+
+  assert.equal(getSafeAuthEmailError(err), 'code=EAUTH responseCode=535');
 });
 
 test('authEmailDelivery source avoids logging credential values', () => {
   const source = fs.readFileSync(deliveryPath, 'utf8');
-  assert.ok(source.includes('err.message'));
+  assert.ok(source.includes('getSafeAuthEmailError'));
   assert.ok(!source.match(/console\.(log|error|warn)\([^)]*MAIL_PASSWORD/));
   assert.ok(!source.match(/console\.(log|error|warn)\([^)]*MAIL_USER/));
 });

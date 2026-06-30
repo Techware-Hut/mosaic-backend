@@ -1,9 +1,14 @@
 const nodemailer = require('nodemailer');
 const { buildFrontendUrl } = require('./frontendUrl');
 const { deliverAuthOtpEmail } = require('./authEmailDelivery');
+const {
+  buildSmtpTransportConfig,
+  formatMosaicFromHeader,
+} = require('./smtpTransport');
 
 let transporter = null;
-let verifyPromise = null;
+let authTransporter = null;
+let authVerifyPromise = null;
 
 function getTransporter() {
   if (!transporter) {
@@ -18,22 +23,29 @@ function getTransporter() {
   return transporter;
 }
 
-function verifyTransporterOnce() {
-  if (!verifyPromise) {
-    verifyPromise = getTransporter().verify().catch((err) => {
-      verifyPromise = null;
+function getAuthTransporter() {
+  if (!authTransporter) {
+    authTransporter = nodemailer.createTransport(buildSmtpTransportConfig());
+  }
+  return authTransporter;
+}
+
+function verifyAuthTransporterOnce() {
+  if (!authVerifyPromise) {
+    authVerifyPromise = getAuthTransporter().verify().catch((err) => {
+      authVerifyPromise = null;
       throw err;
     });
   }
-  return verifyPromise;
+  return authVerifyPromise;
 }
 
 async function sendMailWithAuthDelivery(context, mailOptions) {
   const delivery = await deliverAuthOtpEmail({
     context,
     send: async () => {
-      await verifyTransporterOnce();
-      await getTransporter().sendMail(mailOptions);
+      await verifyAuthTransporterOnce();
+      await getAuthTransporter().sendMail(mailOptions);
     },
   });
 
@@ -52,7 +64,7 @@ async function sendMailWithAuthDelivery(context, mailOptions) {
 
 exports.sendOtpEmail = async (to, otp, context = 'register') => {
   const mailOptions = {
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: 'Your OTP Code',
     text: `Your OTP is ${otp}. It will expire in 10 minutes.`,
@@ -63,7 +75,7 @@ exports.sendOtpEmail = async (to, otp, context = 'register') => {
 
 exports.sendPasswordResetOtpEmail = async (to, otp) => {
   const mailOptions = {
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: 'Password Reset OTP',
     text: `Your password reset OTP is ${otp}. It will expire in 10 minutes.`,

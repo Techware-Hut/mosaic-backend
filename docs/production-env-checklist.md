@@ -68,8 +68,12 @@ Webhook URL registration: [stripe-webhook-registration.md](stripe-webhook-regist
 
 | Variable | Required for |
 |----------|--------------|
-| `MAIL_USER` | OTP, order, onboarding mail (Gmail address; also used as From header) |
-| `MAIL_PASSWORD` | SMTP auth — must be a **Google App Password**, not the account login password |
+| `MAIL_USER` | OTP, order, onboarding mail SMTP login; auth mail From fallback |
+| `MAIL_PASSWORD` | SMTP auth password/app password |
+| `MAIL_HOST` | Optional provider-neutral auth SMTP host; leave unset for Gmail fallback |
+| `MAIL_PORT` | Optional provider-neutral auth SMTP port |
+| `MAIL_SECURE` | Optional provider-neutral auth SMTP TLS flag |
+| `MAIL_FROM` | Optional provider-neutral auth mail From header |
 | `ADMIN_EMAIL` | Admin notifications (vendor onboarding, contact form) — **not** required for auth OTP |
 | `SUPPORT_EMAIL` | Optional; email templates |
 | `APP_NAME` | Optional branding |
@@ -81,13 +85,13 @@ Webhook URL registration: [stripe-webhook-registration.md](stripe-webhook-regist
 
 ### Auth OTP email (registration / resend / unverified login)
 
-OTP is sent **by email only** via Nodemailer + Gmail (`utils/mailer.js`). There is no SMS/mobile OTP channel.
+OTP is sent **by email only** via Nodemailer SMTP (`utils/mailer.js` + `utils/smtpTransport.js`). There is no SMS/mobile OTP channel.
 
-**Auth OTP requires only `MAIL_USER` and `MAIL_PASSWORD`.** `ADMIN_EMAIL` does not gate registration or forgot-password OTP delivery.
+**Auth OTP requires `MAIL_USER` and `MAIL_PASSWORD`.** `ADMIN_EMAIL` does not gate registration or forgot-password OTP delivery. Set `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, and `MAIL_FROM` for provider-neutral SMTP; leave `MAIL_HOST` unset to keep Gmail fallback.
 
 **Production inbox smoke (disposable test account only):**
 
-1. Set `MAIL_USER` and `MAIL_PASSWORD` (App Password) on Elastic Beanstalk; **restart** the environment.
+1. Set the auth SMTP `MAIL_*` env names on Elastic Beanstalk; **restart** the environment.
 2. Run spaced probes (≥30s apart to avoid 429 rate limits): `./scripts/auth-email-smoke.ps1 -ApiBaseUrl https://api.mosaicbizhub.com -DisposableDomain <your-disposable-domain>`
 3. Optional known-account forgot-password: set session-only `SMOKE_TEST_CUSTOMER_EMAIL` and `SMOKE_TEST_VENDOR_EMAIL` before running the script.
 4. `POST /api/users/register` with a disposable email you control — expect **201** and inbox delivery within ~2 minutes.
@@ -97,8 +101,8 @@ OTP is sent **by email only** via Nodemailer + Gmail (`utils/mailer.js`). There 
 
 | Probe | Route | Expected on success | Mail failure |
 | --- | --- | ---: | ---: |
-| Customer forgot-password | `POST /api/users/forgot-password` | 200 | 500 |
-| Vendor forgot-password | `POST /api/users/forgot-password` | 200 | 500 |
+| Customer forgot-password | `POST /api/users/forgot-password` | 200 | 200 generic; verify inbox/logs |
+| Vendor forgot-password | `POST /api/users/forgot-password` | 200 | 200 generic; verify inbox/logs |
 | Customer register | `POST /api/users/register` | 201 | 502 `OTP_DELIVERY_FAILED` |
 | Vendor register | `POST /api/users/register` (`role: business_owner`) | 201 | 502 |
 | Resend OTP | `POST /api/users/resend-otp` | 200 | 502 |
@@ -106,17 +110,17 @@ OTP is sent **by email only** via Nodemailer + Gmail (`utils/mailer.js`). There 
 
 Wait **≥15 minutes** after a burst of failed probes that returned **429** before re-running auth email smoke from the same IP.
 
-**When SMTP delivery fails**, auth endpoints return **502** with `code: OTP_DELIVERY_FAILED` (account may still be saved; user can retry via `POST /api/users/resend-otp` after mail recovery).
+**When SMTP delivery fails**, registration/resend/unverified-login OTP endpoints return **502** with `code: OTP_DELIVERY_FAILED` (account may still be saved; user can retry via `POST /api/users/resend-otp` after mail recovery). Forgot-password remains generic **200** to avoid account enumeration.
 
 **Log signatures for SMTP auth failure (grep EB logs — never log secrets):**
 
 | Signature | Meaning |
 |-----------|---------|
-| `Failed to send OTP email:` | Application caught a registration/resend/login OTP send failure |
+| `Auth OTP email delivery failed` | Application caught an auth OTP/password-reset send failure |
 | `Resend OTP error:` | Unexpected error in resend handler (non-delivery paths) |
 | `Login error:` | Unexpected error in login handler (non-delivery paths) |
-| Nodemailer `code: 'EAUTH'` | SMTP authentication rejected |
-| Response contains `535` / `Invalid login` / `Username and Password not accepted` | Gmail rejected credentials — rotate App Password |
+| `code=EAUTH` | SMTP authentication rejected |
+| `responseCode=535` | SMTP provider rejected auth; inspect provider settings without logging secrets |
 
 Confirm no 6-digit OTP values and no `MAIL_PASSWORD` appear in log lines after auth smoke.
 
