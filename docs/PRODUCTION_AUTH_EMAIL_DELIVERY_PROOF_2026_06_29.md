@@ -4,6 +4,50 @@
 
 OTP registration, forgot-password, and resend-otp mail delivery on production API. No deploy performed. No secrets, OTPs, or credentials printed or committed.
 
+## 2026-06-30 Resolved Status
+
+Auth email delivery is now **passing** in production after deploying provider-neutral SMTP support for the Resend-backed `MAIL_*` configuration.
+
+| Item | Value |
+| --- | --- |
+| Backend feature branch | `fix/auth-email-resend-smtp` |
+| Implementation commit | `75209f7` |
+| Production merge commit | `a5a4e54` |
+| Production deploy workflow | `deploy-eb-production.yml` run `28459250020` - success |
+| Production API | `https://api.mosaicbizhub.com` |
+| Production frontend smoke target | `https://mosaicbizhub.com` |
+
+Current auth SMTP env contract:
+
+| Variable | Purpose |
+| --- | --- |
+| `MAIL_HOST` | Provider-neutral SMTP host for auth OTP/password-reset mail. When unset, the Gmail fallback remains available. |
+| `MAIL_PORT` | SMTP port, parsed as a number. |
+| `MAIL_SECURE` | SMTP secure flag, parsed as a boolean. |
+| `MAIL_USER` | SMTP login identity. |
+| `MAIL_PASSWORD` | SMTP password/API key. |
+| `MAIL_FROM` | From header for auth mail. Falls back to `"Mosaic Biz Hub" <MAIL_USER>`. |
+
+Production checks on 2026-06-30:
+
+| Probe | Result |
+| --- | --- |
+| `GET /api/health` | 200, `status: ok`, release commit `a5a4e54` |
+| `GET /api/ready` | 200, `status: ready`, `database: connected`, `authEmail.configured: true`, release commit `a5a4e54` |
+| `GET /api/build-info` | 200, release commit `a5a4e54` |
+| `./scripts/auth-email-smoke.ps1 -ApiBaseUrl https://api.mosaicbizhub.com -ProbeDelaySeconds 30` | PASS 6, FAIL 0, SKIP 2 |
+| Customer registration OTP delivery | Passed with disposable inbox; email arrived |
+| Vendor registration OTP delivery | Passed with disposable inbox; email arrived |
+| Customer resend OTP delivery | Passed with disposable inbox; email arrived |
+| Vendor resend OTP delivery | Passed through production frontend browser smoke; email arrived |
+| Customer forgot-password OTP delivery | Passed with disposable inbox; email arrived |
+| Vendor forgot-password OTP delivery | Passed with disposable inbox; email arrived |
+| Unknown forgot-password anti-enumeration | 200 generic response; no mailbox delivery observed |
+
+Frontend production browser smoke on 2026-06-30 also confirmed customer and vendor signup pages reached `/verify-otp`, resend calls returned 200, forgot-password pages advanced to the reset step, and all related mailbox delivery checks passed. The smoke output recorded only statuses and booleans; no email addresses, OTPs, tokens, cookies, credentials, env values, or email bodies were printed.
+
+The sections below are retained as historical failure analysis from 2026-06-29.
+
 ## Branch and commit
 
 | Item | Value |
