@@ -75,6 +75,7 @@ test('vendor onboarding MIME allowlist accepts expected safe types', () => {
     ALLOWED_VENDOR_ONBOARDING_MIME_TYPES,
     isAllowedVendorOnboardingMime,
     normalizeMimeType,
+    resolveVendorOnboardingMimeType,
   } = require(allowlistPath);
 
   assert.deepEqual(ALLOWED_VENDOR_ONBOARDING_MIME_TYPES, ALLOWED);
@@ -82,7 +83,11 @@ test('vendor onboarding MIME allowlist accepts expected safe types', () => {
   assert.equal(isAllowedVendorOnboardingMime('image/png'), true);
   assert.equal(isAllowedVendorOnboardingMime('image/webp'), true);
   assert.equal(isAllowedVendorOnboardingMime('application/pdf'), true);
+  assert.equal(isAllowedVendorOnboardingMime('', 'policy.PDF'), true);
+  assert.equal(isAllowedVendorOnboardingMime('application/octet-stream', 'policy.pdf'), true);
   assert.equal(normalizeMimeType(' image/PNG ; charset=binary '), 'image/png');
+  assert.equal(normalizeMimeType('application/x-pdf'), 'application/pdf');
+  assert.equal(resolveVendorOnboardingMimeType('', 'policy.PDF'), 'application/pdf');
   assert.equal(isAllowedVendorOnboardingMime('application/javascript'), false);
   assert.equal(isAllowedVendorOnboardingMime('text/html'), false);
   assert.equal(isAllowedVendorOnboardingMime('application/x-msdownload'), false);
@@ -115,6 +120,71 @@ test('getStage1UploadUrl allows image and PDF MIME types', async () => {
     assert.match(res.body.uploadUrl, /^https:\/\/signed\.example\.com\//);
     assert.equal(res.body.documentType, documentType);
   }
+});
+
+test('getStage1UploadUrl allows PDF when browser omits MIME type but filename is safe', async () => {
+  const { getStage1UploadUrl } = loadUploadController();
+  const res = mockResponse();
+
+  await getStage1UploadUrl(
+    {
+      user: { _id: '507f1f77bcf86cd799439011' },
+      query: {
+        fileName: 'refund-policy.PDF',
+        fileType: '',
+        fileSize: String(1024),
+        documentType: 'refund-policy',
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, null);
+  assert.equal(res.body.success, true);
+  assert.match(res.body.uploadUrl, /refund-policy\.PDF/);
+});
+
+test('getStage1UploadUrl rejects unsupported documents even when extension is present', async () => {
+  const { getStage1UploadUrl } = loadUploadController();
+  const res = mockResponse();
+
+  await getStage1UploadUrl(
+    {
+      user: { _id: '507f1f77bcf86cd799439011' },
+      query: {
+        fileName: 'terms.docx',
+        fileType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        fileSize: String(1024),
+        documentType: 'terms-service',
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /Invalid file type/);
+  assert.match(res.body.message, /application\/pdf/);
+});
+
+test('getStage1UploadUrl rejects files over the documented upload size', async () => {
+  const { getStage1UploadUrl } = loadUploadController();
+  const res = mockResponse();
+
+  await getStage1UploadUrl(
+    {
+      user: { _id: '507f1f77bcf86cd799439011' },
+      query: {
+        fileName: 'large-policy.pdf',
+        fileType: 'application/pdf',
+        fileSize: String(5 * 1024 * 1024 + 1),
+        documentType: 'terms-service',
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, 'File must be under 5MB');
 });
 
 test('getStage1UploadUrl rejects unsafe MIME types with 400', async () => {
