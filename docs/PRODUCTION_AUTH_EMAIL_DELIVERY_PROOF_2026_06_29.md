@@ -101,7 +101,27 @@ Invoke-RestMethod https://api.mosaicbizhub.com/api/ready
 
 ## Email delivery status
 
-**Still blocked** on production (`90d7292`). Register and resend return **502** `OTP_DELIVERY_FAILED`. Inbox delivery not confirmed.
+**Still blocked** on production after deploy `a461b15` (2026-06-29).
+
+| Signal | Result |
+| --- | --- |
+| `GET /api/ready` `authEmail.configured` | **true** — `MAIL_USER` and `MAIL_PASSWORD` are present in EB process env |
+| Register / resend OTP | **502** `OTP_DELIVERY_FAILED` |
+| Known customer/vendor forgot-password | **500** `Failed to send reset OTP` |
+| Unknown forgot-password | **200** (anti-enumeration OK) |
+
+**Revised root cause:** Not missing env vars. SMTP credentials are set but **Gmail delivery is failing** at send time — likely invalid/expired App Password, revoked credentials (`EAUTH` / `535`), or outbound SMTP connectivity from EB. Operator: rotate Google App Password on the `MAIL_USER` account, update `MAIL_PASSWORD` on EB, restart environment, grep CloudWatch for `Auth OTP email delivery failed` and Nodemailer auth errors.
+
+## Production deploy (2026-06-29)
+
+| Item | Value |
+| --- | --- |
+| PR | [#164](https://github.com/Techware-Hut/mosaic-backend/pull/164) `staging` → `main` |
+| Deployed commit | `a461b151127054ad1b31f14122f9291a8d40d4a3` |
+| GHA deploy run | Success (Deploy to Elastic Beanstalk #119) |
+| `authEmail.configured` on `/api/ready` | **true** |
+
+Post-deploy auth-email smoke (MBH_TEST_* emails from session `.env.local`, status codes only): PASS 3 / FAIL 5 / SKIP 0.
 
 ## Code changes in this branch (operability, no auth behavior change)
 

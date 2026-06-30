@@ -187,8 +187,12 @@ See [docs/security-remediation-notes.md](docs/security-remediation-notes.md) for
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `MAIL_USER` | Yes for email features | SMTP sender/login identity used by mail utilities |
-| `MAIL_PASSWORD` | Yes for email features | Gmail **App Password** (not your Google account login password) for SMTP auth |
+| `MAIL_USER` | Yes for email features | SMTP login identity. When `MAIL_HOST` is unset, auth OTP mail keeps the Gmail fallback. |
+| `MAIL_PASSWORD` | Yes for email features | SMTP password/app password for auth OTP mail and existing mail utilities |
+| `MAIL_HOST` | Optional | Provider-neutral SMTP host for auth OTP/password-reset mail; leave unset for Gmail fallback |
+| `MAIL_PORT` | Optional | SMTP port for provider-neutral auth mail, parsed as a number |
+| `MAIL_SECURE` | Optional | Set `true` for secure SMTP such as port `465`; otherwise false |
+| `MAIL_FROM` | Optional | From header for provider-neutral auth mail; falls back to `MAIL_USER` for Gmail compatibility |
 | `ADMIN_EMAIL` | Recommended | Admin notification recipient for onboarding, category requests, and contact inquiries |
 | `SUPPORT_EMAIL` | Optional | Support/contact email used in outbound templates |
 | `APP_NAME` | Optional | Branding label used in some email content |

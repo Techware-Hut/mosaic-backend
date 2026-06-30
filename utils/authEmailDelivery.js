@@ -10,6 +10,25 @@ function isAuthEmailConfigured() {
   );
 }
 
+function getSafeAuthEmailError(err) {
+  if (!err) {
+    return 'unknown';
+  }
+
+  const parts = [];
+  if (err.code) {
+    parts.push(`code=${String(err.code)}`);
+  }
+  if (err.responseCode) {
+    parts.push(`responseCode=${String(err.responseCode)}`);
+  }
+  if (!parts.length && err.name) {
+    parts.push(`type=${String(err.name)}`);
+  }
+
+  return parts.length ? parts.join(' ') : 'delivery_failed';
+}
+
 /**
  * @param {{ context: string, send: () => Promise<void> }} options
  * @returns {Promise<{ sent: boolean, skipped?: boolean, reason?: string, error?: string }>}
@@ -24,13 +43,14 @@ async function deliverAuthOtpEmail({ context, send }) {
     await send();
     return { sent: true, skipped: false };
   } catch (err) {
-    const message = err && err.message ? String(err.message) : 'Unknown email error';
-    console.error(`Auth OTP email delivery failed (${context}):`, message);
-    return { sent: false, skipped: false, error: message };
+    const safeError = getSafeAuthEmailError(err);
+    console.error(`Auth OTP email delivery failed (${context}):`, safeError);
+    return { sent: false, skipped: false, error: safeError };
   }
 }
 
 module.exports = {
   isAuthEmailConfigured,
   deliverAuthOtpEmail,
+  getSafeAuthEmailError,
 };

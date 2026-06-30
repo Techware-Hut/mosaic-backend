@@ -50,7 +50,7 @@ flowchart TB
     MongoDB[(MongoDB Atlas)]
     Stripe[Stripe Connect + Subscriptions]
     S3[AWS S3]
-    SMTP[Nodemailer Gmail SMTP]
+    SMTP[Nodemailer SMTP]
     Google[Google OAuth + Places + Geocoding]
     Sentry[Sentry optional]
   end
@@ -316,8 +316,9 @@ flowchart LR
 
 ### 6.9 Email Notifications
 
-All via Nodemailer (Gmail SMTP). Key files:
-- [`utils/mailer.js`](../utils/mailer.js) — OTP, password reset
+All via Nodemailer. Auth OTP/password-reset mail uses provider-neutral SMTP through [`utils/smtpTransport.js`](../utils/smtpTransport.js) when `MAIL_HOST` is set and keeps the Gmail fallback when `MAIL_HOST` is unset. Other legacy mailers still use their existing Gmail-style transport. Key files:
+- [`utils/mailer.js`](../utils/mailer.js) — OTP, password reset, welcome email
+- [`utils/smtpTransport.js`](../utils/smtpTransport.js) — auth SMTP config + From header
 - [`utils/WellcomeMailer.js`](../utils/WellcomeMailer.js) — vendor onboarding
 - [`utils/approvalMail.js`](../utils/approvalMail.js) — admin finalize
 - [`utils/OrderMail.js`](../utils/OrderMail.js) — post-payment order emails
@@ -401,7 +402,7 @@ Documented in [DATABASE_INDEX_AUDIT.md](DATABASE_INDEX_AUDIT.md). Notable: User 
 | Stripe | Payments, Connect, subscriptions, verification fee | `STRIPE_SECRET_KEY`, 5× webhook secrets, `PLATFORM_FEE_CENTS` |
 | AWS S3 | Product images, vendor document uploads | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET` |
 | Cloudinary | Legacy image storage + PendingImage cleanup | `CLOUDINARY_*` |
-| Gmail SMTP | All transactional email | `MAIL_USER`, `MAIL_PASSWORD`, `ADMIN_EMAIL`, `SUPPORT_EMAIL` |
+| SMTP email | Auth OTP provider-neutral SMTP + legacy transactional mail | `MAIL_USER`, `MAIL_PASSWORD`, optional `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, `MAIL_FROM`, `ADMIN_EMAIL`, `SUPPORT_EMAIL` |
 | Google OAuth | Social login | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `API_BASE_URL` |
 | Google Places/Geocoding | Address autocomplete, geo | `GOOGLE_GEOCODING_API_KEY` |
 | Sentry | Error monitoring (optional) | `SENTRY_DSN`, `SENTRY_ENABLED` |
