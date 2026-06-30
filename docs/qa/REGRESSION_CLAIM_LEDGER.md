@@ -1,6 +1,6 @@
 # Regression Claim Ledger
 
-Date: 2026-06-24
+Date: 2026-06-30
 Repository: `Techware-Hut/mosaic-backend`
 Backend branch: `codex/backend-final-preprod-audit`
 Starting staging SHA: `28f9be37c6ae168605ad1d978d32fb013ddfe3af`
@@ -12,9 +12,9 @@ Rule for this ledger: "not tested" is not treated as a failure. A claim is only 
 
 | Classification | Count | Meaning |
 | --- | ---: | --- |
-| Confirmed and fixed | 2 | Current pass or recent integrated work closed the exact issue with tests/evidence |
+| Confirmed and fixed | 4 | Current pass or recent integrated work closed the exact issue with tests/evidence |
 | Stale/already fixed | 13 | Report no longer matches current staging/frontend code |
-| Runtime evidence required | 9 | Code/tests align, but live final-domain proof is still needed |
+| Runtime evidence required | 7 | Code/tests align, but live final-domain proof is still needed |
 | Frontend-owned | 2 | Backend route is correct; issue was or is in frontend caller/UX/doc surface |
 | Product decision required | 5 | Behavior may be intentional and needs owner decision |
 | Partially confirmed | 2 | A mismatch/risk exists, but safe correction requires clearer consumer semantics |
@@ -25,8 +25,8 @@ Rule for this ledger: "not tested" is not treated as a failure. A claim is only 
 
 | Report item | Classification | Evidence | Owner/action |
 | --- | --- | --- | --- |
-| Vendor registration/OTP blocked | Runtime evidence required | Backend OTP tests pass and failure paths are structured; live SMTP/final-domain browser proof not run | QA with fresh vendor account |
-| Customer registration/OTP blocked | Runtime evidence required | Same auth/OTP coverage as vendor registration | QA with fresh customer account |
+| Vendor registration/OTP blocked | Confirmed and fixed | Production 2026-06-30 final-domain browser smoke reached OTP page, returned 201, and mailbox delivery arrived after backend `a5a4e54` auth SMTP deploy | No backend action; keep no-OTP-recording policy for any valid-code walkthrough |
+| Customer registration/OTP blocked | Confirmed and fixed | Production 2026-06-30 final-domain browser smoke reached OTP page, returned 201, and mailbox delivery arrived after backend `a5a4e54` auth SMTP deploy | No backend action; keep no-OTP-recording policy for any valid-code walkthrough |
 | Registration copy says OTP sent to mobile while backend emails OTP | Frontend-owned | Backend OTP behavior is email-based; frontend copy must remain email-aligned | Keep frontend copy aligned |
 | OTP delivery failure creates unsafe/ambiguous state | Stale/already fixed | `tests/auth/otp-email-delivery.test.js` passes for register/resend/login mail failure | No backend change |
 | Login response leaks unsafe user fields | Stale/already fixed | Login/session tests cover `toPublicAuthUser` safe serialization | No backend change |
