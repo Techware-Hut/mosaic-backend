@@ -154,7 +154,7 @@ Order in [`app.js`](../../app.js):
 | MongoDB Atlas | Primary database | `MONGODB_URI` |
 | Stripe | Orders, Connect, subscriptions, vendor verification | `STRIPE_SECRET_KEY`, 5× webhook secrets |
 | AWS S3 | Product images, vendor documents | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET` |
-| Gmail SMTP | Transactional email | `MAIL_USER`, `MAIL_PASSWORD`, `ADMIN_EMAIL` |
+| SMTP email | Auth OTP provider-neutral SMTP + legacy transactional mail | `MAIL_USER`, `MAIL_PASSWORD`, optional `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, `MAIL_FROM`, `ADMIN_EMAIL` |
 | Google OAuth | Social login | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `API_BASE_URL` |
 | Google Geocoding | Address/geo | `GOOGLE_GEOCODING_API_KEY` |
 | Cloudinary | Legacy image URLs | `CLOUDINARY_*` |

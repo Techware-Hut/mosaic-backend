@@ -45,7 +45,7 @@ Auth is **stateless JWT** with optional **HTTP-only cookies**. There is no serve
 4. `bcrypt.hash(password, 12)` → `passwordHash`.
 5. 6-digit OTP generated, `bcrypt.hash(otp, 10)` stored in `user.otp` with `otpExpiry` = now + 10 minutes.
 6. User saved with `isOtpVerified: false`, `provider: 'local'` (default).
-7. `sendOtpEmail(email, otp)` — OTP delivered by **email** (Nodemailer + Gmail SMTP).
+7. `sendOtpEmail(email, otp)` — OTP delivered by **email** through Nodemailer SMTP. Auth mail uses provider-neutral SMTP when `MAIL_HOST` is set and keeps the Gmail fallback when `MAIL_HOST` is unset.
 8. On successful send: `otpPending` cookie set (10 min, via `getCookieOptions`).
 9. Returns **201** with message *"OTP sent to email"* — no JWT until OTP verified.
 10. On SMTP failure after user save: **502** `{ success: false, code: 'OTP_DELIVERY_FAILED', message: '...', otpPending: true, accountCreated: true, user: { email, role } }` — account preserved; `otpPending` cookie set; user may call `POST /api/users/resend-otp` after mail recovery.
@@ -194,7 +194,7 @@ Separate OTP fields from registration — no JWT issued during reset.
 
 - Always returns the same generic `200` message (`FORGOT_PASSWORD_RESPONSE`) — **no email enumeration**.
 - OTP email sent only when user exists, is not deleted/blocked, and has `passwordHash` (local accounts).
-- On send failure returns `500`; otherwise generic success even for unknown emails.
+- On send failure logs a sanitized delivery reason and still returns the same generic `200` response; no provider error, OTP, or account existence detail is exposed.
 
 ### Reset password
 
@@ -532,7 +532,8 @@ npm test   # runs tests/auth/*.test.js among others
 | Test file | Covers |
 |-----------|--------|
 | `auth-check-payload.test.js` | `toPublicAuthUser` whitelist, `/auth/check` shape, JWT `sub` claim |
-| `password-reset-abuse-protection.test.js` | Forgot-password generic response, reset OTP lockout, rate limit wiring |
+| `password-reset-abuse-protection.test.js` | Forgot-password generic response, reset OTP lockout, generic reset email failure, rate limit wiring |
+| `smtp-transport.test.js` / `auth-mailer-smtp.test.js` | Provider-neutral SMTP config, Gmail fallback, auth mail From header |
 | `password-reset-session-invalidation.test.js` | `sessionVersion` bump, `authenticate` reject/accept |
 | `google-oauth-security.test.js` | Temp cookie TTL, OAuth rate limits |
 

@@ -113,6 +113,11 @@ function assertNoOtpInBody(body) {
   assert.ok(!/\b\d{6}\b/.test(serialized), 'response must not contain a 6-digit OTP');
 }
 
+function assertNoProviderLeakInBody(body) {
+  const serialized = JSON.stringify(body);
+  assert.doesNotMatch(serialized, /EAUTH|535|api[_-]?key|smtp-password|credential/i);
+}
+
 class RegisterMockUser {
   constructor(data) {
     Object.assign(this, data);
@@ -161,7 +166,9 @@ test('registerUser returns OTP_DELIVERY_FAILED when sendOtpEmail throws', async 
     ...buildControllerMocks({
       mailer: {
         sendOtpEmail: async () => {
-          throw new Error('SMTP connection failed');
+          const err = new Error('EAUTH 535 smtp-password rejected');
+          err.code = 'EAUTH';
+          throw err;
         },
       },
     }).mocks,
@@ -182,6 +189,7 @@ test('registerUser returns OTP_DELIVERY_FAILED when sendOtpEmail throws', async 
   assert.equal(res.cookies.otpPending, 'true');
   assert.ok(savedUser && savedUser.saveCalled, 'unverified account should be preserved');
   assertNoOtpInBody(res.body);
+  assertNoProviderLeakInBody(res.body);
 });
 
 test('resendOtp returns OTP_DELIVERY_FAILED when sendOtpEmail throws', async () => {
@@ -196,7 +204,9 @@ test('resendOtp returns OTP_DELIVERY_FAILED when sendOtpEmail throws', async () 
     },
     mailer: {
       sendOtpEmail: async () => {
-        throw new Error('SMTP auth failed');
+        const err = new Error('EAUTH 535 smtp-password rejected');
+        err.code = 'EAUTH';
+        throw err;
       },
     },
   }).mocks);
@@ -213,6 +223,7 @@ test('resendOtp returns OTP_DELIVERY_FAILED when sendOtpEmail throws', async () 
   assert.equal(res.body.user.role, unverifiedUser.role);
   assert.equal(res.cookies.otpPending, undefined);
   assertNoOtpInBody(res.body);
+  assertNoProviderLeakInBody(res.body);
 });
 
 test('resendOtp returns 200 when sendOtpEmail succeeds', async () => {
@@ -248,7 +259,9 @@ test('loginUser returns OTP_DELIVERY_FAILED for unverified user when sendOtpEmai
     },
     mailer: {
       sendOtpEmail: async () => {
-        throw new Error('EAUTH invalid credentials');
+        const err = new Error('EAUTH 535 smtp-password rejected');
+        err.code = 'EAUTH';
+        throw err;
       },
     },
   });
@@ -275,6 +288,7 @@ test('loginUser returns OTP_DELIVERY_FAILED for unverified user when sendOtpEmai
   assert.equal(res.authCookies, null);
   assert.equal(getSetAuthCookiesCalled(), false);
   assertNoOtpInBody(res.body);
+  assertNoProviderLeakInBody(res.body);
 });
 
 test('auth OTP rate limits remain unchanged in userRoutes', () => {

@@ -12,7 +12,7 @@
 
 Audit and document launch-safe backend email notification behavior for vendor onboarding, order confirmation, and review follow-up readiness. Add tests proving graceful SMTP failure handling and logging safety without faking delivery.
 
-**Principle:** Do not fake email delivery. When SMTP is missing or send fails, auth OTP flows return **502** `OTP_DELIVERY_FAILED` after persisting the unverified account/OTP hash. Vendor onboarding skips sends when env is missing; forgot-password returns **500** on send failure.
+**Principle:** Do not fake email delivery. When SMTP is missing or send fails, registration/resend/unverified-login OTP flows return **502** `OTP_DELIVERY_FAILED` after persisting the unverified account/OTP hash. Forgot-password stays anti-enumeration safe and returns the same generic **200** response on send failure. Vendor onboarding skips sends when env is missing.
 
 ---
 
@@ -34,6 +34,7 @@ Audit and document launch-safe backend email notification behavior for vendor on
 
 | File | Functions | Domain |
 | --- | --- | --- |
+| [`utils/smtpTransport.js`](../utils/smtpTransport.js) | Provider-neutral auth SMTP config + Gmail fallback | Auth |
 | [`utils/mailer.js`](../utils/mailer.js) | `sendOtpEmail`, `sendPasswordResetOtpEmail`, `sendWelcomeEmail` | Auth |
 | [`utils/WellcomeMailer.js`](../utils/WellcomeMailer.js) | Onboarding submit/approve/reject/badge, admin alerts | Vendor onboarding |
 | [`utils/vendorOnboardingEmailDelivery.js`](../utils/vendorOnboardingEmailDelivery.js) | `deliverVendorOnboardingEmail(s)` | Graceful SMTP gate |
@@ -57,20 +58,25 @@ Audit and document launch-safe backend email notification behavior for vendor on
 
 | Endpoint | On SMTP success | On SMTP failure after DB save |
 | --- | --- | --- |
-| `POST /api/users/register` | **201** — OTP sent to email; `otpPending` cookie | **502** `OTP_DELIVERY_FAILED` — account saved; no cookie |
+| `POST /api/users/register` | **201** — OTP sent to email; `otpPending` cookie | **502** `OTP_DELIVERY_FAILED` — account saved; `otpPending` cookie |
 | `POST /api/users/resend-otp` | **200** — OTP resent; `otpPending` cookie | **502** `OTP_DELIVERY_FAILED` — new OTP hash saved; no cookie |
 | `POST /api/users/login` (unverified) | **403** `otpPending: true` — OTP emailed | **502** `OTP_DELIVERY_FAILED` — no session/cookie |
+| `POST /api/users/forgot-password` | **200** generic anti-enumeration response | **200** same generic response; sanitized log only |
 
-**Gmail setup:** `MAIL_USER` + `MAIL_PASSWORD` where `MAIL_PASSWORD` is a [Google App Password](https://support.google.com/accounts/answer/185833) (requires 2-Step Verification).
+**Auth SMTP setup:** `MAIL_USER` + `MAIL_PASSWORD` are required. When `MAIL_HOST` is unset, auth mail uses the existing Gmail fallback. When `MAIL_HOST` is set, auth mail uses `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, and `MAIL_FROM` for provider-neutral SMTP.
 
-**Production inbox smoke (auth OTP):** Register with a disposable inbox; confirm delivery or **502** + log grep for `Failed to send OTP email:` / `EAUTH` / `535`. Never log OTP values or `MAIL_PASSWORD`.
+**Production inbox smoke (auth OTP):** Register with a disposable inbox; confirm delivery or **502** + log grep for `Auth OTP email delivery failed` and sanitized code/response-code markers. Never log OTP values or `MAIL_PASSWORD`.
 
 ### Environment variables (names only — never commit values)
 
 | Variable | Used for |
 | --- | --- |
 | `MAIL_USER` | SMTP auth + from address |
-| `MAIL_PASSWORD` | SMTP auth (Gmail app password) |
+| `MAIL_PASSWORD` | SMTP auth password/app password |
+| `MAIL_HOST` | Optional provider-neutral auth SMTP host |
+| `MAIL_PORT` | Optional provider-neutral auth SMTP port |
+| `MAIL_SECURE` | Optional provider-neutral auth SMTP TLS flag |
+| `MAIL_FROM` | Optional provider-neutral auth mail From header |
 | `ADMIN_EMAIL` | Admin notification recipients |
 | `SUPPORT_EMAIL` | Order mail support line fallback |
 | `APP_NAME` | Order phase subject branding |
@@ -123,8 +129,8 @@ Application ID and support contact are included. Approve/reject/badge templates 
 | `initiateOrder` emails | N/A (no gate) | Log `err.message` | **201** — order + PI created |
 | Post-payment webhook emails | N/A | Log `mailErr.message` | **200** — webhook ack |
 | Order accept/reject/ship/deliver | N/A | Log message | **200** — order updated |
-| Register OTP | N/A | Log; registration succeeds | **200/201** |
-| Forgot password OTP | N/A | Log; returns error | **500** — intentional contract |
+| Register OTP | N/A | Log sanitized code; account preserved | **502** `OTP_DELIVERY_FAILED` |
+| Forgot password OTP | N/A | Log sanitized code; generic response | **200** — anti-enumeration |
 
 ---
 
@@ -132,7 +138,7 @@ Application ID and support contact are included. Approve/reject/badge templates 
 
 - [`vendorOnboardingEmailDelivery.js`](../utils/vendorOnboardingEmailDelivery.js): logs label + `err.message` only; never OTP, credentials, or full payloads
 - Order email catch blocks (#33): log `err?.message` / `mailErr?.message` only
-- `mailer.js`: OTP values are not logged (verified by automated source audit)
+- Auth OTP delivery logs sanitized code/type details only; no raw provider payloads, OTP values, or credentials (verified by automated source audit)
 
 ---
 

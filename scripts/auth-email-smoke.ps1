@@ -130,7 +130,7 @@ $registerBody = @{
     role     = 'customer'
 } | ConvertTo-Json -Compress
 $code = Get-StatusCode "$Base/api/users/register" -Method POST -Body $registerBody
-if ($code -eq 201) { Write-ProbePass "A5 POST register customer ($code)" } elseif ($code -eq 502) { Write-ProbeFail "A5 POST register customer ($code, OTP delivery failed - check MAIL_USER/MAIL_PASSWORD on EB)" } else { Write-ProbeFail "A5 POST register customer ($code, expected 201)" }
+if ($code -eq 201) { Write-ProbePass "A5 POST register customer ($code)" } elseif ($code -eq 502) { Write-ProbeFail "A5 POST register customer ($code, OTP delivery failed - check auth SMTP MAIL_* env names on EB)" } else { Write-ProbeFail "A5 POST register customer ($code, expected 201)" }
 
 Wait-ProbeDelay
 
@@ -145,7 +145,7 @@ $registerBody = @{
     role     = 'business_owner'
 } | ConvertTo-Json -Compress
 $code = Get-StatusCode "$Base/api/users/register" -Method POST -Body $registerBody
-if ($code -eq 201) { Write-ProbePass "A6 POST register vendor ($code)" } elseif ($code -eq 502) { Write-ProbeFail "A6 POST register vendor ($code, OTP delivery failed - check MAIL_USER/MAIL_PASSWORD on EB)" } else { Write-ProbeFail "A6 POST register vendor ($code, expected 201)" }
+if ($code -eq 201) { Write-ProbePass "A6 POST register vendor ($code)" } elseif ($code -eq 502) { Write-ProbeFail "A6 POST register vendor ($code, OTP delivery failed - check auth SMTP MAIL_* env names on EB)" } else { Write-ProbeFail "A6 POST register vendor ($code, expected 201)" }
 
 Wait-ProbeDelay
 
