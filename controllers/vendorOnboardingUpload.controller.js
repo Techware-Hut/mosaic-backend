@@ -2,8 +2,10 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const {
   ALLOWED_VENDOR_ONBOARDING_MIME_TYPES,
+  MAX_VENDOR_ONBOARDING_UPLOAD_BYTES,
   isAllowedVendorOnboardingMime,
-  normalizeMimeType,
+  parseUploadSizeBytes,
+  resolveVendorOnboardingMimeType,
 } = require("../utils/vendorOnboardingUploadMimeAllowlist");
 
 const s3Client = new S3Client({
@@ -20,11 +22,11 @@ const s3Client = new S3Client({
 exports.getStage1UploadUrl = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { fileName, fileType, documentType } = req.query;
+    const { fileName, fileType, documentType, fileSize } = req.query;
 
-    if (!fileName || !fileType || !documentType) {
+    if (!fileName || !documentType) {
       return res.status(400).json({
-        message: "fileName, fileType, and documentType are required",
+        message: "fileName and documentType are required",
       });
     }
 
@@ -48,13 +50,27 @@ exports.getStage1UploadUrl = async (req, res) => {
       });
     }
 
-    if (!isAllowedVendorOnboardingMime(fileType)) {
+    const normalizedFileType = resolveVendorOnboardingMimeType(fileType, fileName);
+
+    if (!isAllowedVendorOnboardingMime(fileType, fileName)) {
       return res.status(400).json({
         message: `Invalid file type. Allowed types: ${ALLOWED_VENDOR_ONBOARDING_MIME_TYPES.join(", ")}`,
       });
     }
 
-    const normalizedFileType = normalizeMimeType(fileType);
+    const uploadSizeBytes = parseUploadSizeBytes(fileSize);
+    if (Number.isNaN(uploadSizeBytes)) {
+      return res.status(400).json({
+        message: "Invalid file size",
+      });
+    }
+
+    if (uploadSizeBytes !== null && uploadSizeBytes > MAX_VENDOR_ONBOARDING_UPLOAD_BYTES) {
+      return res.status(400).json({
+        message: `File must be under ${Math.round(MAX_VENDOR_ONBOARDING_UPLOAD_BYTES / (1024 * 1024))}MB`,
+      });
+    }
+
     const bucketName = process.env.AWS_S3_BUCKET;
 
     // ✅ ORGANIZED FOLDER STRUCTURE
