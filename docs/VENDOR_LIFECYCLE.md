@@ -322,6 +322,7 @@ From [`utils/vendorOnboardingUploadMimeAllowlist.js`](../utils/vendorOnboardingU
 - Vendor onboarding uploads are limited to 5 MB when the client sends `fileSize`.
 - Rejected types return `400` with allowed list in message.
 - Filename sanitized: non-alphanumeric → `_`; timestamp prefixed in S3 key.
+- Direct S3 browser uploads require bucket CORS for the frontend origin, `PUT`, and the `Content-Type` header. See [`docs/VENDOR_PDF_UPLOAD_CORS.md`](VENDOR_PDF_UPLOAD_CORS.md).
 
 **Tests:** [`tests/vendor/vendor-onboarding-upload-mime.test.js`](../tests/vendor/vendor-onboarding-upload-mime.test.js)
 

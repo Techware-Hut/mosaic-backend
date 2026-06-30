@@ -182,6 +182,9 @@ See [docs/security-remediation-notes.md](docs/security-remediation-notes.md) for
 | `AWS_ACCESS_KEY_ID` | Yes for uploads | AWS access key for S3 access |
 | `AWS_SECRET_ACCESS_KEY` | Yes for uploads | AWS secret key for S3 access |
 | `AWS_S3_BUCKET` | Yes for uploads | S3 bucket name for product, service, food, and onboarding uploads |
+| `S3_UPLOAD_CORS_ORIGINS` | Optional for S3 CORS apply script | Comma-separated browser origins allowed to direct-upload with presigned S3 URLs. Falls back to `CORS_ORIGINS`/`FRONTEND_URL` plus approved app/local origins. |
+
+Vendor PDF uploads use presigned S3 `PUT` URLs. If the API returns an upload URL but the browser `OPTIONS` request to S3 returns `403`, apply the bucket CORS rule in [docs/VENDOR_PDF_UPLOAD_CORS.md](docs/VENDOR_PDF_UPLOAD_CORS.md).
 
 ### Email and notifications
 
