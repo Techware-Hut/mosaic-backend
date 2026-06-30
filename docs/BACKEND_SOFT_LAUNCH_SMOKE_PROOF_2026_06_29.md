@@ -9,6 +9,29 @@ Related issues:
 
 Read-only launch-readiness verification of existing Mosaic Biz Hub backend behavior against production API. No payment flows executed, no secrets exposed, no code or deploy changes made.
 
+## 2026-06-30 Auth Email Addendum
+
+Production has advanced since the original 2026-06-29 smoke proof.
+
+| Item | Value |
+| --- | --- |
+| Production API tested | `https://api.mosaicbizhub.com` |
+| Production live commit | `a5a4e54` |
+| Production deploy workflow | `deploy-eb-production.yml` run `28459250020` - success |
+| Auth SMTP change | Provider-neutral auth SMTP support using `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, `MAIL_USER`, `MAIL_PASSWORD`, and `MAIL_FROM`; Gmail fallback remains when `MAIL_HOST` is unset |
+
+Post-deploy checks on 2026-06-30:
+
+| Check | Result |
+| --- | --- |
+| `GET /api/health` | Pass - 200, `status: ok`, release commit `a5a4e54` |
+| `GET /api/ready` | Pass - 200, `status: ready`, `database: connected`, `authEmail.configured: true`, release commit `a5a4e54` |
+| `GET /api/build-info` | Pass - 200, release commit `a5a4e54` |
+| Auth email smoke script | Pass - 6 pass, 0 fail, 2 skip (known-account env names absent locally) |
+| Production frontend browser auth/email smoke | Pass - customer/vendor signup reached OTP, signup/resend/forgot-password emails arrived, unknown forgot-password stayed generic with no mailbox delivery |
+
+No Stripe/payment, webhook, `app.js` middleware/CORS, or featured-product route changes were made for this auth email deployment. The canonical `GET /api/featured-products` contract was preserved; `/api/products/featured` remains absent.
+
 ## Commit Identity (Important)
 
 | Item | Value |
