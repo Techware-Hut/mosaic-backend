@@ -1,21 +1,26 @@
 # Vendor PDF Upload CORS Runbook
 
-This app uses AWS S3 presigned URLs for vendor onboarding document uploads. Supabase Storage is not part of the current vendor PDF upload path.
+This app stores vendor onboarding documents in AWS S3. Supabase Storage is not part of the current vendor PDF upload path.
+
+The intended `/partners/business-profile` UI path now uses an authenticated backend upload proxy so the browser uploads to the Mosaic API, not directly to S3. The presigned S3 route remains available for direct-upload flows and diagnostics.
 
 ## Request Flow
 
 1. Vendor opens `/partners/business-profile`.
-2. Frontend calls the authenticated API route:
-   `GET /api/vendor-onboarding/stage1/upload-url`.
-3. Backend verifies the session and `business_owner` vendor permissions, validates the document type, MIME type, and size, then returns a presigned S3 `PUT` URL.
-4. Frontend uploads the PDF directly to the presigned S3 URL with:
-   - method: `PUT`
-   - header: `Content-Type: application/pdf`
-   - credentials: omitted
-   - no `Authorization`, `x-upsert`, cache-control, or app custom headers
-5. Frontend saves the returned `fileUrl` in the vendor onboarding draft.
+2. Frontend posts `multipart/form-data` to:
+   `POST /api/vendor-onboarding/stage1/upload-file`.
+3. Backend verifies the session and `business_owner` vendor permissions, validates the document type, MIME type, and size, then writes the file to S3 under the authenticated vendor user path.
+4. Frontend saves the returned `fileUrl` in the vendor onboarding draft.
 
-The API CORS policy and the S3 bucket CORS policy are separate. A successful `upload-url` response proves API auth/CORS is working, but the browser still preflights the direct S3 `PUT`.
+The API proxy path uses normal backend CORS (`CORS_ORIGINS`) and does not require browser-to-S3 preflight. A successful proxy upload proves API auth/CORS and server-side S3 write behavior are working.
+
+Legacy/direct S3 flow:
+
+1. Frontend calls `GET /api/vendor-onboarding/stage1/upload-url`.
+2. Backend returns a presigned S3 `PUT` URL.
+3. Browser uploads directly to S3 with only `Content-Type` and the raw file body.
+
+For this direct path, the API CORS policy and S3 bucket CORS policy are separate. A successful `upload-url` response proves API auth/CORS is working, but the browser still preflights the direct S3 `PUT`.
 
 ## Required Environment
 
@@ -33,7 +38,7 @@ If `S3_UPLOAD_CORS_ORIGINS` is not set, the helper falls back to `CORS_ORIGINS`,
 
 ## S3 Bucket CORS
 
-The S3 bucket must allow browser preflight for the frontend origin and the signed `PUT` request. AWS S3 CORS rules do not list `OPTIONS` as an allowed method; S3 answers `OPTIONS` when the requested method, origin, and headers match a rule.
+The API proxy path does not require S3 bucket CORS. If using the legacy/direct presigned path, the S3 bucket must allow browser preflight for the frontend origin and the signed `PUT` request. AWS S3 CORS rules do not list `OPTIONS` as an allowed method; S3 answers `OPTIONS` when the requested method, origin, and headers match a rule.
 
 Required rule shape:
 
@@ -84,9 +89,9 @@ Use a safe dummy PDF, not a real vendor document.
 1. Log in as a verified vendor/business owner.
 2. Open `/partners/business-profile`.
 3. Upload a PDF for refund policy or terms/service agreement.
-4. Confirm `GET /api/vendor-onboarding/stage1/upload-url` returns `200`.
-5. Confirm the S3 `OPTIONS` preflight does not return `403`.
-6. Confirm the S3 `PUT` returns a success status.
+4. Confirm `POST /api/vendor-onboarding/stage1/upload-file` returns `200`.
+5. Confirm the upload request does not show a browser CORS failure.
+6. Confirm no browser request is made directly to S3 for the business-profile PDF path.
 7. Confirm the resulting object key is under the authenticated vendor path:
    `vendor-onboarding/business-profile/{vendorUserId}/...`.
 8. Confirm a customer or unauthenticated session cannot get a signed upload URL.
@@ -95,6 +100,8 @@ Use a safe dummy PDF, not a real vendor document.
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
+| `POST /stage1/upload-file` fails `401`/`403` | User session or vendor role check failed | Fix login/vendor verification |
+| `POST /stage1/upload-file` fails API CORS | Backend `CORS_ORIGINS` missing frontend origin | Add the frontend origin to backend CORS env |
 | `upload-url` fails `401`/`403` | User session or vendor role check failed | Fix login/vendor verification, not S3 CORS |
 | `upload-url` returns `200`, then S3 `OPTIONS` returns `403` | Bucket CORS missing origin, `PUT`, or `Content-Type` | Apply this S3 CORS rule |
 | S3 `OPTIONS` passes, but `PUT` fails signature error | Frontend changed signed headers or upload method | Use direct `PUT` with the resolved content type only |

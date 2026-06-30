@@ -26,10 +26,16 @@ function loadUploadController() {
   process.env.AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY || 'test-secret';
 
   const originalLoad = Module._load;
+  const awsMockState = { sentCommands: [] };
   Module._load = function mockLoad(request, parent, isMain) {
     if (request === '@aws-sdk/client-s3') {
       return {
-        S3Client: class S3Client {},
+        S3Client: class S3Client {
+          async send(command) {
+            awsMockState.sentCommands.push(command);
+            return { ETag: '"test-etag"' };
+          }
+        },
         PutObjectCommand: class PutObjectCommand {
           constructor(input) {
             this.input = input;
@@ -52,6 +58,7 @@ function loadUploadController() {
   delete require.cache[uploadControllerPath];
   const loaded = require(uploadControllerPath);
   Module._load = originalLoad;
+  loaded.__awsMockState = awsMockState;
   return loaded;
 }
 
@@ -207,6 +214,81 @@ test('getStage1UploadUrl rejects unsafe MIME types with 400', async () => {
   assert.match(res.body.message, /Invalid file type/);
   assert.match(res.body.message, /image\/jpeg/);
   assert.match(res.body.message, /application\/pdf/);
+});
+
+test('uploadStage1File uploads PDF through authenticated API proxy under vendor path', async () => {
+  const controller = loadUploadController();
+  const res = mockResponse();
+  const vendorUserId = '507f1f77bcf86cd799439011';
+  const body = Buffer.from('%PDF-1.4 safe dummy');
+
+  await controller.uploadStage1File(
+    {
+      user: { _id: vendorUserId },
+      body: { documentType: 'refund-policy' },
+      file: {
+        originalname: 'refund policy.PDF',
+        mimetype: 'application/pdf',
+        size: body.length,
+        buffer: body,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, null);
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.uploadMethod, 'api-proxy');
+  assert.equal(res.body.documentType, 'refund-policy');
+  assert.match(
+    res.body.key,
+    new RegExp(`^vendor-onboarding/business-profile/${vendorUserId}/refund-policy/\\d+-refund_policy\\.PDF$`)
+  );
+  assert.equal(controller.__awsMockState.sentCommands.length, 1);
+  const commandInput = controller.__awsMockState.sentCommands[0].input;
+  assert.equal(commandInput.Bucket, 'test-bucket');
+  assert.equal(commandInput.Key, res.body.key);
+  assert.equal(commandInput.ContentType, 'application/pdf');
+  assert.equal(commandInput.Body, body);
+});
+
+test('uploadStage1File rejects missing file with safe validation error', async () => {
+  const { uploadStage1File } = loadUploadController();
+  const res = mockResponse();
+
+  await uploadStage1File(
+    {
+      user: { _id: '507f1f77bcf86cd799439011' },
+      body: { documentType: 'refund-policy' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+  assert.equal(res.body.message, 'File is required');
+});
+
+test('uploadStage1File rejects unsafe proxy upload MIME types', async () => {
+  const { uploadStage1File } = loadUploadController();
+  const res = mockResponse();
+
+  await uploadStage1File(
+    {
+      user: { _id: '507f1f77bcf86cd799439011' },
+      body: { documentType: 'terms-service' },
+      file: {
+        originalname: 'payload.html',
+        mimetype: 'text/html',
+        size: 12,
+        buffer: Buffer.from('<script />'),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /Invalid file type/);
 });
 
 test('vendor onboarding upload route remains blocked without authentication', async () => {

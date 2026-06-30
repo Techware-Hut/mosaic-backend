@@ -283,15 +283,19 @@ After `verified`, the handler guides stages:
 
 ## Document upload behavior
 
-**Route:** `GET /api/vendor-onboarding/stage1/upload-url` → `getStage1UploadUrl`  
+**UI route:** `POST /api/vendor-onboarding/stage1/upload-file` → `uploadStage1File`
+**Legacy/direct route:** `GET /api/vendor-onboarding/stage1/upload-url` → `getStage1UploadUrl`
 **Middleware:** `authenticate` → `requireVerifiedVendor`
 
 ### Flow
 
-1. Client passes query params: `fileName`, `fileType`, `documentType`, and optional `fileSize`.
-2. Server validates `documentType`, resolved MIME type, and file size.
-3. Returns S3 presigned PUT URL (5 min expiry) + public `fileUrl`.
-4. Client uploads directly to S3, then saves URL in draft via `saveDraft`.
+1. Business-profile UI sends `multipart/form-data` to `POST /stage1/upload-file` with `file` and `documentType`.
+2. Server verifies the vendor session, validates `documentType`, resolved MIME type, and file size.
+3. Server writes the object to S3 under the authenticated vendor user path.
+4. API returns `fileUrl`, `documentType`, and object `key`.
+5. Client saves URL in draft via `saveDraft`.
+
+The presigned `GET /stage1/upload-url` path is retained for direct S3 uploads, but browser direct-upload requires S3 bucket CORS. The intended business-profile PDF path uses the API proxy to avoid S3 browser preflight failures.
 
 ### Allowed `documentType` values
 
@@ -322,7 +326,7 @@ From [`utils/vendorOnboardingUploadMimeAllowlist.js`](../utils/vendorOnboardingU
 - Vendor onboarding uploads are limited to 5 MB when the client sends `fileSize`.
 - Rejected types return `400` with allowed list in message.
 - Filename sanitized: non-alphanumeric → `_`; timestamp prefixed in S3 key.
-- Direct S3 browser uploads require bucket CORS for the frontend origin, `PUT`, and the `Content-Type` header. See [`docs/VENDOR_PDF_UPLOAD_CORS.md`](VENDOR_PDF_UPLOAD_CORS.md).
+- API proxy uploads require backend `CORS_ORIGINS` for the frontend origin and do not require browser-to-S3 CORS. Direct S3 browser uploads require bucket CORS for the frontend origin, `PUT`, and the `Content-Type` header. See [`docs/VENDOR_PDF_UPLOAD_CORS.md`](VENDOR_PDF_UPLOAD_CORS.md).
 
 **Tests:** [`tests/vendor/vendor-onboarding-upload-mime.test.js`](../tests/vendor/vendor-onboarding-upload-mime.test.js)
 
@@ -410,6 +414,7 @@ flowchart TD
 | `POST /draft` | Yes — `requireVerifiedVendor` | No |
 | `GET /draft`, `GET /onboarding-data` | Yes | No |
 | `POST /submit` | Yes | No |
+| `POST /stage1/upload-file` | Yes | No |
 | `GET /stage1/upload-url` | Yes | No |
 | `POST /stage1/create-payment` | Yes | No |
 | `GET /stage1/payment-status` | Yes | No |
@@ -515,6 +520,7 @@ npm test   # includes tests/vendor/*
 | GET | `/draft` | `getDraft` | Vendor verified |
 | POST | `/submit` | `submitForReview` | Vendor verified |
 | GET | `/onboarding-data` | `getOnboardingData` | Vendor verified |
+| POST | `/stage1/upload-file` | `uploadStage1File` | Vendor verified |
 | GET | `/stage1/upload-url` | `getStage1UploadUrl` | Vendor verified |
 | POST | `/stage1/create-payment` | `createVerificationPayment` | Vendor verified |
 | GET | `/stage1/payment-status` | `getPaymentStatus` | Vendor verified |

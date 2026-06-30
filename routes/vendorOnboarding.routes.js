@@ -6,6 +6,7 @@ const requireVerifiedVendor = require("../middlewares/requireVerifiedVendor");
 const requireStage1VerifiedVendor = requireVerifiedVendor.create({
   requireStage1Verified: true,
 });
+const handleVendorOnboardingFileUpload = require("../middlewares/vendorOnboardingFileUpload");
 const authenticate = require('../middlewares/authenticate');
 const isAdmin = require('../middlewares/isAdmin');
 
@@ -24,6 +25,7 @@ const {
 
 const {
   getStage1UploadUrl,
+  uploadStage1File,
 } = require("../controllers/vendorOnboardingUpload.controller");
 
 const {
@@ -48,6 +50,13 @@ router.get('/status/:applicationId', getStatusByApplicationId);
 router.get('/applicationId',authMiddleware,getApplicationId);
 
 router.get("/stage1/upload-url", authMiddleware, requireVerifiedVendor, getStage1UploadUrl);
+router.post(
+  "/stage1/upload-file",
+  authMiddleware,
+  requireVerifiedVendor,
+  handleVendorOnboardingFileUpload,
+  uploadStage1File
+);
 router.post("/stage1/create-payment", authMiddleware, requireVerifiedVendor, createVerificationPayment);
 router.get("/stage1/payment-status", authMiddleware, requireVerifiedVendor, getPaymentStatus);
 
