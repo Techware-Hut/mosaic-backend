@@ -82,6 +82,7 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 | PATCH | `.../business-profile` | same | `patchBusinessProfile` | vendor + Stage-1 `verified` | Partial profile update | 🟡 |
 | GET | `.../status/:applicationId` | — | `getStatusByApplicationId` | ⚪ **Public** | Application status poll | 🟢 — exposes progress by ID |
 | GET | `.../applicationId` | `authenticate` | `getApplicationId` | Authenticated | Get own application ID | 🟡 |
+| POST | `.../stage1/upload-file` | `authenticate`, `requireVerifiedVendor` | `uploadStage1File` | vendor verified | API-proxied S3 document upload | 🟡 P2.6 |
 | GET | `.../stage1/upload-url` | `authenticate`, `requireVerifiedVendor` | `getStage1UploadUrl` | vendor verified | S3 presigned upload URL | 🟡 P2.6 |
 | POST | `.../stage1/create-payment` | same | `createVerificationPayment` | vendor verified | Create $24.99 Stripe PI | 🔴 P2.2 — real/test charge |
 | GET | `.../stage1/payment-status` | same | `getPaymentStatus` | vendor verified | Verification payment status | 🟡 P2.4 |

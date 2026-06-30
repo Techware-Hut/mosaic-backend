@@ -16,121 +16,137 @@ const s3Client = new S3Client({
   },
 });
 
-/**
- * Generate presigned URL for Vendor Onboarding Stage-1 documents
- */
+const ALLOWED_VENDOR_ONBOARDING_DOCUMENT_TYPES = [
+  "minority-proof",
+  "tax-doc",
+  "business-license",
+  "business-profile",
+  "feature-banner",
+  "refund-policy",
+  "terms-service",
+];
+
+function getVendorOnboardingFolderPath(userId, documentType) {
+  switch (documentType) {
+    case "minority-proof":
+      return `vendor-onboarding/stage1/${userId}/minority-proof`;
+    case "tax-doc":
+      return `vendor-onboarding/stage1/${userId}/tax-doc`;
+    case "business-license":
+      return `vendor-onboarding/stage1/${userId}/business-license`;
+    case "business-profile":
+      return `vendor-onboarding/business-profile/${userId}/logo`;
+    case "feature-banner":
+      return `vendor-onboarding/business-profile/${userId}/feature-banner`;
+    case "refund-policy":
+      return `vendor-onboarding/business-profile/${userId}/refund-policy`;
+    case "terms-service":
+      return `vendor-onboarding/business-profile/${userId}/terms-service`;
+    default:
+      return `vendor-onboarding/other/${userId}/${documentType}`;
+  }
+}
+
+function buildVendorOnboardingUploadTarget({
+  userId,
+  fileName,
+  fileType,
+  fileSize,
+  documentType,
+}) {
+  if (!fileName || !documentType) {
+    return {
+      status: 400,
+      body: { message: "fileName and documentType are required" },
+    };
+  }
+
+  if (!ALLOWED_VENDOR_ONBOARDING_DOCUMENT_TYPES.includes(documentType)) {
+    return {
+      status: 400,
+      body: { message: "Invalid document type" },
+    };
+  }
+
+  const normalizedFileType = resolveVendorOnboardingMimeType(fileType, fileName);
+  if (!isAllowedVendorOnboardingMime(fileType, fileName)) {
+    return {
+      status: 400,
+      body: {
+        message: `Invalid file type. Allowed types: ${ALLOWED_VENDOR_ONBOARDING_MIME_TYPES.join(", ")}`,
+      },
+    };
+  }
+
+  const uploadSizeBytes = parseUploadSizeBytes(fileSize);
+  if (Number.isNaN(uploadSizeBytes)) {
+    return {
+      status: 400,
+      body: { message: "Invalid file size" },
+    };
+  }
+
+  if (uploadSizeBytes !== null && uploadSizeBytes > MAX_VENDOR_ONBOARDING_UPLOAD_BYTES) {
+    return {
+      status: 400,
+      body: {
+        message: `File must be under ${Math.round(
+          MAX_VENDOR_ONBOARDING_UPLOAD_BYTES / (1024 * 1024)
+        )}MB`,
+      },
+    };
+  }
+
+  const bucketName = process.env.AWS_S3_BUCKET;
+  const folderPath = getVendorOnboardingFolderPath(userId, documentType);
+  const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const timestamp = Date.now();
+  const key = `${folderPath}/${timestamp}-${cleanFileName}`;
+  const region = process.env.AWS_REGION || "us-east-1";
+  const fileUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
+
+  return {
+    bucketName,
+    documentType,
+    fileUrl,
+    key,
+    normalizedFileType,
+  };
+}
+
 exports.getStage1UploadUrl = async (req, res) => {
   try {
     const userId = req.user._id;
     const { fileName, fileType, documentType, fileSize } = req.query;
 
-    if (!fileName || !documentType) {
-      return res.status(400).json({
-        message: "fileName and documentType are required",
-      });
+    const target = buildVendorOnboardingUploadTarget({
+      userId,
+      fileName,
+      fileType,
+      fileSize,
+      documentType,
+    });
+    if (target.status) {
+      return res.status(target.status).json(target.body);
     }
-
-    // ✅ ALLOWED DOCUMENT TYPES - INCLUDING BUSINESS PROFILE DOCUMENTS
-    const allowedDocTypes = [
-      // Stage 1 Documents
-      "minority-proof",
-      "tax-doc", 
-      "business-license",
-      
-      // Business Profile Documents
-      "business-profile",  // For logo/business profile image
-      "feature-banner",    // For business profile feature banner image
-      "refund-policy",     // For refund & return policy
-      "terms-service"      // For terms & conditions / service agreement
-    ];
-
-    if (!allowedDocTypes.includes(documentType)) {
-      return res.status(400).json({
-        message: "Invalid document type",
-      });
-    }
-
-    const normalizedFileType = resolveVendorOnboardingMimeType(fileType, fileName);
-
-    if (!isAllowedVendorOnboardingMime(fileType, fileName)) {
-      return res.status(400).json({
-        message: `Invalid file type. Allowed types: ${ALLOWED_VENDOR_ONBOARDING_MIME_TYPES.join(", ")}`,
-      });
-    }
-
-    const uploadSizeBytes = parseUploadSizeBytes(fileSize);
-    if (Number.isNaN(uploadSizeBytes)) {
-      return res.status(400).json({
-        message: "Invalid file size",
-      });
-    }
-
-    if (uploadSizeBytes !== null && uploadSizeBytes > MAX_VENDOR_ONBOARDING_UPLOAD_BYTES) {
-      return res.status(400).json({
-        message: `File must be under ${Math.round(MAX_VENDOR_ONBOARDING_UPLOAD_BYTES / (1024 * 1024))}MB`,
-      });
-    }
-
-    const bucketName = process.env.AWS_S3_BUCKET;
-
-    // ✅ ORGANIZED FOLDER STRUCTURE
-    let folderPath;
-    switch (documentType) {
-      // Stage 1 Documents
-      case "minority-proof":
-        folderPath = `vendor-onboarding/stage1/${userId}/minority-proof`;
-        break;
-      case "tax-doc":
-        folderPath = `vendor-onboarding/stage1/${userId}/tax-doc`;
-        break;
-      case "business-license":
-        folderPath = `vendor-onboarding/stage1/${userId}/business-license`;
-        break;
-      
-      // Business Profile Documents  
-      case "business-profile":
-        folderPath = `vendor-onboarding/business-profile/${userId}/logo`;
-        break;
-      case "feature-banner":
-        folderPath = `vendor-onboarding/business-profile/${userId}/feature-banner`;
-        break;
-      case "refund-policy":
-        folderPath = `vendor-onboarding/business-profile/${userId}/refund-policy`;
-        break;
-      case "terms-service":
-        folderPath = `vendor-onboarding/business-profile/${userId}/terms-service`;
-        break;
-      default:
-        folderPath = `vendor-onboarding/other/${userId}/${documentType}`;
-    }
-
-    // Clean filename - remove special characters, spaces
-    const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const timestamp = Date.now();
-    const key = `${folderPath}/${timestamp}-${cleanFileName}`;
 
     const command = new PutObjectCommand({
-      Bucket: bucketName,
-      Key: key,
-      ContentType: normalizedFileType,
+      Bucket: target.bucketName,
+      Key: target.key,
+      ContentType: target.normalizedFileType,
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
-      expiresIn: 300, // 5 minutes
+      expiresIn: 300,
     });
-
-    // ✅ CONSTRUCT PUBLIC URL
-    const region = process.env.AWS_REGION || 'us-east-1';
-    const fileUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
 
     return res.json({
       success: true,
       uploadUrl,
-      fileUrl,
-      documentType,
-      key
+      fileUrl: target.fileUrl,
+      documentType: target.documentType,
+      key: target.key,
     });
-
   } catch (error) {
     console.error("Presigned URL error:", error);
     return res.status(500).json({
@@ -140,53 +156,54 @@ exports.getStage1UploadUrl = async (req, res) => {
   }
 };
 
-// exports.getStage1UploadUrl = async (req, res) => {
-//   try {
-//     const userId = req.user._id;
-//     const { fileName, fileType, documentType } = req.query;
+exports.uploadStage1File = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { documentType } = req.body;
+    const file = req.file;
 
-//     if (!fileName || !fileType || !documentType) {
-//       return res.status(400).json({
-//         message: "fileName, fileType, and documentType are required",
-//       });
-//     }
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        message: "File is required",
+      });
+    }
 
-//     const allowedDocTypes = [
-//       "minority-proof",
-//       "tax-doc",
-//       "business-license",
-//     ];
+    const target = buildVendorOnboardingUploadTarget({
+      userId,
+      fileName: file.originalname,
+      fileType: file.mimetype,
+      fileSize: file.size,
+      documentType,
+    });
+    if (target.status) {
+      return res.status(target.status).json(target.body);
+    }
 
-//     if (!allowedDocTypes.includes(documentType)) {
-//       return res.status(400).json({
-//         message: "Invalid document type",
-//       });
-//     }
+    const command = new PutObjectCommand({
+      Bucket: target.bucketName,
+      Key: target.key,
+      Body: file.buffer,
+      ContentType: target.normalizedFileType,
+    });
 
-//     const bucketName = process.env.AWS_S3_BUCKET;
+    await s3Client.send(command);
 
-//     const key = `vendor-onboarding/stage1/${userId}/${documentType}/${Date.now()}-${fileName}`;
-
-//     const command = new PutObjectCommand({
-//       Bucket: bucketName,
-//       Key: key,
-//       ContentType: fileType,
-//     });
-
-//     const uploadUrl = await getSignedUrl(s3Client, command, {
-//       expiresIn: 300, // 5 minutes
-//     });
-
-//     const fileUrl = `https://${bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
-
-//     return res.json({
-//       uploadUrl,
-//       fileUrl,
-//     });
-//   } catch (error) {
-//     console.error("Presigned URL error:", error);
-//     return res.status(500).json({
-//       message: "Failed to generate upload URL",
-//     });
-//   }
-// };
+    return res.json({
+      success: true,
+      uploadMethod: "api-proxy",
+      fileUrl: target.fileUrl,
+      documentType: target.documentType,
+      key: target.key,
+    });
+  } catch (error) {
+    console.error("Vendor onboarding upload error:", {
+      message: error.message,
+      name: error.name,
+    });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to upload file",
+    });
+  }
+};

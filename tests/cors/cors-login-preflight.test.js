@@ -55,6 +55,9 @@ function createCorsProbeApp(envOverrides) {
   app.post('/api/users/login', (_req, res) => {
     res.sendStatus(200);
   });
+  app.post('/api/vendor-onboarding/stage1/upload-file', (_req, res) => {
+    res.sendStatus(200);
+  });
 
   return {
     app,
@@ -122,6 +125,28 @@ test('OPTIONS /api/users/login denies disallowed origin without server error', a
 
     assert.notEqual(res.status, 500);
     assert.equal(res.headers['access-control-allow-origin'], undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+test('OPTIONS /api/vendor-onboarding/stage1/upload-file allows production apex origin with credentials', async () => {
+  const { app, cleanup } = createCorsProbeApp({
+    NODE_ENV: 'production',
+    CORS_ORIGINS:
+      'https://mosaicbizhub.com,https://app.mosaicbizhub.com,https://mosaic-biz-frontend-launch.vercel.app',
+  });
+
+  try {
+    const res = await supertest(app)
+      .options('/api/vendor-onboarding/stage1/upload-file')
+      .set('Origin', 'https://mosaicbizhub.com')
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type');
+
+    assert.equal(res.status, 204);
+    assert.equal(res.headers['access-control-allow-origin'], 'https://mosaicbizhub.com');
+    assert.equal(res.headers['access-control-allow-credentials'], 'true');
   } finally {
     cleanup();
   }

@@ -8,6 +8,7 @@
     "test:contract": "node --test tests/launch/backend-launch-contract.test.js",
     "test:integration": "node scripts/run-integration-tests.js",
     "smoke:backend": "node scripts/run-smoke-backend.js",
+    "s3:cors:vendor-upload": "node scripts/apply-s3-upload-cors.js",
     "dev": "nodemon index.js",
     "start": "node index.js"
   },

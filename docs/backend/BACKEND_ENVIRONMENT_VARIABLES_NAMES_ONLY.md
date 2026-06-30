@@ -92,6 +92,7 @@
 | `AWS_ACCESS_KEY_ID` | required-prod |
 | `AWS_SECRET_ACCESS_KEY` | required-prod |
 | `AWS_S3_BUCKET` | required-prod |
+| `S3_UPLOAD_CORS_ORIGINS` | optional-prod |
 | `STORAGE_PROVIDER` | optional (`aws`) |
 
 ---
