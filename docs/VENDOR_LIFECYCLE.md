@@ -288,8 +288,8 @@ After `verified`, the handler guides stages:
 
 ### Flow
 
-1. Client passes query params: `fileName`, `fileType`, `documentType`.
-2. Server validates `documentType` and MIME type.
+1. Client passes query params: `fileName`, `fileType`, `documentType`, and optional `fileSize`.
+2. Server validates `documentType`, resolved MIME type, and file size.
 3. Returns S3 presigned PUT URL (5 min expiry) + public `fileUrl`.
 4. Client uploads directly to S3, then saves URL in draft via `saveDraft`.
 
@@ -317,6 +317,9 @@ From [`utils/vendorOnboardingUploadMimeAllowlist.js`](../utils/vendorOnboardingU
 | `application/pdf` | .pdf |
 
 - `normalizeMimeType` strips parameters (e.g. `image/jpeg; charset=binary`).
+- Common browser PDF alias `application/x-pdf` resolves to `application/pdf`.
+- Empty or generic browser MIME values can fall back to a safe file extension allowlist (`.jpg`, `.jpeg`, `.png`, `.webp`, `.pdf`).
+- Vendor onboarding uploads are limited to 5 MB when the client sends `fileSize`.
 - Rejected types return `400` with allowed list in message.
 - Filename sanitized: non-alphanumeric → `_`; timestamp prefixed in S3 key.
 
