@@ -14,9 +14,9 @@ Mosaic backend uses a mix of S3 presigned PUT URLs, API-proxied S3 uploads, dire
 | Surface | Route/file | Auth | File/type behavior | Lifecycle |
 | --- | --- | --- | --- | --- |
 | Vendor onboarding docs | `GET /api/vendor-onboarding/stage1/upload-url`, `POST /api/vendor-onboarding/stage1/upload-file`, `controllers/vendorOnboardingUpload.controller.js` | Authenticated verified vendor | Allowed doc types; JPEG/PNG/WebP/PDF allowlist via `utils/vendorOnboardingUploadMimeAllowlist.js`; filename sanitized | Stage 1 direct path client PUTs to S3; business-profile refund/terms path uses API proxy; both save returned `fileUrl` |
-| Product images | `GET /api/product/upload-url`, `GET /api/product/variant-upload-url` | Authenticated | Product doc type allowlist; image MIME allowlist; gallery quota check for gallery images; response includes upload method/header contract | Client PUTs to S3 and stores returned URL |
-| Service images | `GET /api/service/upload-url` | Authenticated | Service doc type allowlist; image MIME allowlist; gallery quota check for gallery images; response includes upload method/header contract | Client PUTs to S3 and stores returned URL |
-| Food images | `GET /api/food/upload-url` | Authenticated | Food doc type allowlist, image MIME allowlist, gallery quota check, sanitized filenames; response includes upload method/header contract | Client PUTs to S3 and stores returned URL |
+| Product images | `GET /api/product/upload-url`, `GET /api/product/variant-upload-url` | Authenticated business owner | Product doc type allowlist; image MIME normalization/allowlist; gallery quota check for gallery images; response includes upload method/header contract | Client PUTs to S3 and stores returned URL |
+| Service images | `GET /api/service/upload-url` | Authenticated business owner | Service doc type allowlist; image MIME normalization/allowlist; gallery quota check for gallery images; response includes upload method/header contract | Client PUTs to S3 and stores returned URL |
+| Food images | `GET /api/food/upload-url` | Authenticated business owner | Food doc type allowlist, image MIME normalization/allowlist, gallery quota check, sanitized filenames; response includes upload method/header contract | Client PUTs to S3 and stores returned URL |
 | Generic S3 presign | `controllers/s3Controller.js` | Business owner or admin via route | Requires `fileName`/`fileType`; safe media MIME normalization; filename sanitized; user-scoped generic key | Client PUTs to S3 |
 | Business create upload | `middlewares/upload.js`, `utils/uploadFile.js` | Business owner route | Multer memory storage, 5 MB max, JPEG/JPG/PNG/WebP only | Server uploads file buffer to S3 |
 | Legacy Cloudinary pending image | `POST /api/upload-image`, `routes/uploadImage.js` | Authenticated business owner | Validates Cloudinary image URL format | Stores pending URL for cleanup if not attached |
@@ -24,7 +24,7 @@ Mosaic backend uses a mix of S3 presigned PUT URLs, API-proxied S3 uploads, dire
 ## Confirmed Controls
 
 - Vendor onboarding MIME allowlist: `image/jpeg`, `image/png`, `image/webp`, `application/pdf`.
-- Product/service presigned uploads validate image MIME types before issuing URLs.
+- Product/service/food presigned uploads normalize safe image MIME types, including extension fallback when browsers report generic file types.
 - Presigned URLs expire after 300 seconds.
 - Filenames are sanitized in vendor onboarding, product, service, food, and generic presign controllers.
 - Presigned responses include the browser upload contract: `method: "PUT"`, `requiredHeaders.Content-Type`, storage `key`, and 300-second expiry.

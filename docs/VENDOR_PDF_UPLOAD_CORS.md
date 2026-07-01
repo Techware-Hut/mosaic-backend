@@ -96,6 +96,18 @@ Use a safe dummy PDF, not a real vendor document.
    `vendor-onboarding/business-profile/{vendorUserId}/...`.
 8. Confirm a customer or unauthenticated session cannot get a signed upload URL.
 
+## Direct S3 Preflight Regression Check
+
+Run this only for the legacy/direct presigned path. Do not paste signed URLs, cookies, or vendor document contents into GitHub.
+
+1. Log in as a verified vendor/business owner.
+2. Request a direct presigned URL for a safe dummy PDF:
+   `GET /api/vendor-onboarding/stage1/upload-url?fileName=dummy.pdf&fileType=application/pdf&fileSize=1024&documentType=refund-policy`.
+3. Confirm the API response is `200` and includes `uploadUrl`, `method: "PUT"`, and `requiredHeaders["Content-Type"]`.
+4. In the browser Network tab, or with a local-only curl using the redacted signed URL, confirm the S3 `OPTIONS` preflight for the active frontend origin returns an allow-origin header and allows `PUT` with `Content-Type`.
+5. Confirm the following failure is not present: `upload-url` returns `200`, then the S3 `OPTIONS` request returns `403`.
+6. If `OPTIONS` is `403`, do not change frontend auth headers. Re-apply the S3 bucket CORS rule for the exact frontend origin in use.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |

@@ -16,7 +16,7 @@ const isBusinessOwner = require('../middlewares/isBusinessOwner');
 const isCustomer = require('../middlewares/isCustomer');
 const { listReviews, upsertReview, deleteReview } = require('../controllers/reviewController');
 
-router.get('/upload-url', authenticate, getFoodUploadUrl);
+router.get('/upload-url', authenticate, isBusinessOwner, getFoodUploadUrl);
 
 router.post('/add-food', authenticate, isBusinessOwner, createFood);
 

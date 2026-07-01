@@ -28,6 +28,13 @@ const ALLOWED_GENERIC_S3_UPLOAD_MIME_TYPES = [
   'video/mp4',
 ];
 
+const ALLOWED_IMAGE_S3_UPLOAD_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+];
+
 function buildPresignedS3UploadContract(contentType) {
   return {
     method: PRESIGNED_S3_UPLOAD_METHOD,
@@ -84,12 +91,25 @@ function isAllowedGenericS3UploadMimeType(mimeType, fileName) {
   );
 }
 
+function resolveImageS3UploadMimeType(mimeType, fileName) {
+  return resolveGenericS3UploadMimeType(mimeType, fileName);
+}
+
+function isAllowedImageS3UploadMimeType(mimeType, fileName) {
+  return ALLOWED_IMAGE_S3_UPLOAD_MIME_TYPES.includes(
+    resolveImageS3UploadMimeType(mimeType, fileName)
+  );
+}
+
 module.exports = {
   ALLOWED_GENERIC_S3_UPLOAD_MIME_TYPES,
+  ALLOWED_IMAGE_S3_UPLOAD_MIME_TYPES,
   PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
   PRESIGNED_S3_UPLOAD_METHOD,
   buildPresignedS3UploadContract,
   isAllowedGenericS3UploadMimeType,
+  isAllowedImageS3UploadMimeType,
+  resolveImageS3UploadMimeType,
   resolveGenericS3UploadMimeType,
   sanitizeS3UploadFileName,
 };

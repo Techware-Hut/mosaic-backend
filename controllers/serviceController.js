@@ -21,6 +21,8 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const {
   PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
   buildPresignedS3UploadContract,
+  isAllowedImageS3UploadMimeType,
+  resolveImageS3UploadMimeType,
   sanitizeS3UploadFileName,
 } = require('../utils/s3PresignedUploadContract');
 
@@ -1009,8 +1011,8 @@ exports.getServiceUploadUrl = async (req, res) => {
     }
 
     // Validate file type (images only)
-    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    if (!allowedMimeTypes.includes(fileType)) {
+    const normalizedFileType = resolveImageS3UploadMimeType(fileType, fileName);
+    if (!isAllowedImageS3UploadMimeType(fileType, fileName)) {
       return res.status(400).json({
         message: "Only image files are allowed (JPEG, JPG, PNG, GIF, WEBP)",
       });
@@ -1072,7 +1074,7 @@ exports.getServiceUploadUrl = async (req, res) => {
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: key,
-      ContentType: fileType,
+      ContentType: normalizedFileType,
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
@@ -1089,7 +1091,7 @@ exports.getServiceUploadUrl = async (req, res) => {
       fileUrl,
       documentType,
       key,
-      ...buildPresignedS3UploadContract(fileType),
+      ...buildPresignedS3UploadContract(normalizedFileType),
     });
 
   } catch (error) {

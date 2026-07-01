@@ -37,6 +37,7 @@ const router = express.Router();
 router.get(
   '/upload-url',
   authenticate,
+  isBusinessOwner,
   getProductUploadUrl
 );
 
@@ -48,6 +49,7 @@ router.get(
 router.get(
   '/variant-upload-url',
   authenticate,
+  isBusinessOwner,
   getVariantImageUploadUrl
 );
 
