@@ -7,6 +7,7 @@ const ADMIN_AUDIT_ACTIONS = Object.freeze({
   VENDOR_APPLICATION_FINALIZE_APPROVED: 'vendor.application.finalize_approved',
   VENDOR_APPLICATION_FINALIZE_REJECTED: 'vendor.application.finalize_rejected',
   VENDOR_APPLICATION_FINALIZE_FAILED: 'vendor.application.finalize_failed',
+  VENDOR_APPLICATION_NOTIFY_GUIDANCE: 'vendor.application.notify_guidance',
 
   USER_BLOCK: 'user.block',
   USER_UNBLOCK: 'user.unblock',

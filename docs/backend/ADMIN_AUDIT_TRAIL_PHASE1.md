@@ -21,6 +21,7 @@ No existing `AuditLog`, `ActionLog`, or admin activity model was found. Request 
 | `vendor.application.finalize_approved` | `POST .../finalize` — approved |
 | `vendor.application.finalize_rejected` | `POST .../finalize` — rejected |
 | `vendor.application.finalize_failed` | Finalize blocked (not found / wrong status) |
+| `vendor.application.notify_guidance` | `POST .../verification-guidance` — correction/clarification email attempt |
 | `user.block` / `user.unblock` | `PUT /admin/users/:id/block` |
 | `user.soft_delete` | `DELETE /admin/users/:id` |
 | `business.approve` / `business.disapprove` | `POST /admin/api/business/approve/:id` |

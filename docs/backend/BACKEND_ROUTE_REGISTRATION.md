@@ -110,6 +110,7 @@ Mounts: `/api/vendor-onboarding` **and** `/admin/vendor-onboard-verify-stage1` (
 | GET | `/pending` | `getPendingApplications` | JWT | admin | verified |
 | GET | `/:applicationId` | `getApplicationDetails` | JWT | admin | verified |
 | POST | `/:applicationId/verify` | `verifyAndAllocatePoints` | JWT | admin | verified |
+| POST | `/:applicationId/verification-guidance` | `sendVerificationGuidanceNotification` | JWT | admin | verified |
 | POST | `/:applicationId/finalize` | `finalizeVerification` | JWT | admin | verified |
 
 ---

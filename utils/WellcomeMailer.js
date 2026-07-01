@@ -9,6 +9,162 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+const escapeHtml = (value = '') =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const normalizeMailerList = (value) => {
+  const values = Array.isArray(value) ? value : [value];
+
+  return values
+    .flatMap((item) => {
+      if (Array.isArray(item)) return item;
+      if (typeof item === 'string' && item.includes(',')) {
+        return item.split(',');
+      }
+      return item;
+    })
+    .map((item) => String(item ?? '').trim())
+    .filter(Boolean);
+};
+
+const vendorGuidanceCopy = Object.freeze({
+  missing_documents: {
+    subject: 'Action Required: Vendor Application Documents Needed',
+    heading: 'We need a few documents before approval',
+    defaultReason: 'Some required documents are missing or not verified.',
+  },
+  failed_validation: {
+    subject: 'Action Required: Vendor Verification Correction Needed',
+    heading: 'A submitted item did not pass verification',
+    defaultReason: 'One or more submitted items could not be verified.',
+  },
+  discrepancy: {
+    subject: 'Action Required: Vendor Application Clarification Needed',
+    heading: 'We need clarification on your application',
+    defaultReason: 'Some application details need to be clarified before review can continue.',
+  },
+  under_review: {
+    subject: 'Vendor Application Under Review',
+    heading: 'Your application is under review',
+    defaultReason: 'Our team is still reviewing your submitted application.',
+  },
+  manual_review: {
+    subject: 'Vendor Application Manual Review Update',
+    heading: 'Your application needs manual review',
+    defaultReason: 'Your application has been routed for manual review by our team.',
+  },
+});
+
+function buildListHtml(items) {
+  if (!items.length) return '';
+
+  return `
+    <ul style="margin:8px 0 0 18px; padding:0; color:#475569; line-height:1.6;">
+      ${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+    </ul>
+  `;
+}
+
+exports.sendVendorVerificationGuidanceEmail = async ({
+  to,
+  vendorName,
+  businessName,
+  applicationId,
+  currentStatus,
+  outcome,
+  reason,
+  reasons,
+  documentsNeeded,
+  fieldsNeeded,
+  responseWindowDays,
+  correctionPath = '/partners/business/new',
+  supportEmail,
+}) => {
+  const copy = vendorGuidanceCopy[outcome] || vendorGuidanceCopy.failed_validation;
+  const reasonItems = normalizeMailerList(reasons);
+  const safeReason = String(reason ?? '').trim();
+  if (safeReason) {
+    reasonItems.unshift(safeReason);
+  }
+
+  const documents = normalizeMailerList(documentsNeeded);
+  const fields = normalizeMailerList(fieldsNeeded);
+  const responseDays = Number(responseWindowDays);
+  const responseWindowText = Number.isFinite(responseDays) && responseDays > 0
+    ? `Please respond within ${Math.round(responseDays)} business day${Math.round(responseDays) === 1 ? '' : 's'}.`
+    : 'Please respond as soon as you can so our team can continue review.';
+  const contactEmail = supportEmail || process.env.SUPPORT_EMAIL || 'info@mosaicbizhub.com';
+  const status = currentStatus || 'submitted';
+  const displayName = vendorName || 'there';
+  const displayBusinessName = businessName || 'your business';
+  const correctionUrl = buildFrontendUrl(correctionPath);
+
+  const mailOptions = {
+    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    to,
+    subject: copy.subject,
+    html: `
+      <div style="font-family:Arial,sans-serif;background:#f8fafc;padding:28px;">
+        <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;padding:28px;border:1px solid #e2e8f0;">
+          <h2 style="margin:0 0 12px;color:#0f172a;">Hello ${escapeHtml(displayName)},</h2>
+          <p style="color:#475569;line-height:1.6;margin:0 0 16px;">
+            ${escapeHtml(copy.heading)} for <strong>${escapeHtml(displayBusinessName)}</strong>.
+          </p>
+
+          <div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:14px;margin:18px 0;">
+            <p style="margin:0;color:#334155;"><strong>Application ID:</strong> ${escapeHtml(applicationId || 'N/A')}</p>
+            <p style="margin:6px 0 0;color:#334155;"><strong>Current status:</strong> ${escapeHtml(status)}</p>
+          </div>
+
+          <p style="color:#475569;line-height:1.6;margin:0 0 8px;">
+            <strong>Reason${reasonItems.length > 1 ? 's' : ''}:</strong>
+          </p>
+          ${buildListHtml(reasonItems.length ? reasonItems : [copy.defaultReason])}
+
+          ${documents.length ? `
+            <p style="color:#475569;line-height:1.6;margin:18px 0 8px;">
+              <strong>Documents needed:</strong>
+            </p>
+            ${buildListHtml(documents)}
+          ` : ''}
+
+          ${fields.length ? `
+            <p style="color:#475569;line-height:1.6;margin:18px 0 8px;">
+              <strong>Fields or details needed:</strong>
+            </p>
+            ${buildListHtml(fields)}
+          ` : ''}
+
+          <p style="color:#475569;line-height:1.6;margin:18px 0 0;">
+            ${escapeHtml(responseWindowText)}
+          </p>
+
+          <div style="margin:24px 0;text-align:center;">
+            <a href="${correctionUrl}" style="background:#1d4ed8;color:#fff;padding:12px 18px;text-decoration:none;border-radius:6px;font-size:14px;font-weight:bold;">
+              Open Vendor Dashboard
+            </a>
+          </div>
+
+          <p style="font-size:13px;color:#64748b;line-height:1.5;margin:24px 0 0;">
+            Need help? Contact <a href="mailto:${escapeHtml(contactEmail)}">${escapeHtml(contactEmail)}</a>.
+          </p>
+
+          <p style="font-size:13px;color:#64748b;margin:18px 0 0;">
+            Mosaic Biz Hub Team
+          </p>
+        </div>
+      </div>
+    `,
+  };
+
+  await transporter.sendMail(mailOptions);
+};
+
 exports.sendWelcomeEmail = async (to, vendorName) => {
   const mailOptions = {
     from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
@@ -179,69 +335,23 @@ exports.sendVendorRejectionEmail = async ({
   to,
   vendorName,
   applicationId,
-  rejectionReason
+  rejectionReason,
+  businessName,
+  currentStatus = 'rejected',
+  documentsNeeded,
+  responseWindowDays,
 }) => {
-  const safeRejectionReason =
-    rejectionReason || 'Some required documents are not verified.';
-
-  const mailOptions = {
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+  await exports.sendVendorVerificationGuidanceEmail({
     to,
-    subject: "Action Required: Vendor Application Update",
-    html: `
-      <div style="font-family: Arial, sans-serif; background:#f4f6f8; padding:30px;">
-        <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:8px; padding:30px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-          
-          <h2 style="color:#2c3e50;">Hello ${vendorName},</h2>
-          
-          <p style="color:#555; line-height:1.6;">
-            Thank you for applying to <strong>Mosaic Biz Hub</strong>.
-          </p>
-
-          <p style="color:#555; line-height:1.6;">
-            Your application could not be approved because the following required document(s) are not verified:
-          </p>
-
-          <div style="background:#fff3f3; border:1px solid #f5c6cb; padding:15px; border-radius:6px; margin:20px 0;">
-            <p style="margin:0; color:#a94442;">
-              <strong>Unverified Documents:</strong><br/>
-              ${safeRejectionReason}
-            </p>
-          </div>
-
-          <p style="color:#555; line-height:1.6;">
-            Please update the required documents to continue your verification process.
-          </p>
-
-          <div style="margin:25px 0; text-align:center;">
-            <a 
-              href="${buildFrontendUrl('/partners/business/new')}"
-              style="background:#c79b44; color:#fff; padding:12px 18px; text-decoration:none; border-radius:6px; font-size:14px; font-weight:bold;"
-            >
-              Update Documents
-            </a>
-          </div>
-
-          <p style="color:#555; line-height:1.6;">
-            Once updated, our team will review your application again.
-          </p>
-
-          <hr style="border:none; border-top:1px solid #eee; margin:30px 0;" />
-
-          <p style="font-size:13px; color:#888;">
-            If you need help, feel free to reply to this email.
-          </p>
-
-          <p style="font-size:13px; color:#888;">
-            Best regards,<br/>
-            <strong>Mosaic Biz Hub Team</strong>
-          </p>
-        </div>
-      </div>
-    `,
-  };
-
-  await transporter.sendMail(mailOptions);
+    vendorName,
+    businessName,
+    applicationId,
+    currentStatus,
+    outcome: 'missing_documents',
+    reason: rejectionReason,
+    documentsNeeded,
+    responseWindowDays,
+  });
 };
 
 // exports.sendVendorRejectionEmail = async ({

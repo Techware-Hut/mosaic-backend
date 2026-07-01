@@ -217,6 +217,27 @@ On finalize: `syncBusinessPoints` updates `Business.points` and `Business.badge`
 
 **Note:** `finalizeVerification` does **not** call `syncBusinessFromOnboarding`. Full Business record creation/update happens later via profile PUT (see Phase 7).
 
+### Step C - Vendor guidance notifications
+
+**Route:** `POST /api/vendor-onboarding/:applicationId/verification-guidance` (admin)
+**Handler:** `sendVerificationGuidanceNotification`
+
+This route sends vendor-facing clarification/correction emails without changing the Stage-1 application status. Supported `outcome` values:
+
+| Outcome | Email purpose |
+|---------|---------------|
+| `missing_documents` | Required documents are missing or not verified |
+| `failed_validation` | A submitted document/detail did not pass verification |
+| `discrepancy` | Application details need clarification against public/business records |
+| `under_review` | Application remains under review |
+| `manual_review` | Application has been routed for manual review |
+
+The request may include vendor-visible `reason`, `reasons`, `adminNote`, `documentsNeeded`, `fieldsNeeded`, and optional `responseWindowDays`. Internal-only notes are not forwarded. The backend dedupes repeat notifications for the same application status, outcome, reason, documents, fields, and response window.
+
+Notification attempts are stored on `VendorOnboardingStage1.verificationNotificationLog` with delivery status (`sent`, `skipped`, or `failed`) after the email attempt. This is audit evidence only; it does not replace admin audit events.
+
+There is no Stage-1 stalled/deactivated application workflow in the current model, so no final stalled/deactivated lifecycle email is implemented here.
+
 ---
 
 ## Phase 6: Rejected state
@@ -423,6 +444,7 @@ flowchart TD
 | `GET /pending` | No | Yes — `authenticate` + `isAdmin` |
 | `GET /:applicationId` | No | Yes |
 | `POST /:applicationId/verify` | No | Yes |
+| `POST /:applicationId/verification-guidance` | No | Yes |
 | `POST /:applicationId/finalize` | No | Yes |
 
 Admin routes mount at both `/api/vendor-onboarding/*` and `/admin/vendor-onboard-verify-stage1/*` (same router).
@@ -530,6 +552,7 @@ npm test   # includes tests/vendor/*
 | GET | `/pending` | `getPendingApplications` | Admin |
 | GET | `/:applicationId` | `getApplicationDetails` | Admin |
 | POST | `/:applicationId/verify` | `verifyAndAllocatePoints` | Admin |
+| POST | `/:applicationId/verification-guidance` | `sendVerificationGuidanceNotification` | Admin |
 | POST | `/:applicationId/finalize` | `finalizeVerification` | Admin |
 
 Webhook: `POST /api/vendor-onboarding/webhook/payment` → `handleVendorPaymentWebhook`
