@@ -289,13 +289,13 @@ After `verified`, the handler guides stages:
 
 ### Flow
 
-1. Business-profile UI sends `multipart/form-data` to `POST /stage1/upload-file` with `file` and `documentType`.
+1. `/partners/business/new` and `/partners/business-profile` send `multipart/form-data` to `POST /stage1/upload-file` with `file` and `documentType`.
 2. Server verifies the vendor session, validates `documentType`, resolved MIME type, and file size.
 3. Server writes the object to S3 under the authenticated vendor user path.
 4. API returns `fileUrl`, `documentType`, and object `key`.
-5. Client saves URL in draft via `saveDraft`.
+5. Client saves URL in the Stage-1 draft or business profile payload.
 
-The presigned `GET /stage1/upload-url` path is retained for direct S3 uploads, but browser direct-upload requires S3 bucket CORS. The intended business-profile PDF path uses the API proxy to avoid S3 browser preflight failures.
+The presigned `GET /stage1/upload-url` path is retained for direct S3 diagnostics, but browser direct-upload requires S3 bucket CORS. The intended vendor/business document UI paths use the API proxy to avoid S3 browser preflight failures. Do not regress `/partners/business/new` back to `GET /stage1/upload-url`; it must share the same upload helper as `/partners/business-profile`.
 
 ### Allowed `documentType` values
 
