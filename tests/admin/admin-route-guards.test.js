@@ -140,6 +140,7 @@ test('vendor onboarding admin routes require authenticate and isAdmin', () => {
     "router.get('/pending', authenticate, isAdmin",
     "router.get('/:applicationId', authenticate, isAdmin",
     "router.post('/:applicationId/verify', authenticate, isAdmin",
+    "router.post('/:applicationId/verification-guidance', authenticate, isAdmin",
     "router.post('/:applicationId/finalize', authenticate, isAdmin",
   ];
 

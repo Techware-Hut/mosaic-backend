@@ -165,6 +165,32 @@ const VendorOnboardingStage1Schema = new mongoose.Schema(
 
     profileCompletionNotifiedAt: Date,
 
+    verificationNotificationLog: [
+      {
+        event: String,
+        fingerprint: String,
+        applicationStatus: String,
+        deliveryStatus: {
+          type: String,
+          enum: ["sent", "skipped", "failed"],
+        },
+        labels: [String],
+        reasonSummary: String,
+        documentsNeeded: [String],
+        fieldsNeeded: [String],
+        responseWindowDays: Number,
+        triggeredBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        attemptedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        error: String,
+      },
+    ],
+
     totalVerificationPoints: {
       type: Number,
       default: 0,

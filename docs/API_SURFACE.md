@@ -89,6 +89,7 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 | GET | `.../pending` | `authenticate`, `isAdmin` | `getPendingApplications` | admin | Admin review queue (`submitted` only) | 🟡 P3.1 |
 | GET | `.../:applicationId` | `authenticate`, `isAdmin` | `getApplicationDetails` | admin | Application detail | 🟡 P3.2 |
 | POST | `.../:applicationId/verify` | `authenticate`, `isAdmin` | `verifyAndAllocatePoints` | admin | Mark checklist item; add points | 🟡 P3.3 |
+| POST | `.../:applicationId/verification-guidance` | `authenticate`, `isAdmin` | `sendVerificationGuidanceNotification` | admin | Send correction/clarification email without status change | 🟡 P3.4 |
 | POST | `.../:applicationId/finalize` | `authenticate`, `isAdmin` | `finalizeVerification` | admin | Approve/reject Stage-1 | 🔴 P3.4 — sends emails |
 
 ---
@@ -328,7 +329,7 @@ Router-level: `authenticate`, `isCustomer`.
 
 | Method | Route | Middleware | Controller | Auth/Role | Purpose | Smoke Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| POST | `/api/orders/initiate` | `authenticate` | `initiateOrder` | Authenticated customer | Create order + Stripe PI (Connect) | 🔴 **P5.2–P5.3** — real money; emails before pay |
+| POST | `/api/orders/initiate` | `authenticate` | `initiateOrder` | Authenticated customer | Create order + Stripe PI (Connect) | Real money; paid email is webhook-only |
 | GET | `/api/orders/retrieve-intent/:id` | `authenticate` | `retrieveIntent` | Authenticated | PI + orders lookup | 🟡 P5.4 |
 | GET | `/api/orders/user` | `authenticate` | `getUserOrders` | Authenticated | Customer orders | 🟡 |
 | GET | `/api/orders/:id/invoice.pdf` | `authenticate` | `getInvoicePdf` | Authenticated | Invoice PDF | 🟡 |
@@ -523,7 +524,7 @@ Routes that need extra care in production testing (from [launch-readiness-report
 | **Real money** | `POST /api/orders/initiate`, vendor `create-payment`, subscriptions | Stripe test mode + dedicated test accounts only |
 | **Public status leak** | `GET /api/vendor-onboarding/status/:applicationId` | Do not use real application IDs in public demos |
 | **Admin destructive** | `/admin/users/*`, finalize, business approve | Admin test account only |
-| **Pre-payment emails** | `POST /api/orders/initiate` | Known P0-6 — expect emails before pay succeeds |
+| **Order emails** | `POST /api/orders/initiate`, `/api/stripe/payment/webhook`, lifecycle routes | Paid confirmation is webhook-only; lifecycle emails are best-effort after state changes |
 
 ---
 

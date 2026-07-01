@@ -32,6 +32,7 @@ const {
   getPendingApplications,
   getApplicationDetails,
   verifyAndAllocatePoints,
+  sendVerificationGuidanceNotification,
   finalizeVerification,
 } = require("../controllers/admin/vendorOnboardVerifyStage1");
 
@@ -64,6 +65,7 @@ router.get("/stage1/payment-status", authMiddleware, requireVerifiedVendor, getP
 router.get('/pending', authenticate, isAdmin, getPendingApplications);
 router.get('/:applicationId', authenticate, isAdmin, getApplicationDetails);
 router.post('/:applicationId/verify', authenticate, isAdmin, verifyAndAllocatePoints);
+router.post('/:applicationId/verification-guidance', authenticate, isAdmin, sendVerificationGuidanceNotification);
 router.post('/:applicationId/finalize', authenticate, isAdmin, finalizeVerification);
 
 module.exports = router;
