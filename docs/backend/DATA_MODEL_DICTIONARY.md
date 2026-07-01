@@ -169,6 +169,8 @@ Unique `{ customerId, productVariantId }`.
 | `status`, `statusHistory` | lifecycle |
 | `paymentStatus`, `paymentId`, `paymentMethod` | Stripe |
 | `chargeId`, `transferId` on items | post-webhook |
+| `paidConfirmationEmailSentAt` | post-payment email duplicate guard |
+| `lifecycleEmailLog` | customer order lifecycle email attempt audit |
 
 **Indexes:** `{ userId, vendorId, status }`, `{ groupOrderId }`
 

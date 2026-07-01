@@ -68,6 +68,7 @@ function loadOrderController({ orders = [], order = null } = {}) {
       return {
         sendOrderStatusEmail: async () => {},
         sendOrderUpdateEmail: async () => {},
+        sendOrderLifecycleEmail: async () => {},
         sendVendorNewOrderEmail: async () => {},
         sendCustomerOrderPlacedEmail: async () => {},
       };

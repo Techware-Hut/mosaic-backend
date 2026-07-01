@@ -177,6 +177,24 @@ const orderSchema = new Schema(
       type: Date,
       default: null,
     },
+    lifecycleEmailLog: [
+      {
+        event: String,
+        fingerprint: String,
+        orderStatus: String,
+        paymentStatus: String,
+        deliveryStatus: {
+          type: String,
+          enum: ["sent", "skipped", "failed"],
+        },
+        recipientRole: String,
+        attemptedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        error: String,
+      },
+    ],
     stripeCustomerId: {
       type: String, // Optional: if using Stripe Customer objects
     },

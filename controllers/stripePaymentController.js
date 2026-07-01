@@ -2,6 +2,10 @@ const Stripe = require("stripe");
 const Order = require("../models/Order");
 const { sendOrderPaidEmails } = require("../utils/OrderMail");
 const {
+  appendOrderLifecycleEmailLog,
+  buildOrderLifecycleEmailFingerprint,
+} = require("../utils/orderLifecycleEmailDelivery");
+const {
   sanitizePaymentIntentForClient,
   sanitizeOrderForPaymentPoll,
 } = require("../utils/paymentIntentResponse");
@@ -101,6 +105,10 @@ exports.stripePaymentWebhook = async (req, res) => {
           order.businessId?.owner?.email,
         ].filter(Boolean);
         const uniqueVendorEmails = [...new Set(vendorEmails)];
+        const paidEmailFingerprint = buildOrderLifecycleEmailFingerprint(
+          order,
+          "order_paid_confirmation"
+        );
 
         // ✅ send emails (best-effort)
         try {
@@ -112,7 +120,20 @@ exports.stripePaymentWebhook = async (req, res) => {
           });
           order.paidConfirmationEmailSentAt = new Date();
           await order.save();
+          await appendOrderLifecycleEmailLog(order, {
+            event: "order_paid_confirmation",
+            fingerprint: paidEmailFingerprint,
+            deliveryStatus: "sent",
+            recipientRole: "customer",
+          });
         } catch (mailErr) {
+          await appendOrderLifecycleEmailLog(order, {
+            event: "order_paid_confirmation",
+            fingerprint: paidEmailFingerprint,
+            deliveryStatus: "failed",
+            recipientRole: "customer",
+            error: mailErr?.message || "Unknown email error",
+          });
           console.error("✉️ Failed to send order-paid emails:", mailErr?.message || mailErr);
         }
       }

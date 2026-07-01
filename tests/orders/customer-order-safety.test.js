@@ -24,12 +24,13 @@ function makeOrder(overrides = {}) {
   let saveCalls = 0;
   return {
     _id: 'order-1',
-    userId: 'customer-1',
+    userId: { _id: 'customer-1', email: 'customer@example.com' },
     status: 'ordered',
     paymentStatus: 'pending',
     paymentId: null,
     items: [],
     statusHistory: [],
+    lifecycleEmailLog: [],
     async save() {
       saveCalls += 1;
     },
@@ -51,6 +52,7 @@ function loadOrderController({
     find: [],
     findOne: [],
     populate: [],
+    email: [],
     refundCreate: [],
     variantFindById: [],
     sequence: [],
@@ -93,7 +95,15 @@ function loadOrderController({
         },
         findOne(filter) {
           calls.findOne.push(filter);
-          return order;
+          return {
+            populate(field, select) {
+              calls.populate.push({ field, select });
+              return Promise.resolve(order);
+            },
+            then(resolve, reject) {
+              return Promise.resolve(order).then(resolve, reject);
+            },
+          };
         },
       };
     }
@@ -118,8 +128,9 @@ function loadOrderController({
 
     if (request.endsWith('utils/orderPhase')) {
       return {
-        sendOrderStatusEmail: async () => {},
-        sendOrderUpdateEmail: async () => {},
+        sendOrderStatusEmail: async (...args) => calls.email.push(['status', ...args]),
+        sendOrderUpdateEmail: async (...args) => calls.email.push(['update', ...args]),
+        sendOrderLifecycleEmail: async (...args) => calls.email.push(['lifecycle', ...args]),
         sendVendorNewOrderEmail: async () => {},
         sendCustomerOrderPlacedEmail: async () => {},
       };
@@ -218,6 +229,7 @@ test('cancelOrderByUser does not restore accepted-order stock when refund fails'
   assert.equal(order.status, 'accepted');
   assert.equal(order.paymentStatus, 'paid');
   assert.deepEqual(order.statusHistory, []);
+  assert.deepEqual(calls.email, []);
   assert.equal(order.getSaveCalls(), 0);
 });
 
@@ -264,5 +276,13 @@ test('cancelOrderByUser restores accepted-order stock after successful refund', 
   assert.equal(order.status, 'cancelled');
   assert.equal(order.paymentStatus, 'refunded');
   assert.deepEqual(order.statusHistory, [{ status: 'cancelled' }]);
-  assert.equal(order.getSaveCalls(), 1);
+  assert.equal(order.lifecycleEmailLog.length, 1);
+  assert.equal(order.lifecycleEmailLog[0].event, 'order_cancelled');
+  assert.equal(order.lifecycleEmailLog[0].deliveryStatus, 'sent');
+  assert.equal(res.body.order.lifecycleEmailLog, undefined);
+  assert.equal(calls.email.length, 1);
+  assert.equal(calls.email[0][0], 'lifecycle');
+  assert.equal(calls.email[0][1], 'customer@example.com');
+  assert.equal(calls.email[0][3], 'order_cancelled');
+  assert.equal(order.getSaveCalls(), 2);
 });

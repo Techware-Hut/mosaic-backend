@@ -107,7 +107,7 @@ sequenceDiagram
     API->>DB: status=cancelled only
   end
   API-->>C: 200 + order
-  Note over C,S: No customer email on cancel (reject/ship/deliver do email)
+  Note over C,S: Customer lifecycle email is attempted after state save; failure is logged without reversing state
 ```
 
 ### Vendor reject (paid order)
@@ -151,7 +151,7 @@ sequenceDiagram
     API->>S: refunds.create(full, reverse_transfer, refund_application_fee)
     API->>DB: paymentStatus=refunded, status=refunded
   end
-  Note over V,S: No email on initiateReturn or acceptReturn
+  Note over V,S: Customer lifecycle email is attempted for return initiated and refund processed after state save
 ```
 
 ### Webhook `charge.refunded` (as-built)
@@ -201,7 +201,7 @@ Classification key:
 | Connected-account transfer reversal | Implemented; runtime proof needed | `reverse_transfer: true` on all refund creates |
 | Application fee handling on refund | Implemented; runtime proof needed | `refund_application_fee: true` |
 | Status synchronization (inline + webhook) | **Confirmed bug** (partial) | Inline updates work; `charge.refunded` depends on charge metadata |
-| Notification on refund/cancel/return | **Client policy decision needed** | Reject/ship/deliver email; cancel/return paths silent |
+| Notification on refund/cancel/return | Implemented; runtime proof needed | Customer lifecycle email attempts logged in `lifecycleEmailLog`; targeted unit coverage added |
 | Reconciliation / audit trail | **Absent** (partial webhook) | No `Refund` records; item-level Stripe IDs not cleared on refund |
 | Stripe dispute webhooks | **Absent** | No `charge.dispute.*` handlers |
 | `Refund` model persistence | **Absent** | Orphan schema |
@@ -234,7 +234,7 @@ Classification key:
 | # | Question | Current behavior |
 |---|----------|------------------|
 | P1 | Should customer `initiateReturn` create a **pending** return vs immediately `returned`? | Immediate `returned`; vendor cannot reject return request |
-| P2 | Should cancel/acceptReturn/initiateReturn send **email notifications**? | Only reject/ship/deliver notify |
+| P2 | Should cancel/acceptReturn/initiateReturn send **email notifications**? | Yes - best-effort customer lifecycle email attempts are logged after state save |
 | P3 | Are **partial refunds** (damaged item, shipping only) required? | Not supported |
 | P4 | Who resolves **lost/damaged in transit** — vendor, platform, or insurer? | No workflow |
 | P5 | Should **admin** override refunds or mediate disputes? | No admin actions |

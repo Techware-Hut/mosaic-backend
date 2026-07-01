@@ -98,7 +98,12 @@ const User = require("../models/User");
 const ProductVariant = require("../models/ProductVariant")  ;
 const Business = require("../models/Business");
 const { getBusinessCheckoutBlock } = require("../utils/checkoutGuards");
-const { sendOrderStatusEmail, sendOrderUpdateEmail } = require("../utils/orderPhase");
+const {
+  sendOrderStatusEmail,
+  sendOrderUpdateEmail,
+  sendOrderLifecycleEmail,
+} = require("../utils/orderPhase");
+const { sendCustomerOrderLifecycleEmail } = require("../utils/orderLifecycleEmailDelivery");
 const {
   calculateShippingForVendor,
   normalizeDeliverySpeed,
@@ -120,6 +125,13 @@ const toNum = (value) => {
 };
 
 const getAuthenticatedUserId = (req) => req.user?.id || req.user?._id;
+
+function serializeOrderForResponse(order) {
+  if (!order) return order;
+  const payload = typeof order.toObject === "function" ? order.toObject() : { ...order };
+  delete payload.lifecycleEmailLog;
+  return payload;
+}
 
 const ADMIN_PAYMENT_BUCKETS = ["pending", "paid", "failed", "refunded"];
 const ADMIN_STATUS_BUCKETS = [
@@ -1035,19 +1047,17 @@ exports.acceptOrder = async (req, res) => {
     order.statusHistory.push({ status: "accepted" });
     await order.save();
 
-    try {
-      const customerEmail = order.userId.email; // use whichever you store
-      if (customerEmail) {
-        await sendOrderStatusEmail(customerEmail, order._id.toString(), "accepted");
-      }
-    } catch (e) {
-      console.error("Failed to send acceptance email:", e?.message || e);
-    }
+    const emailDelivery = await sendCustomerOrderLifecycleEmail({
+      order,
+      event: "order_accepted",
+      send: (customerEmail) => sendOrderStatusEmail(customerEmail, order._id.toString(), "accepted"),
+    });
 
     res.json({
       success: true,
       message: "Order accepted and stock updated",
-      order,
+      emailDelivery,
+      order: serializeOrderForResponse(order),
     });
   } catch (err) {
     console.error("Error accepting order:", err);
@@ -1113,19 +1123,17 @@ exports.rejectOrder = async (req, res) => {
     }
 
     await order.save();
-    try {
-      const customerEmail = order.userId.email; // use whichever you store
-      if (customerEmail) {
-        await sendOrderStatusEmail(customerEmail, order._id.toString(), "rejected");
-      }
-    } catch (e) {
-      console.error("Failed to send rejection email:", e?.message || e);
-    }
+    const emailDelivery = await sendCustomerOrderLifecycleEmail({
+      order,
+      event: "order_rejected",
+      send: (customerEmail) => sendOrderStatusEmail(customerEmail, order._id.toString(), "rejected"),
+    });
 
     res.json({
       success: true,
       message: "Order rejected and refunded (if paid)",
-      order,
+      emailDelivery,
+      order: serializeOrderForResponse(order),
     });
   } catch (err) {
     console.error("Error rejecting order:", err);
@@ -1172,18 +1180,19 @@ exports.shipOrder = async (req, res) => {
     await order.save();
 
     // ✅ FIX EMAIL SENDING
-    const email = order.userId?.email;
-
-    if (email) {
-      await sendOrderUpdateEmail(email, "shipped", trackingUrl);
-    } else {
-      console.error("Missing user email for order:", order._id);
-    }
+    const emailDelivery = await sendCustomerOrderLifecycleEmail({
+      order,
+      event: "order_shipped",
+      fingerprintDetails: { trackingId, trackingUrl },
+      send: (customerEmail) =>
+        sendOrderUpdateEmail(customerEmail, "shipped", trackingUrl, { trackingId }),
+    });
 
     res.json({
       success: true,
       message: "Order marked as shipped",
-      order,
+      emailDelivery,
+      order: serializeOrderForResponse(order),
     });
   } catch (err) {
     console.error("Error in shipOrder:", err);
@@ -1219,18 +1228,17 @@ exports.deliverOrder = async (req, res) => {
     await order.save();
 
     // ✅ FIX EMAIL
-    const email = order.userId?.email;
-
-    if (email) {
-      await sendOrderUpdateEmail(email, "delivered");
-    } else {
-      console.error("Missing user email for order:", order._id);
-    }
+    const emailDelivery = await sendCustomerOrderLifecycleEmail({
+      order,
+      event: "order_delivered",
+      send: (customerEmail) => sendOrderUpdateEmail(customerEmail, "delivered"),
+    });
 
     res.json({
       success: true,
       message: "Order marked as delivered successfully",
-      order,
+      emailDelivery,
+      order: serializeOrderForResponse(order),
     });
   } catch (err) {
     console.error("Error delivering order:", err);
@@ -1243,7 +1251,8 @@ exports.initiateReturn = async (req, res) => {
     const userId = getAuthenticatedUserId(req);
     const orderId = req.params.orderId;
 
-    const order = await Order.findOne({ _id: orderId, userId });
+    const order = await Order.findOne({ _id: orderId, userId })
+      .populate("userId", "email name");
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found or unauthorized" });
     }
@@ -1261,10 +1270,17 @@ exports.initiateReturn = async (req, res) => {
 
     await order.save();  // Save the order after marking it as returned
 
+    const emailDelivery = await sendCustomerOrderLifecycleEmail({
+      order,
+      event: "return_initiated",
+      send: (customerEmail) => sendOrderLifecycleEmail(customerEmail, order, "return_initiated"),
+    });
+
     res.json({
       success: true,
       message: 'Return initiated successfully',
-      order,
+      emailDelivery,
+      order: serializeOrderForResponse(order),
     });
   } catch (err) {
     console.error("Error initiating return:", err);
@@ -1279,7 +1295,9 @@ exports.acceptReturn = async (req, res) => {
     const vendorId = req.user._id;
     const orderId = req.params.orderId;
 
-    const order = await Order.findOne({ _id: orderId, vendorId }).populate('businessId');
+    const order = await Order.findOne({ _id: orderId, vendorId })
+      .populate('businessId')
+      .populate('userId', 'email name');
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found or unauthorized" });
     }
@@ -1326,10 +1344,17 @@ exports.acceptReturn = async (req, res) => {
 
     await order.save();  // Save the updated order
 
+    const emailDelivery = await sendCustomerOrderLifecycleEmail({
+      order,
+      event: "order_refunded",
+      send: (customerEmail) => sendOrderLifecycleEmail(customerEmail, order, "order_refunded"),
+    });
+
     res.json({
       success: true,
       message: 'Return accepted and refund processed (if paid)',
-      order,
+      emailDelivery,
+      order: serializeOrderForResponse(order),
     });
   } catch (err) {
     console.error("Error accepting return:", err);
@@ -1501,7 +1526,8 @@ exports.cancelOrderByUser = async (req, res) => {
     const { orderId } = req.params;
 
     // Load the order for this user
-    const order = await Order.findOne({ _id: orderId, userId });
+    const order = await Order.findOne({ _id: orderId, userId })
+      .populate("userId", "email name");
     if (!order) {
       return res
         .status(404)
@@ -1573,10 +1599,17 @@ exports.cancelOrderByUser = async (req, res) => {
     order.statusHistory.push({ status: "cancelled" });
     await order.save();
 
+    const emailDelivery = await sendCustomerOrderLifecycleEmail({
+      order,
+      event: "order_cancelled",
+      send: (customerEmail) => sendOrderLifecycleEmail(customerEmail, order, "order_cancelled"),
+    });
+
     return res.json({
       success: true,
       message: "Order cancelled successfully",
-      order,
+      emailDelivery,
+      order: serializeOrderForResponse(order),
     });
   } catch (err) {
     console.error("Error cancelling order:", err);

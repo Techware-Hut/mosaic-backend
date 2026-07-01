@@ -46,6 +46,7 @@ function buildOrderForPostPayment(overrides = {}) {
     status: 'created',
     statusHistory: [{ status: 'created' }],
     paidConfirmationEmailSentAt: null,
+    lifecycleEmailLog: [],
     items: [{ chargeId: null, transferId: null, applicationFeeId: null }],
     userId: { email: 'customer@example.com' },
     vendorId: { email: 'vendor@example.com' },
@@ -61,13 +62,17 @@ function buildOrderForPostPayment(overrides = {}) {
   };
 }
 
-function loadPostPaymentWebhook({ orders = [], mailShouldFail = false } = {}) {
+function loadPostPaymentWebhook({
+  orders = [],
+  mailShouldFail = false,
+  eventType = 'payment_intent.succeeded',
+} = {}) {
   let emailSendCount = 0;
 
   const stripeMock = {
     webhooks: {
       constructEvent: () => ({
-        type: 'payment_intent.succeeded',
+        type: eventType,
         data: {
           object: {
             id: PAYMENT_ID,
@@ -137,6 +142,9 @@ test('post-payment webhook calls sendOrderPaidEmails on success', async () => {
   assert.ok(res.body.received);
   assert.equal(getEmailSendCount(), 1);
   assert.ok(order.paidConfirmationEmailSentAt instanceof Date);
+  assert.equal(order.lifecycleEmailLog.length, 1);
+  assert.equal(order.lifecycleEmailLog[0].event, 'order_paid_confirmation');
+  assert.equal(order.lifecycleEmailLog[0].deliveryStatus, 'sent');
 });
 
 test('post-payment webhook still returns received when email send fails', async () => {
@@ -164,6 +172,10 @@ test('post-payment webhook still returns received when email send fails', async 
 
   assert.ok(res.body.received);
   assert.equal(getEmailSendCount(), 1);
+  assert.equal(order.paidConfirmationEmailSentAt, null);
+  assert.equal(order.lifecycleEmailLog.length, 1);
+  assert.equal(order.lifecycleEmailLog[0].deliveryStatus, 'failed');
+  assert.ok(order.lifecycleEmailLog[0].error.includes('SMTP unavailable'));
   assert.ok(errorLogs.some((line) => line.includes('SMTP unavailable')));
   assert.ok(!errorLogs.some((line) => line.includes('whsec_')));
 });
@@ -186,6 +198,30 @@ test('post-payment webhook skips duplicate paid confirmation emails', async () =
 
   assert.ok(res.body.received);
   assert.equal(getEmailSendCount(), 0);
+  assert.equal(order.lifecycleEmailLog.length, 0);
+});
+
+test('post-payment webhook does not send confirmation on failed payment event', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const order = buildOrderForPostPayment();
+  const { stripePaymentWebhook, getEmailSendCount } = loadPostPaymentWebhook({
+    orders: [order],
+    eventType: 'payment_intent.payment_failed',
+  });
+  const res = mockResponse();
+
+  await stripePaymentWebhook(
+    {
+      headers: { 'stripe-signature': 'sig_test' },
+      body: Buffer.from('{}'),
+    },
+    res
+  );
+
+  assert.ok(res.body.received);
+  assert.equal(getEmailSendCount(), 0);
+  assert.equal(order.paidConfirmationEmailSentAt, null);
+  assert.equal(order.lifecycleEmailLog.length, 0);
 });
 
 test('initiateOrder no longer sends pre-payment customer or vendor emails', () => {

@@ -6,6 +6,14 @@ const APP_NAME = process.env.APP_NAME || "Mosaic Biz Hub";
 const LOGO_URL = getFrontendLogoUrl();
 const ORDERS_URL = buildFrontendUrl("/customer/order");
 
+const escapeHtml = (value = "") =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
 // Configure transporter (swap service/config as needed)
 const transporter = nodemailer.createTransport({
   service: "Gmail",
@@ -286,7 +294,7 @@ async function sendOrderStatusEmail(to, orderId, status) {
   }
 }
 
-async function sendOrderUpdateEmail(to, status, trackingUrl = null) {
+async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}) {
   const orderUrl = buildFrontendUrl("/customer/order");
 
   let title = "";
@@ -299,13 +307,14 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null) {
     message = `
       <p>Good news! Your order has been <strong>shipped</strong> and is on its way.</p>
       <p>You can track your shipment using the link below.</p>
+      ${details.trackingId ? `<p><strong>Tracking ID:</strong> ${escapeHtml(details.trackingId)}</p>` : ""}
     `;
 
     // ✅ Add tracking button if URL exists
     if (trackingUrl) {
       extraButton = `
         <div style="text-align:center; margin:20px 0;">
-          <a href="${trackingUrl}" target="_blank"
+          <a href="${escapeHtml(trackingUrl)}" target="_blank"
             style="
               background:#333;
               color:#ffffff;
@@ -379,4 +388,96 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null) {
   });
 }
 
-module.exports = { sendOrderStatusEmail,sendOrderUpdateEmail,sendVendorNewOrderEmail,sendCustomerOrderPlacedEmail };
+async function sendOrderLifecycleEmail(to, order, event) {
+  const orderReference = order?.groupOrderId || order?._id?.toString?.() || "your order";
+  const orderUrl = buildFrontendUrl("/customer/order");
+
+  const copyByEvent = {
+    order_cancelled: {
+      title: "Order Cancelled",
+      body: `
+        <p>Your order <strong>#${escapeHtml(orderReference)}</strong> has been <strong>cancelled</strong>.</p>
+        ${
+          order?.paymentStatus === "refunded"
+            ? "<p>If payment was captured, the refund has been initiated and will settle according to your payment provider timeline.</p>"
+            : "<p>No paid confirmation email is sent for unpaid or abandoned orders.</p>"
+        }
+      `,
+      textLines: [
+        `Your order #${orderReference} has been cancelled.`,
+        order?.paymentStatus === "refunded"
+          ? "If payment was captured, the refund has been initiated."
+          : "No paid confirmation email is sent for unpaid or abandoned orders.",
+      ],
+    },
+    return_initiated: {
+      title: "Return Request Received",
+      body: `
+        <p>Your return request for order <strong>#${escapeHtml(orderReference)}</strong> has been received.</p>
+        <p>The vendor will review the request and we will send another update when the return is accepted or resolved.</p>
+      `,
+      textLines: [
+        `Your return request for order #${orderReference} has been received.`,
+        "The vendor will review the request and we will send another update when it is resolved.",
+      ],
+    },
+    order_refunded: {
+      title: "Refund Processed",
+      body: `
+        <p>Your refund for order <strong>#${escapeHtml(orderReference)}</strong> has been processed.</p>
+        <p>Refund timing depends on your bank or card provider.</p>
+      `,
+      textLines: [
+        `Your refund for order #${orderReference} has been processed.`,
+        "Refund timing depends on your bank or card provider.",
+      ],
+    },
+  };
+
+  const copy = copyByEvent[event] || {
+    title: "Order Update",
+    body: `<p>There is an update for order <strong>#${escapeHtml(orderReference)}</strong>.</p>`,
+    textLines: [`There is an update for order #${orderReference}.`],
+  };
+
+  const bodyHtml = `
+    ${copy.body}
+
+    <div style="text-align:center; margin:30px 0;">
+      <a href="${orderUrl}" target="_blank"
+        style="
+          background:#C7A040;
+          color:#ffffff;
+          padding:14px 28px;
+          text-decoration:none;
+          border-radius:6px;
+          font-weight:600;
+          display:inline-block;
+        ">
+        View Your Orders
+      </a>
+    </div>
+  `;
+
+  const html = wrapHtml({ title: copy.title, bodyHtml });
+  const text = plainText({
+    title: copy.title,
+    lines: [...copy.textLines, `View your orders: ${orderUrl}`],
+  });
+
+  await transporter.sendMail({
+    from: `"${APP_NAME}" <${process.env.MAIL_USER}>`,
+    to,
+    subject: `${APP_NAME} - ${copy.title}`,
+    html,
+    text,
+  });
+}
+
+module.exports = {
+  sendOrderStatusEmail,
+  sendOrderUpdateEmail,
+  sendOrderLifecycleEmail,
+  sendVendorNewOrderEmail,
+  sendCustomerOrderPlacedEmail,
+};

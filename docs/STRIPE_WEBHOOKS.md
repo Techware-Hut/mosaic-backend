@@ -128,7 +128,7 @@ Triggered by PaymentIntent from `POST /api/vendor-onboarding/stage1/create-payme
 
 | Event type | Action |
 |------------|--------|
-| `payment_intent.succeeded` | Find orders by `paymentId`; set `paid`/`ordered`; store `chargeId`, `transferId`, `applicationFeeId` on items; send order-paid emails |
+| `payment_intent.succeeded` | Find orders by `paymentId`; set `paid`/`ordered`; store `chargeId`, `transferId`, `applicationFeeId` on items; send order-paid emails; append lifecycle email attempt log |
 | Other | `200` ack only |
 
 ---
