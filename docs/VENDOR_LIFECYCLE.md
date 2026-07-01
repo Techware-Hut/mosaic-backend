@@ -323,7 +323,7 @@ From [`utils/vendorOnboardingUploadMimeAllowlist.js`](../utils/vendorOnboardingU
 - `normalizeMimeType` strips parameters (e.g. `image/jpeg; charset=binary`).
 - Common browser PDF alias `application/x-pdf` resolves to `application/pdf`.
 - Empty or generic browser MIME values can fall back to a safe file extension allowlist (`.jpg`, `.jpeg`, `.png`, `.webp`, `.pdf`).
-- Vendor onboarding uploads are limited to 5 MB when the client sends `fileSize`.
+- API proxy uploads are limited to 5 MB from the server-observed uploaded file size; the direct presigned diagnostic route validates the client-provided `fileSize` query when present.
 - Rejected types return `400` with allowed list in message.
 - Filename sanitized: non-alphanumeric → `_`; timestamp prefixed in S3 key.
 - API proxy uploads require backend `CORS_ORIGINS` for the frontend origin and do not require browser-to-S3 CORS. Direct S3 browser uploads require bucket CORS for the frontend origin, `PUT`, and the `Content-Type` header. See [`docs/VENDOR_PDF_UPLOAD_CORS.md`](VENDOR_PDF_UPLOAD_CORS.md).

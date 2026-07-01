@@ -24,6 +24,12 @@ For this direct path, the API CORS policy and S3 bucket CORS policy are separate
 
 ## Required Environment
 
+Frontend runtime:
+
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_API_BASE_URL` | Backend API origin used by `uploadVendorOnboardingFile` for `POST /api/vendor-onboarding/stage1/upload-file` |
+
 Backend runtime:
 
 | Variable | Purpose |
@@ -32,9 +38,9 @@ Backend runtime:
 | `AWS_ACCESS_KEY_ID` | Server-side S3 signing/apply credentials |
 | `AWS_SECRET_ACCESS_KEY` | Server-side S3 signing/apply credentials |
 | `AWS_S3_BUCKET` | Upload bucket name |
-| `S3_UPLOAD_CORS_ORIGINS` | Optional comma-separated browser origins for S3 upload CORS |
+| `S3_UPLOAD_CORS_ORIGINS` | Optional comma-separated browser origins for the direct S3 diagnostic upload path |
 
-If `S3_UPLOAD_CORS_ORIGINS` is not set, the helper falls back to `CORS_ORIGINS`, `FRONTEND_URL`, the production app origins, and local dev origins.
+If `S3_UPLOAD_CORS_ORIGINS` is not set, the helper falls back to `CORS_ORIGINS`, `FRONTEND_URL`, the production app origins, and local dev origins. The canonical `/partners/business/new` and `/partners/business-profile` UI upload path does not need this variable because the browser posts to the backend API proxy.
 
 ## S3 Bucket CORS
 
