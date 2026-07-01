@@ -7,6 +7,11 @@ const {
   parseUploadSizeBytes,
   resolveVendorOnboardingMimeType,
 } = require("../utils/vendorOnboardingUploadMimeAllowlist");
+const {
+  PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
+  buildPresignedS3UploadContract,
+  sanitizeS3UploadFileName,
+} = require("../utils/s3PresignedUploadContract");
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -99,7 +104,7 @@ function buildVendorOnboardingUploadTarget({
 
   const bucketName = process.env.AWS_S3_BUCKET;
   const folderPath = getVendorOnboardingFolderPath(userId, documentType);
-  const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const cleanFileName = sanitizeS3UploadFileName(fileName);
   const timestamp = Date.now();
   const key = `${folderPath}/${timestamp}-${cleanFileName}`;
   const region = process.env.AWS_REGION || "us-east-1";
@@ -137,7 +142,7 @@ exports.getStage1UploadUrl = async (req, res) => {
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
-      expiresIn: 300,
+      expiresIn: PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
     });
 
     return res.json({
@@ -146,6 +151,7 @@ exports.getStage1UploadUrl = async (req, res) => {
       fileUrl: target.fileUrl,
       documentType: target.documentType,
       key: target.key,
+      ...buildPresignedS3UploadContract(target.normalizedFileType),
     });
   } catch (error) {
     console.error("Presigned URL error:", error);

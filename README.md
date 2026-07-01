@@ -184,7 +184,7 @@ See [docs/security-remediation-notes.md](docs/security-remediation-notes.md) for
 | `AWS_S3_BUCKET` | Yes for uploads | S3 bucket name for product, service, food, and onboarding uploads |
 | `S3_UPLOAD_CORS_ORIGINS` | Optional for S3 CORS apply script | Comma-separated browser origins allowed to direct-upload with presigned S3 URLs. Falls back to `CORS_ORIGINS`/`FRONTEND_URL` plus approved app/local origins. |
 
-Vendor PDF uploads from `/partners/business-profile` use the authenticated API proxy route `POST /api/vendor-onboarding/stage1/upload-file`, which writes to the same vendor-scoped S3 path without requiring browser-to-S3 CORS. The legacy/direct presigned `PUT` route remains available; if that path is used and browser `OPTIONS` to S3 returns `403`, apply the bucket CORS rule in [docs/VENDOR_PDF_UPLOAD_CORS.md](docs/VENDOR_PDF_UPLOAD_CORS.md).
+Vendor PDF uploads from `/partners/business-profile` use the authenticated API proxy route `POST /api/vendor-onboarding/stage1/upload-file`, which writes to the same vendor-scoped S3 path without requiring browser-to-S3 CORS. The legacy/direct presigned `PUT` route remains available and returns the required method/header contract; if that path is used and browser `OPTIONS` to S3 returns `403`, apply the bucket CORS rule in [docs/VENDOR_PDF_UPLOAD_CORS.md](docs/VENDOR_PDF_UPLOAD_CORS.md).
 
 ### Email and notifications
 

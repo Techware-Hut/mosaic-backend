@@ -18,6 +18,11 @@ const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const {
+  PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
+  buildPresignedS3UploadContract,
+  sanitizeS3UploadFileName,
+} = require('../utils/s3PresignedUploadContract');
 
 require('../models/ServiceCategory');
 require('../models/ServiceSubcategory');
@@ -1060,7 +1065,7 @@ exports.getServiceUploadUrl = async (req, res) => {
     }
 
     // Clean filename and add timestamp to prevent collisions
-    const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const cleanFileName = sanitizeS3UploadFileName(fileName);
     const timestamp = Date.now();
     const key = `${folderPath}/${timestamp}-${cleanFileName}`;
 
@@ -1071,7 +1076,7 @@ exports.getServiceUploadUrl = async (req, res) => {
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
-      expiresIn: 300, // 5 minutes
+      expiresIn: PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
     });
 
     // Construct public URL
@@ -1084,7 +1089,7 @@ exports.getServiceUploadUrl = async (req, res) => {
       fileUrl,
       documentType,
       key,
-      expiresIn: 300
+      ...buildPresignedS3UploadContract(fileType),
     });
 
   } catch (error) {

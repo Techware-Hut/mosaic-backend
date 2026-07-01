@@ -5,6 +5,11 @@ const SubscriptionPlan = require('../models/SubscriptionPlan');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { hasActiveFoodBookings } = require('../utils/bookingDeleteGuards');
+const {
+  PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
+  buildPresignedS3UploadContract,
+  sanitizeS3UploadFileName,
+} = require('../utils/s3PresignedUploadContract');
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -432,7 +437,7 @@ exports.getFoodUploadUrl = async (req, res) => {
         folderPath = `foods/${userId}/temp`;
     }
 
-    const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const cleanFileName = sanitizeS3UploadFileName(fileName);
     const timestamp = Date.now();
     const key = `${folderPath}/${timestamp}-${cleanFileName}`;
 
@@ -442,7 +447,9 @@ exports.getFoodUploadUrl = async (req, res) => {
       ContentType: fileType,
     });
 
-    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
+    const uploadUrl = await getSignedUrl(s3Client, command, {
+      expiresIn: PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
+    });
     const region = process.env.AWS_REGION || 'us-east-1';
     const fileUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
 
@@ -452,7 +459,7 @@ exports.getFoodUploadUrl = async (req, res) => {
       fileUrl,
       documentType,
       key,
-      expiresIn: 300,
+      ...buildPresignedS3UploadContract(fileType),
     });
   } catch (err) {
     console.error('Food presigned URL error:', err.message);
