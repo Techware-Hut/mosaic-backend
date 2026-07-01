@@ -126,6 +126,10 @@ test('getStage1UploadUrl allows image and PDF MIME types', async () => {
     assert.equal(res.body.success, true, `${fileType} should succeed`);
     assert.match(res.body.uploadUrl, /^https:\/\/signed\.example\.com\//);
     assert.equal(res.body.documentType, documentType);
+    assert.equal(res.body.method, 'PUT');
+    assert.equal(res.body.uploadMethod, 'PUT');
+    assert.deepEqual(res.body.requiredHeaders, { 'Content-Type': fileType });
+    assert.equal(res.body.expiresIn, 300);
   }
 });
 
@@ -149,6 +153,7 @@ test('getStage1UploadUrl allows PDF when browser omits MIME type but filename is
   assert.equal(res.statusCode, null);
   assert.equal(res.body.success, true);
   assert.match(res.body.uploadUrl, /refund-policy\.PDF/);
+  assert.deepEqual(res.body.requiredHeaders, { 'Content-Type': 'application/pdf' });
 });
 
 test('getStage1UploadUrl rejects unsupported documents even when extension is present', async () => {
