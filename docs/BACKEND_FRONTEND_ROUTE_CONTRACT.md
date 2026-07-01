@@ -178,8 +178,8 @@ Mount: `/api/vendor-onboarding` → [`routes/vendorOnboarding.routes.js`](../rou
 | `/api/vendor-onboarding/submit` | POST | Yes | verified vendor | Submit application | **valid** | |
 | `/api/vendor-onboarding/business-profile` | PUT | Yes | stage-1 verified vendor | Business profile update | **valid** | Full replace |
 | `/api/vendor-onboarding/business-profile` | PATCH | Yes | stage-1 verified vendor | Business profile patch | **valid** | Partial update |
-| `/api/vendor-onboarding/stage1/upload-file` | POST | Yes | verified vendor | Doc upload proxy | **valid** | Business-profile PDF UI path |
-| `/api/vendor-onboarding/stage1/upload-url` | GET | Yes | verified vendor | Presigned doc upload | **valid** | Legacy/direct S3 path |
+| `/api/vendor-onboarding/stage1/upload-file` | POST | Yes | verified vendor | Doc upload proxy | **valid** | Canonical `/partners/business/new` and `/partners/business-profile` document UI path |
+| `/api/vendor-onboarding/stage1/upload-url` | GET | Yes | verified vendor | Presigned doc upload | **valid** | Direct S3 diagnostic path; not used by those UI routes |
 | `/api/vendor-onboarding/stage1/create-payment` | POST | Yes | verified vendor | Verification fee | **valid** | Stripe Checkout path |
 | `/api/vendor-onboarding/stage1/payment-status` | GET | Yes | verified vendor | Payment poll | **valid** | |
 | `/api/vendor-onboarding/status/:applicationId` | GET | No | Public | Application status page | **valid** | |

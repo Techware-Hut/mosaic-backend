@@ -110,9 +110,11 @@ Observed on launch origin (sanitized): `Access-Control-Allow-Methods` includes P
 
 ---
 
-## Frontend upload contract
+## Direct S3 diagnostic upload contract
 
-1. `GET /api/vendor-onboarding/stage1/upload-url?fileName=...&fileType={file.type}&documentType=...` with vendor cookies.
+The active `/partners/business/new` and `/partners/business-profile` UI routes should use `POST /api/vendor-onboarding/stage1/upload-file`, not this direct browser-to-S3 path. Use this contract only when deliberately testing the retained presigned upload diagnostic path.
+
+1. `GET /api/vendor-onboarding/stage1/upload-url?fileName=...&fileType={resolvedMimeType}&documentType=...` with vendor cookies.
 2. `PUT` to `uploadUrl` with body = raw file bytes (not `multipart/form-data`).
 3. Header `Content-Type` must **exactly** match `requiredHeaders["Content-Type"]` from the API response.
 4. Persist **`fileUrl`** from the API response for draft/submit payloads.
