@@ -14,6 +14,13 @@ const {
   countProductListingUsage,
   assertProductListingQuota,
 } = require('../utils/listingTierLimits');
+const {
+  PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
+  buildPresignedS3UploadContract,
+  isAllowedImageS3UploadMimeType,
+  resolveImageS3UploadMimeType,
+  sanitizeS3UploadFileName,
+} = require('../utils/s3PresignedUploadContract');
 const { Decimal128 } = mongoose.Types;
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -1391,8 +1398,8 @@ exports.getProductUploadUrl = async (req, res) => {
     }
 
     // Validate file type (images only)
-    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    if (!allowedMimeTypes.includes(fileType)) {
+    const normalizedFileType = resolveImageS3UploadMimeType(fileType, fileName);
+    if (!isAllowedImageS3UploadMimeType(fileType, fileName)) {
       return res.status(400).json({
         message: "Only image files are allowed (JPEG, JPG, PNG, GIF, WEBP)",
       });
@@ -1446,18 +1453,18 @@ exports.getProductUploadUrl = async (req, res) => {
     }
 
     // Clean filename and add timestamp to prevent collisions
-    const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const cleanFileName = sanitizeS3UploadFileName(fileName);
     const timestamp = Date.now();
     const key = `${folderPath}/${timestamp}-${cleanFileName}`;
 
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: key,
-      ContentType: fileType,
+      ContentType: normalizedFileType,
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
-      expiresIn: 300, // 5 minutes
+      expiresIn: PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
     });
 
     // Construct public URL
@@ -1470,7 +1477,7 @@ exports.getProductUploadUrl = async (req, res) => {
       fileUrl,
       documentType,
       key,
-      expiresIn: 300
+      ...buildPresignedS3UploadContract(normalizedFileType),
     });
 
   } catch (error) {
@@ -1494,8 +1501,8 @@ exports.getVariantImageUploadUrl = async (req, res) => {
     }
 
     // Validate file type
-    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    if (!allowedMimeTypes.includes(fileType)) {
+    const normalizedFileType = resolveImageS3UploadMimeType(fileType, fileName);
+    if (!isAllowedImageS3UploadMimeType(fileType, fileName)) {
       return res.status(400).json({
         message: "Only image files are allowed",
       });
@@ -1511,18 +1518,18 @@ exports.getVariantImageUploadUrl = async (req, res) => {
       folderPath = `products/${userId}/${productId}/variants`;
     }
 
-    const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const cleanFileName = sanitizeS3UploadFileName(fileName);
     const timestamp = Date.now();
     const key = `${folderPath}/${timestamp}-${cleanFileName}`;
 
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: key,
-      ContentType: fileType,
+      ContentType: normalizedFileType,
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
-      expiresIn: 300,
+      expiresIn: PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
     });
 
     const region = process.env.AWS_REGION || 'us-east-1';
@@ -1532,7 +1539,8 @@ exports.getVariantImageUploadUrl = async (req, res) => {
       success: true,
       uploadUrl,
       fileUrl,
-      key
+      key,
+      ...buildPresignedS3UploadContract(normalizedFileType),
     });
 
   } catch (error) {

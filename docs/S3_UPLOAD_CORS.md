@@ -36,7 +36,7 @@ See also [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md)
 | Guards | `authenticate` + `requireVerifiedVendor` |
 | Controller | [`controllers/vendorOnboardingUpload.controller.js`](../controllers/vendorOnboardingUpload.controller.js) |
 | Query params | `fileName`, `fileType`, `documentType` |
-| Response | `{ success, uploadUrl, fileUrl, documentType, key }` |
+| Response | `{ success, uploadUrl, fileUrl, documentType, key, method, requiredHeaders, expiresIn }` |
 | Signed fields | `PutObjectCommand` includes `ContentType` (must match browser PUT header) |
 | Key prefix | `vendor-onboarding/stage1/{userId}/...` |
 | Expiry | 300 seconds |
@@ -55,12 +55,13 @@ Apply on bucket **`mosaic-biz-hub`** (must match production `AWS_S3_BUCKET`):
 [
   {
     "AllowedOrigins": [
-      "https://mosaic-biz-frontend-launch.vercel.app",
       "https://mosaicbizhub.com",
-      "https://app.mosaicbizhub.com"
+      "https://www.mosaicbizhub.com",
+      "https://app.mosaicbizhub.com",
+      "https://mosaic-biz-frontend-launch.vercel.app"
     ],
     "AllowedMethods": ["PUT", "GET", "HEAD"],
-    "AllowedHeaders": ["*"],
+    "AllowedHeaders": ["Content-Type"],
     "ExposeHeaders": ["ETag"],
     "MaxAgeSeconds": 3000
   }
@@ -113,7 +114,7 @@ Observed on launch origin (sanitized): `Access-Control-Allow-Methods` includes P
 
 1. `GET /api/vendor-onboarding/stage1/upload-url?fileName=...&fileType={file.type}&documentType=...` with vendor cookies.
 2. `PUT` to `uploadUrl` with body = raw file bytes (not `multipart/form-data`).
-3. Header `Content-Type` must **exactly** match the `fileType` query param sent to the API (backend signs this into the URL).
+3. Header `Content-Type` must **exactly** match `requiredHeaders["Content-Type"]` from the API response.
 4. Persist **`fileUrl`** from the API response for draft/submit payloads.
 
 If PUT returns **403 SignatureDoesNotMatch**, check Content-Type mismatch before re-checking CORS.

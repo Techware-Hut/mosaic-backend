@@ -149,8 +149,8 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 
 | Method | Route | Middleware | Controller | Auth/Role | Purpose | Smoke Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/product/upload-url` | `authenticate` | `getProductUploadUrl` | Authenticated | S3 presigned URL | 🟡 |
-| GET | `/api/product/variant-upload-url` | `authenticate` | `getVariantImageUploadUrl` | Authenticated | Variant image URL | 🟡 |
+| GET | `/api/product/upload-url` | `authenticate`, `isBusinessOwner` | `getProductUploadUrl` | business_owner | S3 presigned URL | 🟡 |
+| GET | `/api/product/variant-upload-url` | `authenticate`, `isBusinessOwner` | `getVariantImageUploadUrl` | business_owner | Variant image URL | 🟡 |
 | GET | `/api/product/business/:businessId` | `authenticate`, `isBusinessOwner` | `getBusinessProducts` | business_owner | Vendor product list | 🟡 |
 | GET | `/api/product/:productId/reviews` | — | `listReviews` | ⚪ Public | List reviews | 🟢 |
 | POST | `/api/product/:productId/reviews` | `authenticate`, `isCustomer` | `upsertReview` | customer | Upsert review | 🟡 |
@@ -173,7 +173,7 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 
 | Method | Route | Middleware | Controller | Auth/Role | Purpose | Smoke Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/service/upload-url` | `authenticate` | `getServiceUploadUrl` | Authenticated | Upload URL | 🟡 |
+| GET | `/api/service/upload-url` | `authenticate`, `isBusinessOwner` | `getServiceUploadUrl` | business_owner | Upload URL | 🟡 |
 | GET | `/api/service/parent-services` | `authenticate`, `isBusinessOwner` | `getParentServices` | business_owner | Parent services | 🟡 |
 | GET | `/api/service/child-services/:parentServiceId` | same | `getChildServices` | business_owner | Child services | 🟡 |
 | POST | `/api/service/parent` | same | `createParentService` | business_owner | Create parent | 🟡 |
@@ -197,7 +197,7 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 
 | Method | Route | Middleware | Controller | Auth/Role | Purpose | Smoke Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/food/upload-url` | `authenticate` | `getFoodUploadUrl` | Authenticated | Upload URL | 🟡 |
+| GET | `/api/food/upload-url` | `authenticate`, `isBusinessOwner` | `getFoodUploadUrl` | business_owner | Upload URL | 🟡 |
 | POST | `/api/food/add-food` | `authenticate`, `isBusinessOwner` | `createFood` | business_owner | Create food listing | 🟡 |
 | GET | `/api/food/my-foods` | same | `getMyFoods` | business_owner | List own foods | 🟡 |
 | GET | `/api/food/business-food/:id` | — | `getBusinessFoodById` | ⚪ Public | Food by business | 🟢 |

@@ -17,8 +17,8 @@ The API proxy path uses normal backend CORS (`CORS_ORIGINS`) and does not requir
 Legacy/direct S3 flow:
 
 1. Frontend calls `GET /api/vendor-onboarding/stage1/upload-url`.
-2. Backend returns a presigned S3 `PUT` URL.
-3. Browser uploads directly to S3 with only `Content-Type` and the raw file body.
+2. Backend returns a presigned S3 `PUT` URL plus `method`, `requiredHeaders`, storage `key`, and expiry metadata.
+3. Browser uploads directly to S3 with `credentials: "omit"`, only the signed `Content-Type`, and the raw file body.
 
 For this direct path, the API CORS policy and S3 bucket CORS policy are separate. A successful `upload-url` response proves API auth/CORS is working, but the browser still preflights the direct S3 `PUT`.
 
@@ -96,6 +96,18 @@ Use a safe dummy PDF, not a real vendor document.
    `vendor-onboarding/business-profile/{vendorUserId}/...`.
 8. Confirm a customer or unauthenticated session cannot get a signed upload URL.
 
+## Direct S3 Preflight Regression Check
+
+Run this only for the legacy/direct presigned path. Do not paste signed URLs, cookies, or vendor document contents into GitHub.
+
+1. Log in as a verified vendor/business owner.
+2. Request a direct presigned URL for a safe dummy PDF:
+   `GET /api/vendor-onboarding/stage1/upload-url?fileName=dummy.pdf&fileType=application/pdf&fileSize=1024&documentType=refund-policy`.
+3. Confirm the API response is `200` and includes `uploadUrl`, `method: "PUT"`, and `requiredHeaders["Content-Type"]`.
+4. In the browser Network tab, or with a local-only curl using the redacted signed URL, confirm the S3 `OPTIONS` preflight for the active frontend origin returns an allow-origin header and allows `PUT` with `Content-Type`.
+5. Confirm the following failure is not present: `upload-url` returns `200`, then the S3 `OPTIONS` request returns `403`.
+6. If `OPTIONS` is `403`, do not change frontend auth headers. Re-apply the S3 bucket CORS rule for the exact frontend origin in use.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -104,5 +116,5 @@ Use a safe dummy PDF, not a real vendor document.
 | `POST /stage1/upload-file` fails API CORS | Backend `CORS_ORIGINS` missing frontend origin | Add the frontend origin to backend CORS env |
 | `upload-url` fails `401`/`403` | User session or vendor role check failed | Fix login/vendor verification, not S3 CORS |
 | `upload-url` returns `200`, then S3 `OPTIONS` returns `403` | Bucket CORS missing origin, `PUT`, or `Content-Type` | Apply this S3 CORS rule |
-| S3 `OPTIONS` passes, but `PUT` fails signature error | Frontend changed signed headers or upload method | Use direct `PUT` with the resolved content type only |
+| S3 `OPTIONS` passes, but `PUT` fails signature error | Frontend changed signed headers or upload method | Use direct `PUT` with `requiredHeaders["Content-Type"]` only |
 | Local dev upload fails | Localhost origin missing from bucket CORS | Add local origin and reapply |

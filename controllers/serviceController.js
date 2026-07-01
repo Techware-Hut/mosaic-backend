@@ -18,6 +18,13 @@ const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const {
+  PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
+  buildPresignedS3UploadContract,
+  isAllowedImageS3UploadMimeType,
+  resolveImageS3UploadMimeType,
+  sanitizeS3UploadFileName,
+} = require('../utils/s3PresignedUploadContract');
 
 require('../models/ServiceCategory');
 require('../models/ServiceSubcategory');
@@ -1004,8 +1011,8 @@ exports.getServiceUploadUrl = async (req, res) => {
     }
 
     // Validate file type (images only)
-    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    if (!allowedMimeTypes.includes(fileType)) {
+    const normalizedFileType = resolveImageS3UploadMimeType(fileType, fileName);
+    if (!isAllowedImageS3UploadMimeType(fileType, fileName)) {
       return res.status(400).json({
         message: "Only image files are allowed (JPEG, JPG, PNG, GIF, WEBP)",
       });
@@ -1060,18 +1067,18 @@ exports.getServiceUploadUrl = async (req, res) => {
     }
 
     // Clean filename and add timestamp to prevent collisions
-    const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const cleanFileName = sanitizeS3UploadFileName(fileName);
     const timestamp = Date.now();
     const key = `${folderPath}/${timestamp}-${cleanFileName}`;
 
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: key,
-      ContentType: fileType,
+      ContentType: normalizedFileType,
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
-      expiresIn: 300, // 5 minutes
+      expiresIn: PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
     });
 
     // Construct public URL
@@ -1084,7 +1091,7 @@ exports.getServiceUploadUrl = async (req, res) => {
       fileUrl,
       documentType,
       key,
-      expiresIn: 300
+      ...buildPresignedS3UploadContract(normalizedFileType),
     });
 
   } catch (error) {

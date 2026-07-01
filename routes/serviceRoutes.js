@@ -10,6 +10,7 @@ const { listReviews, upsertReview, deleteReview } = require('../controllers/revi
 router.get(
   '/upload-url',
   authenticate,
+  isBusinessOwner,
   getServiceUploadUrl
 );
 
