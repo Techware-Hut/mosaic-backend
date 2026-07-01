@@ -181,6 +181,7 @@ function loadInitiateOrder({
       return {
         sendOrderStatusEmail: async () => {},
         sendOrderUpdateEmail: async () => {},
+        sendOrderLifecycleEmail: async () => {},
         sendVendorNewOrderEmail: async () => {},
         sendCustomerOrderPlacedEmail: async () => {},
       };
