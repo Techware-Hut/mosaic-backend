@@ -13,7 +13,7 @@ Mosaic backend uses a mix of S3 presigned PUT URLs, API-proxied S3 uploads, dire
 
 | Surface | Route/file | Auth | File/type behavior | Lifecycle |
 | --- | --- | --- | --- | --- |
-| Vendor onboarding docs | `GET /api/vendor-onboarding/stage1/upload-url`, `POST /api/vendor-onboarding/stage1/upload-file`, `controllers/vendorOnboardingUpload.controller.js` | Authenticated verified vendor | Allowed doc types; JPEG/PNG/WebP/PDF allowlist via `utils/vendorOnboardingUploadMimeAllowlist.js`; filename sanitized | Stage 1 direct path client PUTs to S3; business-profile refund/terms path uses API proxy; both save returned `fileUrl` |
+| Vendor onboarding docs | `POST /api/vendor-onboarding/stage1/upload-file`, diagnostic `GET /api/vendor-onboarding/stage1/upload-url`, `controllers/vendorOnboardingUpload.controller.js` | Authenticated verified vendor | Allowed doc types; JPEG/PNG/WebP/PDF allowlist via `utils/vendorOnboardingUploadMimeAllowlist.js`; filename sanitized | `/partners/business/new` and `/partners/business-profile` use the API proxy and save returned `fileUrl`; direct presign remains diagnostic only |
 | Product images | `GET /api/product/upload-url`, `GET /api/product/variant-upload-url` | Authenticated business owner | Product doc type allowlist; image MIME normalization/allowlist; gallery quota check for gallery images; response includes upload method/header contract | Client PUTs to S3 and stores returned URL |
 | Service images | `GET /api/service/upload-url` | Authenticated business owner | Service doc type allowlist; image MIME normalization/allowlist; gallery quota check for gallery images; response includes upload method/header contract | Client PUTs to S3 and stores returned URL |
 | Food images | `GET /api/food/upload-url` | Authenticated business owner | Food doc type allowlist, image MIME normalization/allowlist, gallery quota check, sanitized filenames; response includes upload method/header contract | Client PUTs to S3 and stores returned URL |
@@ -24,6 +24,7 @@ Mosaic backend uses a mix of S3 presigned PUT URLs, API-proxied S3 uploads, dire
 ## Confirmed Controls
 
 - Vendor onboarding MIME allowlist: `image/jpeg`, `image/png`, `image/webp`, `application/pdf`.
+- Vendor/business document UI routes share the API-proxied `POST /stage1/upload-file` flow, so browser uploads go to the Mosaic API instead of directly to S3.
 - Product/service/food presigned uploads normalize safe image MIME types, including extension fallback when browsers report generic file types.
 - Presigned URLs expire after 300 seconds.
 - Filenames are sanitized in vendor onboarding, product, service, food, and generic presign controllers.

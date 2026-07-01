@@ -103,7 +103,8 @@ Mounts: `/api/vendor-onboarding` **and** `/admin/vendor-onboard-verify-stage1` (
 | PUT/PATCH | `/business-profile` | update/patch profile | JWT | stage-1 verified | verified |
 | GET | `/status/:applicationId` | `getStatusByApplicationId` | **Public** | — | verified |
 | GET | `/applicationId` | `getApplicationId` | JWT | — | verified |
-| GET | `/stage1/upload-url` | `getStage1UploadUrl` | JWT | verified vendor | verified |
+| POST | `/stage1/upload-file` | `uploadStage1File` | JWT | verified vendor | verified |
+| GET | `/stage1/upload-url` | `getStage1UploadUrl` | JWT | verified vendor | verified direct S3 diagnostic |
 | POST | `/stage1/create-payment` | `createVerificationPayment` | JWT | verified vendor | verified |
 | GET | `/stage1/payment-status` | `getPaymentStatus` | JWT | verified vendor | verified |
 | GET | `/pending` | `getPendingApplications` | JWT | admin | verified |
