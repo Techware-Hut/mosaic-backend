@@ -89,6 +89,7 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 | GET | `.../pending` | `authenticate`, `isAdmin` | `getPendingApplications` | admin | Admin review queue (`submitted` only) | 🟡 P3.1 |
 | GET | `.../:applicationId` | `authenticate`, `isAdmin` | `getApplicationDetails` | admin | Application detail | 🟡 P3.2 |
 | POST | `.../:applicationId/verify` | `authenticate`, `isAdmin` | `verifyAndAllocatePoints` | admin | Mark checklist item; add points | 🟡 P3.3 |
+| POST | `.../:applicationId/verification-guidance` | `authenticate`, `isAdmin` | `sendVerificationGuidanceNotification` | admin | Send correction/clarification email without status change | 🟡 P3.4 |
 | POST | `.../:applicationId/finalize` | `authenticate`, `isAdmin` | `finalizeVerification` | admin | Approve/reject Stage-1 | 🔴 P3.4 — sends emails |
 
 ---

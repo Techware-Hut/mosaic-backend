@@ -50,6 +50,7 @@ sequenceDiagram
 | `GET /api/vendor-onboarding/pending` | Admin | `getPendingApplications` |
 | `GET /api/vendor-onboarding/:applicationId` | Admin | `getApplicationDetails` |
 | `POST /api/vendor-onboarding/:applicationId/verify` | Admin | `verifyAndAllocatePoints` |
+| `POST /api/vendor-onboarding/:applicationId/verification-guidance` | Admin | `sendVerificationGuidanceNotification` |
 | `POST /api/vendor-onboarding/:applicationId/finalize` | Admin | `finalizeVerification` |
 
 ---
@@ -96,9 +97,12 @@ Document checklist (EIN, license, minority proof) is validated at **admin finali
 | Submit success | `sendVendorSubmissionConfirmationEmail` | Vendor user email — 3–5 business day receipt copy |
 | Finalize approve | `sendVendorApprovedEmail` | Vendor user email |
 | Finalize approve + badge | `sendVendorTrustBadgeAssignedEmail` | Vendor user email |
-| Finalize reject | `sendVendorRejectionEmail` | Vendor user email |
+| Finalize reject / missing documents | `sendVendorRejectionEmail` (wraps guidance template) | Vendor user email |
+| Admin correction or clarification | `sendVendorVerificationGuidanceEmail` | Vendor user email |
 
 **Delivery helper:** [`utils/vendorOnboardingEmailDelivery.js`](../utils/vendorOnboardingEmailDelivery.js)
+
+**Guidance outcomes:** `missing_documents`, `failed_validation`, `discrepancy`, `under_review`, and `manual_review`. These emails do not create a new application status; they use the current stored status and log attempts on `VendorOnboardingStage1.verificationNotificationLog`. Stalled/deactivated vendor-application notification is not supported because the current Stage-1 model has no stalled/deactivated workflow.
 
 **Environment variables (names only):**
 
@@ -106,6 +110,7 @@ Document checklist (EIN, license, minority proof) is validated at **admin finali
 - `MAIL_PASSWORD`
 - `ADMIN_EMAIL`
 - `FRONTEND_URL` (used in some templates)
+- `SUPPORT_EMAIL` (optional support contact fallback)
 
 **Provider:** Existing Nodemailer + Gmail transport — no new provider introduced.
 
@@ -118,6 +123,7 @@ Document checklist (EIN, license, minority proof) is validated at **admin finali
 | SMTP not configured | 200 | Applied | `emailSkipped: true`, `emailSent: false` |
 | SMTP send throws | 200 | Applied | `emailSent: false`, error logged (message only) |
 | Submit emails fail | 200 | Submitted | `emailSent` / `emailSkipped` on submit response |
+| Guidance email duplicate | 200 | Unchanged | `emailDeduped: true`, no second send |
 
 Secrets and full payloads are never logged.
 

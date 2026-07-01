@@ -1,9 +1,11 @@
+const crypto = require('crypto');
 const VendorOnboarding = require('../../models/VendorOnboardingStage1');
 const User = require('../../models/User');
 const Business = require('../../models/Business');
 const { 
   sendVendorApprovedEmail,
   sendVendorRejectionEmail,
+  sendVendorVerificationGuidanceEmail,
   sendVendorTrustBadgeAssignedEmail
 } = require('../../utils/WellcomeMailer');
 const { deliverVendorOnboardingEmails } = require('../../utils/vendorOnboardingEmailDelivery');
@@ -23,6 +25,138 @@ const {
 const PENDING_REVIEW_STATUSES = Object.freeze(['submitted']);
 
 exports.PENDING_REVIEW_STATUSES = PENDING_REVIEW_STATUSES;
+
+const VERIFICATION_GUIDANCE_OUTCOMES = Object.freeze({
+  missing_documents: {
+    label: 'vendor_missing_documents',
+    defaultReason: 'Required documents are missing or not verified.',
+  },
+  failed_validation: {
+    label: 'vendor_failed_validation',
+    defaultReason: 'A submitted item did not pass verification.',
+  },
+  discrepancy: {
+    label: 'vendor_discrepancy',
+    defaultReason: 'Application details need clarification before review can continue.',
+  },
+  under_review: {
+    label: 'vendor_under_review',
+    defaultReason: 'The application remains under review.',
+  },
+  manual_review: {
+    label: 'vendor_manual_review',
+    defaultReason: 'The application has been routed for manual review.',
+  },
+});
+
+exports.VERIFICATION_GUIDANCE_OUTCOMES = VERIFICATION_GUIDANCE_OUTCOMES;
+
+const truncateForAudit = (value, maxLength = 300) => {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+};
+
+const normalizeGuidanceList = (value) => {
+  const values = Array.isArray(value) ? value : [value];
+
+  return values
+    .flatMap((item) => {
+      if (Array.isArray(item)) return item;
+      if (typeof item === 'string' && item.includes(',')) {
+        return item.split(',');
+      }
+      return item;
+    })
+    .map((item) => truncateForAudit(item, 120))
+    .filter(Boolean);
+};
+
+const normalizeResponseWindowDays = (value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+  return Math.round(numeric);
+};
+
+const buildGuidanceFingerprint = ({
+  outcome,
+  applicationStatus,
+  reasons,
+  documentsNeeded,
+  fieldsNeeded,
+  responseWindowDays,
+}) => {
+  const payload = {
+    outcome,
+    applicationStatus,
+    reasons: [...normalizeGuidanceList(reasons)].sort(),
+    documentsNeeded: [...normalizeGuidanceList(documentsNeeded)].sort(),
+    fieldsNeeded: [...normalizeGuidanceList(fieldsNeeded)].sort(),
+    responseWindowDays: normalizeResponseWindowDays(responseWindowDays) || null,
+  };
+
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(payload))
+    .digest('hex');
+};
+
+const hasNotificationFingerprint = (application, fingerprint) =>
+  Array.isArray(application?.verificationNotificationLog)
+    && application.verificationNotificationLog.some((entry) => entry?.fingerprint === fingerprint);
+
+const getDeliveryStatus = (emailDelivery) => {
+  if (emailDelivery?.emailSent) return 'sent';
+  if (emailDelivery?.emailSkipped) return 'skipped';
+  return 'failed';
+};
+
+const appendVerificationNotificationLog = async (application, {
+  outcome,
+  fingerprint,
+  reasons,
+  documentsNeeded,
+  fieldsNeeded,
+  responseWindowDays,
+  emailDelivery,
+  triggeredBy,
+}) => {
+  if (!Array.isArray(application.verificationNotificationLog)) {
+    application.verificationNotificationLog = [];
+  }
+
+  const firstFailure = emailDelivery?.results?.find((result) => result.error);
+
+  application.verificationNotificationLog.push({
+    event: outcome,
+    fingerprint,
+    applicationStatus: application.status,
+    deliveryStatus: getDeliveryStatus(emailDelivery),
+    labels: (emailDelivery?.results || []).map((result) => result.label).filter(Boolean),
+    reasonSummary: normalizeGuidanceList(reasons).join('; '),
+    documentsNeeded: normalizeGuidanceList(documentsNeeded),
+    fieldsNeeded: normalizeGuidanceList(fieldsNeeded),
+    responseWindowDays: normalizeResponseWindowDays(responseWindowDays),
+    triggeredBy,
+    attemptedAt: new Date(),
+    error: firstFailure?.error ? truncateForAudit(firstFailure.error, 180) : undefined,
+  });
+
+  try {
+    await application.save();
+    return { logged: true };
+  } catch (error) {
+    console.error('Vendor verification notification log failed:', error.message);
+    return { logged: false, error: error.message };
+  }
+};
+
+const buildGuidanceAuditNote = (outcome, emailDelivery, notificationLog) => {
+  const status = getDeliveryStatus(emailDelivery);
+  const logged = notificationLog?.logged ? 'logged' : 'log_failed';
+  return `Vendor guidance notification ${outcome}: ${status}; ${logged}`;
+};
 
 const syncBusinessPoints = async (application, badge, options = {}) => {
   const ownerId = application.userId?._id || application.userId;
@@ -500,6 +634,198 @@ exports.verifyAndAllocatePoints = async (req, res) => {
 
 
 /* =====================================================
+   SEND VENDOR VERIFICATION GUIDANCE
+===================================================== */
+exports.sendVerificationGuidanceNotification = async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    const {
+      outcome,
+      reason,
+      reasons,
+      adminNote,
+      note,
+      documentsNeeded,
+      missingDocuments,
+      fieldsNeeded,
+      responseWindowDays,
+    } = req.body || {};
+
+    const normalizedOutcome = String(outcome || '').trim().toLowerCase();
+    const guidanceConfig = VERIFICATION_GUIDANCE_OUTCOMES[normalizedOutcome];
+
+    if (!guidanceConfig) {
+      await recordAdminAuditFailure(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_NOTIFY_GUIDANCE,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: applicationId,
+        note: 'Invalid vendor verification guidance outcome',
+      });
+
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid vendor verification guidance outcome',
+        data: {
+          supportedOutcomes: Object.keys(VERIFICATION_GUIDANCE_OUTCOMES),
+        },
+      });
+    }
+
+    const application = await VendorOnboarding.findOne({ applicationId })
+      .populate('userId', 'name email');
+
+    if (!application) {
+      await recordAdminAuditFailure(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_NOTIFY_GUIDANCE,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: applicationId,
+        note: 'Application not found',
+      });
+
+      return res.status(404).json({
+        success: false,
+        message: 'Application not found',
+      });
+    }
+
+    const vendorEmail = application.userId?.email;
+    if (!vendorEmail) {
+      await recordAdminAuditFailure(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_NOTIFY_GUIDANCE,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: application.applicationId,
+        note: 'Vendor email missing',
+      });
+
+      return res.status(400).json({
+        success: false,
+        message: 'Vendor email missing',
+      });
+    }
+
+    const reasonItems = normalizeGuidanceList(reasons);
+    const primaryReason = truncateForAudit(reason || adminNote || note || '', 500);
+    if (primaryReason) {
+      reasonItems.unshift(primaryReason);
+    }
+    if (!reasonItems.length) {
+      reasonItems.push(guidanceConfig.defaultReason);
+    }
+
+    const documentItems = normalizeGuidanceList(documentsNeeded || missingDocuments);
+    const fieldItems = normalizeGuidanceList(fieldsNeeded);
+    const responseDays = normalizeResponseWindowDays(responseWindowDays);
+    const fingerprint = buildGuidanceFingerprint({
+      outcome: normalizedOutcome,
+      applicationStatus: application.status,
+      reasons: reasonItems,
+      documentsNeeded: documentItems,
+      fieldsNeeded: fieldItems,
+      responseWindowDays: responseDays,
+    });
+
+    if (hasNotificationFingerprint(application, fingerprint)) {
+      await recordAdminAuditSuccess(req, {
+        actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_NOTIFY_GUIDANCE,
+        targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+        targetId: application.applicationId,
+        changeSummary: buildFieldChangeSummary(
+          {},
+          { outcome: normalizedOutcome, status: application.status, emailDeduped: true },
+          ['outcome', 'status', 'emailDeduped']
+        ),
+        note: 'Duplicate vendor guidance notification suppressed',
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Duplicate vendor guidance notification suppressed',
+        data: {
+          applicationId: application.applicationId,
+          status: application.status,
+          outcome: normalizedOutcome,
+          emailSent: false,
+          emailSkipped: false,
+          emailFailed: false,
+          emailDeduped: true,
+          notificationLogged: false,
+        },
+      });
+    }
+
+    const emailDelivery = await deliverVendorOnboardingEmails([
+      {
+        label: guidanceConfig.label,
+        send: () => sendVendorVerificationGuidanceEmail({
+          to: vendorEmail,
+          vendorName: application.userId?.name,
+          businessName: application.businessName,
+          applicationId: application.applicationId,
+          currentStatus: application.status,
+          outcome: normalizedOutcome,
+          reasons: reasonItems,
+          documentsNeeded: documentItems,
+          fieldsNeeded: fieldItems,
+          responseWindowDays: responseDays,
+        }),
+      },
+    ]);
+
+    const notificationLog = await appendVerificationNotificationLog(application, {
+      outcome: normalizedOutcome,
+      fingerprint,
+      reasons: reasonItems,
+      documentsNeeded: documentItems,
+      fieldsNeeded: fieldItems,
+      responseWindowDays: responseDays,
+      emailDelivery,
+      triggeredBy: req.user?._id || req.user?.id,
+    });
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_NOTIFY_GUIDANCE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
+      targetId: application.applicationId,
+      changeSummary: buildFieldChangeSummary(
+        {},
+        {
+          outcome: normalizedOutcome,
+          status: application.status,
+          emailSent: emailDelivery.emailSent,
+          emailSkipped: emailDelivery.emailSkipped,
+          emailFailed: emailDelivery.emailFailed,
+          notificationLogged: notificationLog.logged,
+        },
+        ['outcome', 'status', 'emailSent', 'emailSkipped', 'emailFailed', 'notificationLogged']
+      ),
+      note: buildGuidanceAuditNote(normalizedOutcome, emailDelivery, notificationLog),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Vendor guidance notification processed',
+      data: {
+        applicationId: application.applicationId,
+        status: application.status,
+        outcome: normalizedOutcome,
+        emailSent: emailDelivery.emailSent,
+        emailSkipped: emailDelivery.emailSkipped,
+        emailFailed: emailDelivery.emailFailed,
+        emailDeduped: false,
+        notificationLogged: notificationLog.logged,
+      },
+    });
+  } catch (error) {
+    console.error('Vendor guidance notification error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to send vendor guidance notification',
+    });
+  }
+};
+
+
+/* =====================================================
    FINALIZE VERIFICATION (APPROVE/REJECT)
 ===================================================== */
 // only checks for required documents and approves/rejects based on that. Points are not a factor in approval decision, but badge is still assigned based on points.  
@@ -658,11 +984,32 @@ exports.finalizeVerification = async (req, res) => {
           send: () => sendVendorRejectionEmail({
             to: vendorEmail,
             vendorName,
+            businessName: application.businessName,
             applicationId: application.applicationId,
+            currentStatus: application.status,
             rejectionReason: missingRequiredDocuments.join(', '),
+            documentsNeeded: missingRequiredDocuments,
           }),
         },
       ]);
+
+      const rejectionFingerprint = buildGuidanceFingerprint({
+        outcome: 'missing_documents',
+        applicationStatus: application.status,
+        reasons: [rejectionReason.trim()],
+        documentsNeeded: missingRequiredDocuments,
+        fieldsNeeded: [],
+      });
+
+      const notificationLog = await appendVerificationNotificationLog(application, {
+        outcome: 'missing_documents',
+        fingerprint: rejectionFingerprint,
+        reasons: [rejectionReason.trim()],
+        documentsNeeded: missingRequiredDocuments,
+        fieldsNeeded: [],
+        emailDelivery,
+        triggeredBy: req.user?._id || req.user?.id,
+      });
 
       await recordAdminAuditSuccess(req, {
         actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_FINALIZE_REJECTED,
@@ -673,15 +1020,18 @@ exports.finalizeVerification = async (req, res) => {
           { status: application.status, badge },
           ['status', 'badge']
         ),
-        note: rejectionReason.trim(),
+        note: `${rejectionReason.trim()} ${buildGuidanceAuditNote('missing_documents', emailDelivery, notificationLog)}`,
       });
 
       return res.status(200).json({
+        success: true,
         data: {
           status: 'rejected',
           badge,
           emailSent: emailDelivery.emailSent,
           emailSkipped: emailDelivery.emailSkipped,
+          emailFailed: emailDelivery.emailFailed,
+          notificationLogged: notificationLog.logged,
           missingRequiredDocuments,
           rejectionReason: rejectionReason.trim(),
         }

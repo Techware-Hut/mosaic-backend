@@ -93,6 +93,7 @@ Audit and document launch-safe backend email notification behavior for vendor on
 | Admin submission alert | `submitForReview` | `sendAdminOnboardingSubmissionEmail` | Same delivery helper |
 | Vendor approved | `finalizeVerification` | `sendVendorApprovedEmail` | Non-blocking; HTTP 200 |
 | Vendor rejected | `finalizeVerification` | `sendVendorRejectionEmail` | Non-blocking; HTTP 200 |
+| Vendor correction/clarification guidance | `sendVerificationGuidanceNotification` | `sendVendorVerificationGuidanceEmail` | Non-blocking; dedupes identical status/reason payloads |
 | Trust badge assigned | `finalizeVerification` | `sendVendorTrustBadgeAssignedEmail` | Non-blocking; HTTP 200 |
 | Order placed (customer) | `initiateOrder` | `sendCustomerOrderPlacedEmail` | try/catch; order + PI still created |
 | Order placed (vendor) | `initiateOrder` | `sendVendorNewOrderEmail` | try/catch; order + PI still created |
