@@ -3,28 +3,45 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const {
+  getVendorEmailConfigStatus,
+  getVendorEmailProvider,
   isVendorEmailConfigured,
   deliverVendorOnboardingEmail,
   deliverVendorOnboardingEmails,
+  normalizeProviderMessageId,
 } = require('../../utils/vendorOnboardingEmailDelivery');
 
-const originalMailUser = process.env.MAIL_USER;
-const originalMailPassword = process.env.MAIL_PASSWORD;
+const MAIL_ENV_KEYS = [
+  'MAIL_HOST',
+  'MAIL_PORT',
+  'MAIL_SECURE',
+  'MAIL_USER',
+  'MAIL_PASSWORD',
+  'MAIL_FROM',
+];
 
-function restoreMailEnv() {
-  if (originalMailUser === undefined) {
-    delete process.env.MAIL_USER;
-  } else {
-    process.env.MAIL_USER = originalMailUser;
+const originalMailEnv = Object.fromEntries(
+  MAIL_ENV_KEYS.map((key) => [key, process.env[key]])
+);
+
+function restoreMailEnv(saved = originalMailEnv) {
+  for (const key of MAIL_ENV_KEYS) {
+    if (saved[key] === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = saved[key];
+    }
   }
-  if (originalMailPassword === undefined) {
-    delete process.env.MAIL_PASSWORD;
-  } else {
-    process.env.MAIL_PASSWORD = originalMailPassword;
+}
+
+function clearMailEnv() {
+  for (const key of MAIL_ENV_KEYS) {
+    delete process.env[key];
   }
 }
 
 test('isVendorEmailConfigured returns false when MAIL_USER or MAIL_PASSWORD missing', () => {
+  clearMailEnv();
   process.env.MAIL_USER = '';
   process.env.MAIL_PASSWORD = 'secret';
   assert.equal(isVendorEmailConfigured(), false);
@@ -37,15 +54,31 @@ test('isVendorEmailConfigured returns false when MAIL_USER or MAIL_PASSWORD miss
 });
 
 test('isVendorEmailConfigured returns true when both env vars are set', () => {
+  clearMailEnv();
   process.env.MAIL_USER = 'mail@example.com';
   process.env.MAIL_PASSWORD = 'app-password';
   assert.equal(isVendorEmailConfigured(), true);
   restoreMailEnv();
 });
 
+test('vendor email config treats Resend SMTP as requiring MAIL_FROM', () => {
+  clearMailEnv();
+  process.env.MAIL_HOST = 'smtp.resend.com';
+  process.env.MAIL_USER = 'resend';
+  process.env.MAIL_PASSWORD = 'smtp-password';
+
+  assert.equal(getVendorEmailProvider(), 'resend_smtp');
+  assert.equal(isVendorEmailConfigured(), false);
+  assert.deepEqual(getVendorEmailConfigStatus().missing, ['MAIL_FROM']);
+
+  process.env.MAIL_FROM = 'Mosaic Biz Hub <hello@mosaicbizhub.com>';
+  assert.equal(isVendorEmailConfigured(), true);
+
+  restoreMailEnv();
+});
+
 test('deliverVendorOnboardingEmail skips when SMTP not configured', async () => {
-  process.env.MAIL_USER = '';
-  process.env.MAIL_PASSWORD = '';
+  clearMailEnv();
 
   const warnLogs = [];
   const originalWarn = console.warn;
@@ -64,25 +97,31 @@ test('deliverVendorOnboardingEmail skips when SMTP not configured', async () => 
   assert.equal(result.sent, false);
   assert.equal(result.skipped, true);
   assert.equal(result.reason, 'email_not_configured');
+  assert.deepEqual(result.missingEnvNames, ['MAIL_USER', 'MAIL_PASSWORD']);
   assert.ok(warnLogs.some((line) => line.includes('test_skip')));
+  assert.ok(warnLogs.some((line) => line.includes('MAIL_USER')));
 });
 
 test('deliverVendorOnboardingEmail returns sent on success', async () => {
+  clearMailEnv();
   process.env.MAIL_USER = 'mail@example.com';
   process.env.MAIL_PASSWORD = 'app-password';
 
   const result = await deliverVendorOnboardingEmail({
     label: 'test_success',
-    send: async () => {},
+    send: async () => ({ messageId: '<vendor-message-id@example.test>' }),
   });
 
   restoreMailEnv();
 
   assert.equal(result.sent, true);
   assert.equal(result.skipped, false);
+  assert.equal(result.provider, 'legacy_gmail');
+  assert.equal(result.messageId, '<vendor-message-id@example.test>');
 });
 
 test('deliverVendorOnboardingEmail logs message only on failure', async () => {
+  clearMailEnv();
   process.env.MAIL_USER = 'mail@example.com';
   process.env.MAIL_PASSWORD = 'app-password';
 
@@ -108,13 +147,14 @@ test('deliverVendorOnboardingEmail logs message only on failure', async () => {
 });
 
 test('deliverVendorOnboardingEmails aggregates partial success', async () => {
+  clearMailEnv();
   process.env.MAIL_USER = 'mail@example.com';
   process.env.MAIL_PASSWORD = 'app-password';
 
   const delivery = await deliverVendorOnboardingEmails([
     {
       label: 'first',
-      send: async () => {},
+      send: async () => ({ messageId: 'first-message' }),
     },
     {
       label: 'second',
@@ -131,5 +171,12 @@ test('deliverVendorOnboardingEmails aggregates partial success', async () => {
   assert.equal(delivery.emailFailed, false);
   assert.equal(delivery.results.length, 2);
   assert.equal(delivery.results[0].sent, true);
+  assert.equal(delivery.results[0].messageId, 'first-message');
   assert.equal(delivery.results[1].sent, false);
+});
+
+test('normalizeProviderMessageId safely bounds provider ids', () => {
+  const oversizedId = 'x'.repeat(300);
+  assert.equal(normalizeProviderMessageId({ messageId: oversizedId }).length, 180);
+  assert.equal(normalizeProviderMessageId({}), undefined);
 });

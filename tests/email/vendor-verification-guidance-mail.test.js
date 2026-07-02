@@ -12,6 +12,7 @@ function loadMailerWithMocks(sendMailCalls, createdConfigs = []) {
       return {
         sendMail: async (message) => {
           sendMailCalls.push(message);
+          return { messageId: `message-${sendMailCalls.length}` };
         },
       };
     },
@@ -48,7 +49,7 @@ test('vendor verification guidance email escapes vendor-visible admin notes', as
   const sendMailCalls = [];
   const mailer = loadMailerWithMocks(sendMailCalls);
 
-  await mailer.sendVendorVerificationGuidanceEmail({
+  const info = await mailer.sendVendorVerificationGuidanceEmail({
     to: 'vendor@example.com',
     vendorName: 'Vendor <User>',
     businessName: 'Test & Co',
@@ -65,6 +66,7 @@ test('vendor verification guidance email escapes vendor-visible admin notes', as
   process.env.SUPPORT_EMAIL = originalSupportEmail;
 
   assert.equal(sendMailCalls.length, 1);
+  assert.equal(info.messageId, 'message-1');
   const message = sendMailCalls[0];
   assert.equal(message.subject, 'Action Required: Vendor Verification Correction Needed');
   assert.ok(message.html.includes('Current status:</strong> submitted'));
@@ -86,7 +88,7 @@ test('vendor rejection email uses missing-document guidance copy', async () => {
   const sendMailCalls = [];
   const mailer = loadMailerWithMocks(sendMailCalls);
 
-  await mailer.sendVendorRejectionEmail({
+  const info = await mailer.sendVendorRejectionEmail({
     to: 'vendor@example.com',
     vendorName: 'Vendor User',
     businessName: 'Missing Docs LLC',
@@ -98,6 +100,7 @@ test('vendor rejection email uses missing-document guidance copy', async () => {
   process.env.MAIL_USER = originalMailUser;
 
   assert.equal(sendMailCalls.length, 1);
+  assert.equal(info.messageId, 'message-1');
   const message = sendMailCalls[0];
   assert.equal(message.subject, 'Action Required: Vendor Application Documents Needed');
   assert.ok(message.html.includes('Missing Docs LLC'));
@@ -128,11 +131,12 @@ test('vendor onboarding mailer uses provider-neutral SMTP config and MAIL_FROM',
   const mailer = loadMailerWithMocks(sendMailCalls, createdConfigs);
 
   try {
-    await mailer.sendVendorSubmissionConfirmationEmail({
+    const info = await mailer.sendVendorSubmissionConfirmationEmail({
       to: 'vendor@example.com',
       vendorName: 'Vendor User',
       applicationId: 'MBH-APP-SMTP-001',
     });
+    assert.equal(info.messageId, 'message-1');
   } finally {
     Object.entries(savedEnv).forEach(([key, value]) => {
       if (value === undefined) {

@@ -134,6 +134,7 @@ const appendVerificationNotificationLog = async (application, {
     applicationStatus: application.status,
     deliveryStatus: getDeliveryStatus(emailDelivery),
     labels: (emailDelivery?.results || []).map((result) => result.label).filter(Boolean),
+    messageIds: (emailDelivery?.results || []).map((result) => result.messageId).filter(Boolean),
     reasonSummary: normalizeGuidanceList(reasons).join('; '),
     documentsNeeded: normalizeGuidanceList(documentsNeeded),
     fieldsNeeded: normalizeGuidanceList(fieldsNeeded),
