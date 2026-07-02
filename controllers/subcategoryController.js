@@ -7,6 +7,9 @@ const FoodCategory = require('../models/FoodCategory');
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
 const Service = require('../models/Service');
+const {
+  findPublicCategory,
+} = require('../utils/categoryVisibility');
 
 // Get Product Subcategories by Category ID or Slug
 
@@ -16,11 +19,16 @@ exports.getProductSubcategories = async (req, res) => {
     let categoryId = categoryIdOrSlug;
 
     if (!mongoose.Types.ObjectId.isValid(categoryIdOrSlug)) {
-      const category = await ProductCategory.findOne({ slug: categoryIdOrSlug });
+      const category = await findPublicCategory(ProductCategory, { slug: categoryIdOrSlug });
       if (!category) {
         return res.status(404).json({ success: false, message: 'Category not found' });
       }
       categoryId = category._id;
+    } else {
+      const category = await findPublicCategory(ProductCategory, { id: categoryIdOrSlug });
+      if (!category) {
+        return res.status(404).json({ success: false, message: 'Category not found' });
+      }
     }
 
     const subcategories = await ProductSubcategory.find({ category: categoryId })
@@ -99,11 +107,16 @@ exports.getServiceSubcategories = async (req, res) => {
     let categoryId = categoryIdOrSlug;
 
     if (!mongoose.Types.ObjectId.isValid(categoryIdOrSlug)) {
-      const category = await ServiceCategory.findOne({ slug: categoryIdOrSlug });
+      const category = await findPublicCategory(ServiceCategory, { slug: categoryIdOrSlug });
       if (!category) {
         return res.status(404).json({ success: false, message: 'Category not found' });
       }
       categoryId = category._id;
+    } else {
+      const category = await findPublicCategory(ServiceCategory, { id: categoryIdOrSlug });
+      if (!category) {
+        return res.status(404).json({ success: false, message: 'Category not found' });
+      }
     }
 
     const subcategories = await ServiceSubcategory.find({ category: categoryId })
@@ -180,11 +193,16 @@ exports.getFoodSubcategories = async (req, res) => {
 
     // Check if it's a slug (not a valid ObjectId)
     if (!mongoose.Types.ObjectId.isValid(categoryIdOrSlug)) {
-      const category = await FoodCategory.findOne({ slug: categoryIdOrSlug });
+      const category = await findPublicCategory(FoodCategory, { slug: categoryIdOrSlug });
       if (!category) {
         return res.status(404).json({ success: false, message: 'Category not found' });
       }
       categoryId = category._id;
+    } else {
+      const category = await findPublicCategory(FoodCategory, { id: categoryIdOrSlug });
+      if (!category) {
+        return res.status(404).json({ success: false, message: 'Category not found' });
+      }
     }
 
     const subcategories = await FoodSubcategory.find({ category: categoryId })
