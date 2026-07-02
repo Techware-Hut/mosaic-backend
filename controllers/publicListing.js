@@ -32,6 +32,9 @@ const {
 const {
   publicMarketplaceBusinessFilter,
 } = require('../lib/marketplace/businessEligibility');
+const {
+  findPublicCategory,
+} = require('../utils/categoryVisibility');
 
 const getVisibleBusinessIds = async () => {
   const businesses = await Business.find(
@@ -181,15 +184,15 @@ exports.getAllServices = async (req, res) => {
     }
 
     // Category filtering - accept both slug and ID
-    if (categoryId) {
-      filters.categoryId = categoryId;
-    } else if (categorySlug) {
-      const category = await ServiceCategory.findOne({ slug: categorySlug });
-      if (category) {
-        filters.categoryId = category._id;
-      } else {
-        return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+    if (categoryId || categorySlug) {
+      const category = await findPublicCategory(ServiceCategory, {
+        id: categoryId,
+        slug: categorySlug,
+      });
+      if (!category) {
+        return res.json(emptyListResponse(page));
       }
+      filters.categoryId = category._id;
     }
 
     // Subcategory filtering - accept both slug and ID
@@ -561,12 +564,13 @@ exports.getAllFood = async (req, res) => {
     }
 
     // Category filtering
-    if (categoryId) {
-      filters.categoryId = categoryId;
-    } else if (categorySlug) {
-      const category = await FoodCategory.findOne({ slug: categorySlug });
+    if (categoryId || categorySlug) {
+      const category = await findPublicCategory(FoodCategory, {
+        id: categoryId,
+        slug: categorySlug,
+      });
       if (!category) {
-        return res.json({ success: true, total: 0, page: parseInt(page), totalPages: 0, data: [] });
+        return res.json(emptyListResponse(page));
       }
       filters.categoryId = category._id;
     }
@@ -925,19 +929,27 @@ const ProductSubcategory = require('../models/ProductSubcategory');
 const MinorityType = require('../models/MinorityType');
 
 async function resolveCategoryIdForListingType(listingType, { categoryId, categorySlug }) {
-  if (categoryId) return categoryId;
-  if (!categorySlug) return null;
+  if (!categoryId && !categorySlug) return null;
 
   if (listingType === 'product') {
-    const category = await ProductCategory.findOne({ slug: categorySlug }).select('_id').lean();
+    const category = await findPublicCategory(ProductCategory, {
+      id: categoryId,
+      slug: categorySlug,
+    });
     return category?._id || null;
   }
   if (listingType === 'service') {
-    const category = await ServiceCategory.findOne({ slug: categorySlug }).select('_id').lean();
+    const category = await findPublicCategory(ServiceCategory, {
+      id: categoryId,
+      slug: categorySlug,
+    });
     return category?._id || null;
   }
   if (listingType === 'food') {
-    const category = await FoodCategory.findOne({ slug: categorySlug }).select('_id').lean();
+    const category = await findPublicCategory(FoodCategory, {
+      id: categoryId,
+      slug: categorySlug,
+    });
     return category?._id || null;
   }
   return null;
@@ -1008,12 +1020,13 @@ exports.getAllProducts = async (req, res) => {
     }
 
     // Category filtering - accept both slug and ID
-    if (categoryId) {
-      filters.categoryId = categoryId;
-    } else if (categorySlug) {
-      const category = await ProductCategory.findOne({ slug: categorySlug });
-      if (category) filters.categoryId = category._id;
-      else return res.json(emptyListResponse(page));
+    if (categoryId || categorySlug) {
+      const category = await findPublicCategory(ProductCategory, {
+        id: categoryId,
+        slug: categorySlug,
+      });
+      if (!category) return res.json(emptyListResponse(page));
+      filters.categoryId = category._id;
     }
 
     // Subcategory filtering - accept both slug and ID
@@ -1109,12 +1122,13 @@ exports.getProductsByFilters = async (req, res) => {
     const filters = { isDeleted: false, isPublished: true };
 
     // Category filtering - accept both slug and ID
-    if (categoryId) {
-      filters.categoryId = categoryId;
-    } else if (categorySlug) {
-      const category = await ProductCategory.findOne({ slug: categorySlug });
-      if (category) filters.categoryId = category._id;
-      else return res.json({ success: true, total: 0, data: [] });
+    if (categoryId || categorySlug) {
+      const category = await findPublicCategory(ProductCategory, {
+        id: categoryId,
+        slug: categorySlug,
+      });
+      if (!category) return res.json({ success: true, total: 0, data: [] });
+      filters.categoryId = category._id;
     }
 
     // Subcategory filtering - accept both slug and ID
@@ -1628,33 +1642,39 @@ exports.searchPublicListings = async (req, res) => {
       ...baseBusinessFilter,
     };
 
-    const resolvedCategoryId = await resolveCategoryIdForListingType(parsed.listingType === 'all' ? 'product' : parsed.listingType, parsed)
-      || (parsed.categoryId || null);
-
     if (parsed.categoryId || parsed.categorySlug) {
+      let resolvedAnyCategory = false;
+
       if (shouldIncludeListingType(parsed.listingType, 'product')) {
-        const productCategoryId = parsed.categoryId || await resolveCategoryIdForListingType('product', parsed);
+        const productCategoryId = await resolveCategoryIdForListingType('product', parsed);
         if (productCategoryId) {
           productFilter.categoryId = productCategoryId;
-        } else if (parsed.categorySlug) {
-          return res.json(emptyPayload);
+          resolvedAnyCategory = true;
+        } else {
+          productFilter._id = { $exists: false };
         }
       }
       if (shouldIncludeListingType(parsed.listingType, 'service')) {
-        const serviceCategoryId = parsed.categoryId || await resolveCategoryIdForListingType('service', parsed);
+        const serviceCategoryId = await resolveCategoryIdForListingType('service', parsed);
         if (serviceCategoryId) {
           serviceFilter.categoryId = serviceCategoryId;
-        } else if (parsed.categorySlug) {
-          return res.json(emptyPayload);
+          resolvedAnyCategory = true;
+        } else {
+          serviceFilter._id = { $exists: false };
         }
       }
       if (shouldIncludeListingType(parsed.listingType, 'food')) {
-        const foodCategoryId = parsed.categoryId || await resolveCategoryIdForListingType('food', parsed);
+        const foodCategoryId = await resolveCategoryIdForListingType('food', parsed);
         if (foodCategoryId) {
           foodFilter.categoryId = foodCategoryId;
-        } else if (parsed.categorySlug) {
-          return res.json(emptyPayload);
+          resolvedAnyCategory = true;
+        } else {
+          foodFilter._id = { $exists: false };
         }
+      }
+
+      if (!resolvedAnyCategory) {
+        return res.json(emptyPayload);
       }
     }
 

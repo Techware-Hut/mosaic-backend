@@ -1117,6 +1117,7 @@ if (
       applicationId: onboarding.applicationId,
       emailSent: emailDelivery.emailSent,
       emailSkipped: emailDelivery.emailSkipped,
+      emailFailed: emailDelivery.emailFailed,
     });
   } catch (error) {
     console.error("Stage-1 submit error:", error);

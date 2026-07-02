@@ -1,10 +1,18 @@
 const ServiceCategory = require('../../models/ServiceCategory');
 const deleteCloudinaryFile = require('../../utils/deleteCloudinaryFile');
+const {
+  assertValidCategoryName,
+  buildPublicCategoryFilter,
+  filterPublicCategories,
+  getCategoryVisibilityFields,
+} = require('../../utils/categoryVisibility');
 
 
 exports.getServiceCategories = async (req, res) => {
   try {
-    const categories = await ServiceCategory.find().sort({ createdAt: -1 });
+    const categories = filterPublicCategories(
+      await ServiceCategory.find(buildPublicCategoryFilter()).sort({ createdAt: -1 }).lean()
+    );
     res.json({ success: true, categories });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -14,7 +22,13 @@ exports.getServiceCategories = async (req, res) => {
 exports.createServiceCategory = async (req, res) => {
   try {
     const { name, description, img } = req.body;
-    const category = new ServiceCategory({ name, description, img });
+    const normalizedName = assertValidCategoryName(name);
+    const category = new ServiceCategory({
+      name: normalizedName,
+      description,
+      img,
+      ...getCategoryVisibilityFields(req.body),
+    });
     await category.save();
     res.status(201).json({ success: true, category });
   } catch (err) {
@@ -25,10 +39,19 @@ exports.createServiceCategory = async (req, res) => {
 exports.updateServiceCategory = async (req, res) => {
   try {
     const { name, description, img } = req.body;
+    const updates = {
+      description,
+      img,
+      ...getCategoryVisibilityFields(req.body),
+    };
+    if (Object.prototype.hasOwnProperty.call(req.body, 'name')) {
+      updates.name = assertValidCategoryName(name);
+    }
+
     const category = await ServiceCategory.findByIdAndUpdate(
       req.params.id,
-      { name, description, img },
-      { new: true }
+      updates,
+      { new: true, runValidators: true }
     );
     if (!category) return res.status(404).json({ success: false, message: 'Category not found' });
     res.json({ success: true, category });

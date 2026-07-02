@@ -8,6 +8,12 @@ const CategoryRequest = require('../models/CategoryRequest');
 const Product = require('../models/Product');
 const Service = require('../models/Service');
 const {
+  assertValidCategoryName,
+  buildPublicCategoryFilter,
+  filterPublicCategories,
+  findPublicCategory,
+} = require('../utils/categoryVisibility');
+const {
   ADMIN_AUDIT_ACTIONS,
   ADMIN_AUDIT_TARGET_TYPES,
 } = require('../utils/audit/actionRegistry');
@@ -313,8 +319,8 @@ const createCategoryRequest = async (req, res) => {
       });
     }
 
-    const trimmedCategoryName = String(categoryName).trim();
-    const trimmedSubcategoryName = String(subcategoryName).trim();
+    const trimmedCategoryName = assertValidCategoryName(categoryName);
+    const trimmedSubcategoryName = assertValidCategoryName(subcategoryName);
 
     // Check for existing pending requests
     const existingPendingRequest = await CategoryRequest.findOne({
@@ -368,9 +374,10 @@ const createCategoryRequest = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating category request:', error);
-    return res.status(500).json({
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({
       success: false,
-      message: 'Error creating category request',
+      message: statusCode === 400 ? error.message : 'Error creating category request',
       error: error.message,
     });
   }
@@ -486,15 +493,18 @@ const approveCategoryRequest = async (req, res) => {
       });
     }
 
+    const approvedCategoryName = assertValidCategoryName(categoryRequest.categoryName);
+    const approvedSubcategoryName = assertValidCategoryName(categoryRequest.subcategoryName);
+
     let category = await findByNameInsensitive(
       modelConfig.categoryModel,
-      categoryRequest.categoryName
+      approvedCategoryName
     );
 
     if (!category) {
       category = await modelConfig.categoryModel.create(
         buildCreatePayload(modelConfig.categoryModel, {
-          name: categoryRequest.categoryName,
+          name: approvedCategoryName,
           description: categoryRequest.description,
         })
       );
@@ -502,14 +512,14 @@ const approveCategoryRequest = async (req, res) => {
 
     let subcategory = await findByNameInsensitive(
       modelConfig.subcategoryModel,
-      categoryRequest.subcategoryName,
+      approvedSubcategoryName,
       { category: category._id }
     );
 
     if (!subcategory) {
       subcategory = await modelConfig.subcategoryModel.create(
         buildCreatePayload(modelConfig.subcategoryModel, {
-          name: categoryRequest.subcategoryName,
+          name: approvedSubcategoryName,
           description: categoryRequest.description,
           category: category._id,
         })
@@ -554,9 +564,10 @@ const approveCategoryRequest = async (req, res) => {
     });
   } catch (error) {
     console.error('Error approving category request:', error);
-    return res.status(500).json({
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({
       success: false,
-      message: 'Error approving category request',
+      message: statusCode === 400 ? error.message : 'Error approving category request',
       error: error.message,
     });
   }
@@ -636,18 +647,20 @@ const rejectCategoryRequest = async (req, res) => {
 // Controller to get all categories
 const getAllCategories = async (req, res) => {
   try {
-    
-    const foodCategories = await FoodCategory.find();
-    const productCategories = await ProductCategory.find();
-    const serviceCategories = await ServiceCategory.find();
+    const publicCategoryFilter = buildPublicCategoryFilter();
+    const [foodCategories, productCategories, serviceCategories] = await Promise.all([
+      FoodCategory.find(publicCategoryFilter).lean(),
+      ProductCategory.find(publicCategoryFilter).lean(),
+      ServiceCategory.find(publicCategoryFilter).lean(),
+    ]);
     
 
     return res.status(200).json({
       success: true,
       data: {
-        foodCategories,
-        productCategories,
-        serviceCategories,
+        foodCategories: filterPublicCategories(foodCategories),
+        productCategories: filterPublicCategories(productCategories),
+        serviceCategories: filterPublicCategories(serviceCategories),
       },
     });
   } catch (error) {
@@ -662,7 +675,9 @@ const getAllCategories = async (req, res) => {
 
 const getProductCategories = async (req, res) => {
   try {
-    const productCategories = await ProductCategory.find().lean();
+    const productCategories = filterPublicCategories(
+      await ProductCategory.find(buildPublicCategoryFilter()).lean()
+    );
 
     // Aggregate product counts
     const counts = await Product.aggregate([
@@ -680,7 +695,7 @@ const getProductCategories = async (req, res) => {
     // Convert to map for quick lookup
     const countMap = {};
     counts.forEach(item => {
-      countMap[item._id.toString()] = item.totalProducts;
+      if (item._id) countMap[item._id.toString()] = item.totalProducts;
     });
 
     // Add totalProducts field to each category
@@ -730,7 +745,9 @@ const getProductCategories = async (req, res) => {
 
 const getServiceCategories = async (req, res) => {
   try {
-    const serviceCategories = await ServiceCategory.find().lean();
+    const serviceCategories = filterPublicCategories(
+      await ServiceCategory.find(buildPublicCategoryFilter()).lean()
+    );
 
     // Aggregate service counts
     const counts = await Service.aggregate([
@@ -748,7 +765,7 @@ const getServiceCategories = async (req, res) => {
     // Convert to map
     const countMap = {};
     counts.forEach(item => {
-      countMap[item._id.toString()] = item.totalServices;
+      if (item._id) countMap[item._id.toString()] = item.totalServices;
     });
 
     // Attach totalServices field
@@ -796,7 +813,9 @@ const getServiceCategories = async (req, res) => {
 
 const getFoodCategories = async (req, res) => {
   try {
-    const foodCategories = await FoodCategory.find();
+    const foodCategories = filterPublicCategories(
+      await FoodCategory.find(buildPublicCategoryFilter()).lean()
+    );
     return res.status(200).json({
       success: true,
       data: {
@@ -828,6 +847,14 @@ const getProductSubcategories = async (req, res) => {
       });
     }
 
+    const category = await findPublicCategory(ProductCategory, { id: categoryId });
+    if (!category) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found.",
+      });
+    }
+
     const subcategories = await ProductSubcategory.find({ category: categoryId }).select(
       "_id name"
     );
@@ -852,12 +879,14 @@ const listSubcategories = async (req, res) => {
 
     let catId = categoryId;
     if (!catId && categorySlug) {
-      const cat = await ProductCategory.findOne(
-        { slug: String(categorySlug) },
-        { _id: 1 }
-      ).lean();
+      const cat = await findPublicCategory(ProductCategory, { slug: categorySlug });
       if (!cat) return res.status(404).json({ error: 'Unknown category slug' });
       catId = String(cat._id);
+    }
+
+    if (catId) {
+      const cat = await findPublicCategory(ProductCategory, { id: catId });
+      if (!cat) return res.status(404).json({ error: 'Unknown category' });
     }
 
     const filter = {};

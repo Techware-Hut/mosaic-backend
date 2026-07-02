@@ -1,14 +1,11 @@
 // utils/emails/businessProfileEmails.js
 const nodemailer = require('nodemailer');
+const {
+  buildSmtpTransportConfig,
+  formatMosaicFromHeader,
+} = require('./smtpTransport');
 
-// Create transporter (fix: createTransport not createTransporter)
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASSWORD
-  }
-});
+const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
 
 // Send business profile review notification to admin
 const sendBusinessProfileReviewEmail = async (userEmail, userName, profileId) => {
@@ -16,7 +13,7 @@ const sendBusinessProfileReviewEmail = async (userEmail, userName, profileId) =>
     const adminEmail = process.env.ADMIN_EMAIL || 'admin@mosaicbizhub.com';
     
     const mailOptions = {
-      from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+      from: formatMosaicFromHeader(),
       to: adminEmail,
       subject: 'New Business Profile Submitted for Review - Step 3',
       html: `
@@ -62,7 +59,7 @@ const sendBusinessProfileReviewEmail = async (userEmail, userName, profileId) =>
 const sendBusinessProfileApprovalEmail = async (userEmail, userName, badge, totalPoints) => {
   try {
     const mailOptions = {
-      from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+      from: formatMosaicFromHeader(),
       to: userEmail,
       subject: 'Business Profile Approved - Badge Assigned',
       html: `
@@ -99,7 +96,7 @@ const sendBusinessProfileApprovalEmail = async (userEmail, userName, badge, tota
 const sendQuestionVerificationEmail = async (userEmail, userName, questionNumber, points) => {
   try {
     const mailOptions = {
-      from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+      from: formatMosaicFromHeader(),
       to: userEmail,
       subject: 'Business Profile Question Verified',
       html: `

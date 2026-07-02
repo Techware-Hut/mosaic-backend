@@ -1,13 +1,11 @@
 const ContactInquiry = require('../models/ContactInquiry');
 const nodemailer = require('nodemailer');
+const {
+  buildSmtpTransportConfig,
+  formatMosaicFromHeader,
+} = require('../utils/smtpTransport');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASSWORD,
-  },
-});
+const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
 
 exports.createContactInquiry = async (req, res) => {
   try {
@@ -27,7 +25,7 @@ exports.createContactInquiry = async (req, res) => {
     // Try to send email to admin (don't fail if email fails)
     try {
       const mailOptions = {
-        from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+        from: formatMosaicFromHeader(),
         to: process.env.ADMIN_EMAIL,
         subject: `New Contact Inquiry: ${subject}`,
         html: `

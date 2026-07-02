@@ -1,6 +1,10 @@
 // utils/orderMailer.js
 const nodemailer = require("nodemailer");
 const { buildFrontendUrl, getFrontendLogoUrl } = require("./frontendUrl");
+const {
+  buildSmtpTransportConfig,
+  formatMosaicFromHeader,
+} = require("./smtpTransport");
 
 const APP_NAME = process.env.APP_NAME || "Mosaic Biz Hub";
 const LOGO_URL = getFrontendLogoUrl();
@@ -15,13 +19,7 @@ const escapeHtml = (value = "") =>
     .replace(/'/g, "&#039;");
 
 // Configure transporter (swap service/config as needed)
-const transporter = nodemailer.createTransport({
-  service: "Gmail",
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASSWORD,
-  },
-});
+const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
 
 /**
  * HTML wrapper with logo header and CTA button
@@ -165,7 +163,7 @@ async function sendCustomerOrderPlacedEmail(to, order) {
   });
 
   await transporter.sendMail({
-    from: `"${APP_NAME}" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: `${APP_NAME} • Order Placed`,
     html,
@@ -199,7 +197,7 @@ async function sendVendorNewOrderEmail(to, order) {
   });
 
   await transporter.sendMail({
-    from: `"${APP_NAME}" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: `${APP_NAME} • New Order Received`,
     html,
@@ -278,7 +276,7 @@ async function sendOrderStatusEmail(to, orderId, status) {
       });
 
   const mailOptions = {
-    from: `"${APP_NAME}" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: `${APP_NAME} • ${title}`,
     html,
@@ -380,7 +378,7 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
   });
 
   await transporter.sendMail({
-    from: `"${APP_NAME}" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: `${APP_NAME} • ${title}`,
     html,
@@ -466,7 +464,7 @@ async function sendOrderLifecycleEmail(to, order, event) {
   });
 
   await transporter.sendMail({
-    from: `"${APP_NAME}" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: `${APP_NAME} - ${copy.title}`,
     html,

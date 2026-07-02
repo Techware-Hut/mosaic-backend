@@ -972,6 +972,7 @@ exports.finalizeVerification = async (req, res) => {
           badge,
           emailSent: emailDelivery.emailSent,
           emailSkipped: emailDelivery.emailSkipped,
+          emailFailed: emailDelivery.emailFailed,
         }
       });
     }

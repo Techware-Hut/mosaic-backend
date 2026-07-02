@@ -6,9 +6,11 @@ const path = require('node:path');
 const {
   ALLOWED_GENERIC_S3_UPLOAD_MIME_TYPES,
   ALLOWED_IMAGE_S3_UPLOAD_MIME_TYPES,
+  MAX_IMAGE_S3_UPLOAD_BYTES,
   buildPresignedS3UploadContract,
   isAllowedGenericS3UploadMimeType,
   isAllowedImageS3UploadMimeType,
+  parseS3UploadSizeBytes,
   resolveGenericS3UploadMimeType,
   resolveImageS3UploadMimeType,
   sanitizeS3UploadFileName,
@@ -58,6 +60,14 @@ test('image S3 upload helper resolves empty browser MIME types from safe extensi
 test('generic S3 upload filenames are sanitized before key construction', () => {
   assert.equal(sanitizeS3UploadFileName('../bad folder/policy.pdf'), '.._bad_folder_policy.pdf');
   assert.equal(sanitizeS3UploadFileName(''), 'upload');
+});
+
+test('image S3 upload helper parses optional file size limits', () => {
+  assert.equal(MAX_IMAGE_S3_UPLOAD_BYTES, 5 * 1024 * 1024);
+  assert.equal(parseS3UploadSizeBytes(undefined), null);
+  assert.equal(parseS3UploadSizeBytes('1024'), 1024);
+  assert.equal(Number.isNaN(parseS3UploadSizeBytes('-1')), true);
+  assert.equal(Number.isNaN(parseS3UploadSizeBytes('not-a-number')), true);
 });
 
 test('listing presign routes require business owner authorization', () => {

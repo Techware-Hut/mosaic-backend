@@ -316,9 +316,9 @@ flowchart LR
 
 ### 6.9 Email Notifications
 
-All via Nodemailer. Auth OTP/password-reset mail uses provider-neutral SMTP through [`utils/smtpTransport.js`](../utils/smtpTransport.js) when `MAIL_HOST` is set and keeps the Gmail fallback when `MAIL_HOST` is unset. Other legacy mailers still use their existing Gmail-style transport. Key files:
+All via Nodemailer. Transactional mail uses provider-neutral SMTP through [`utils/smtpTransport.js`](../utils/smtpTransport.js) when `MAIL_HOST` is set and keeps the Gmail fallback when `MAIL_HOST` is unset. Key files:
 - [`utils/mailer.js`](../utils/mailer.js) — OTP, password reset, welcome email
-- [`utils/smtpTransport.js`](../utils/smtpTransport.js) — auth SMTP config + From header
+- [`utils/smtpTransport.js`](../utils/smtpTransport.js) — SMTP config + From header
 - [`utils/WellcomeMailer.js`](../utils/WellcomeMailer.js) — vendor onboarding
 - [`utils/approvalMail.js`](../utils/approvalMail.js) — admin finalize
 - [`utils/OrderMail.js`](../utils/OrderMail.js) — post-payment order emails
