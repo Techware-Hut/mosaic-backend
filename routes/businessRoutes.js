@@ -49,6 +49,13 @@ router.get(
   businessController.getMyBusinesses
 );
 
+router.post(
+  '/:id/publish-storefront',
+  authenticate,
+  isBusinessOwner,
+  businessController.publishStorefront
+);
+
 router.get(
   '/:id/shipping-settings',
   authenticate,
