@@ -95,3 +95,50 @@ test('sendOtpEmail uses provider-neutral SMTP config and MAIL_FROM for auth mail
   assert.equal(sentMessages[0].from, 'Mosaic Biz Hub <hello@mosaicbizhub.com>');
   assert.equal(sentMessages[0].to, 'recipient@example.com');
 });
+
+test('sendWelcomeEmail uses provider-neutral SMTP config and MAIL_FROM', async () => {
+  const savedEnv = snapshotEnv();
+  process.env.MAIL_HOST = 'smtp.resend.com';
+  process.env.MAIL_PORT = '465';
+  process.env.MAIL_SECURE = 'true';
+  process.env.MAIL_USER = 'resend';
+  process.env.MAIL_PASSWORD = 'smtp-password';
+  process.env.MAIL_FROM = 'Mosaic Biz Hub <hello@mosaicbizhub.com>';
+
+  const createdConfigs = [];
+  const sentMessages = [];
+  const nodemailerMock = {
+    createTransport(config) {
+      createdConfigs.push(config);
+      return {
+        verify: async () => {},
+        sendMail: async (message) => {
+          sentMessages.push(message);
+        },
+      };
+    },
+  };
+
+  const mailer = loadMailerWithNodemailer(nodemailerMock);
+
+  try {
+    await mailer.sendWelcomeEmail('vendor@example.com', 'Vendor', 'business_owner');
+  } finally {
+    restoreEnv(savedEnv);
+    delete require.cache[mailerPath];
+  }
+
+  assert.equal(createdConfigs.length, 1);
+  assert.deepEqual(createdConfigs[0], {
+    host: 'smtp.resend.com',
+    port: 465,
+    secure: true,
+    auth: {
+      user: 'resend',
+      pass: 'smtp-password',
+    },
+  });
+  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages[0].from, 'Mosaic Biz Hub <hello@mosaicbizhub.com>');
+  assert.equal(sentMessages[0].to, 'vendor@example.com');
+});

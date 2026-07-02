@@ -35,7 +35,7 @@ function createCorsProbeApp(envOverrides) {
   Object.assign(process.env, envOverrides);
   delete require.cache[corsOriginsPath];
 
-  const { getAllowedOrigins } = require(corsOriginsPath);
+  const { getAllowedOrigins, isAllowedCredentialOrigin } = require(corsOriginsPath);
   const allowedOrigins = getAllowedOrigins();
   const app = express();
 
@@ -43,7 +43,7 @@ function createCorsProbeApp(envOverrides) {
     cors({
       origin(origin, callback) {
         if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
+        if (isAllowedCredentialOrigin(origin, allowedOrigins)) {
           return callback(null, true);
         }
         return callback(null, false);
@@ -105,6 +105,27 @@ test('OPTIONS /api/users/login allows Vercel preview origin when configured', as
       res.headers['access-control-allow-origin'],
       'https://mosaic-biz-frontend-launch.vercel.app'
     );
+    assert.equal(res.headers['access-control-allow-credentials'], 'true');
+  } finally {
+    cleanup();
+  }
+});
+
+test('OPTIONS /api/users/login allows same-project Vercel branch preview origin', async () => {
+  const { app, cleanup } = createCorsProbeApp({
+    NODE_ENV: 'production',
+    CORS_ORIGINS: 'https://mosaicbizhub.com',
+  });
+
+  try {
+    const origin = 'https://mosaic-biz-frontend-launch-git-feature-digital-builders.vercel.app';
+    const res = await supertest(app)
+      .options('/api/users/login')
+      .set('Origin', origin)
+      .set('Access-Control-Request-Method', 'POST');
+
+    assert.equal(res.status, 204);
+    assert.equal(res.headers['access-control-allow-origin'], origin);
     assert.equal(res.headers['access-control-allow-credentials'], 'true');
   } finally {
     cleanup();

@@ -223,7 +223,7 @@ Dual mount: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (
 | [`utils/bookingMailer.js`](../utils/bookingMailer.js) | Service booking notifications |
 | [`utils/BuisnessprofileMail.js`](../utils/BuisnessprofileMail.js) | Business profile Step-3 admin notification |
 
-**Transport:** Nodemailer SMTP. Auth OTP/password-reset mail supports provider-neutral SMTP via `MAIL_HOST` and keeps Gmail fallback when `MAIL_HOST` is unset; other legacy mailers still use the existing Gmail-style transport.
+**Transport:** Nodemailer SMTP. Transactional mail supports provider-neutral SMTP via `MAIL_HOST` and keeps Gmail fallback when `MAIL_HOST` is unset.
 
 ### 1.12 Models index (Mongoose)
 

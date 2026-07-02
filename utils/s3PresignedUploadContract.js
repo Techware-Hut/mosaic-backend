@@ -1,5 +1,6 @@
 const PRESIGNED_S3_UPLOAD_METHOD = 'PUT';
 const PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS = 300;
+const MAX_IMAGE_S3_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 const GENERIC_UPLOAD_MIME_ALIASES = {
   'image/jpg': 'image/jpeg',
@@ -101,14 +102,29 @@ function isAllowedImageS3UploadMimeType(mimeType, fileName) {
   );
 }
 
+function parseS3UploadSizeBytes(fileSize) {
+  if (fileSize === undefined || fileSize === null || fileSize === '') {
+    return null;
+  }
+
+  const parsed = Number(fileSize);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return Number.NaN;
+  }
+
+  return parsed;
+}
+
 module.exports = {
   ALLOWED_GENERIC_S3_UPLOAD_MIME_TYPES,
   ALLOWED_IMAGE_S3_UPLOAD_MIME_TYPES,
+  MAX_IMAGE_S3_UPLOAD_BYTES,
   PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
   PRESIGNED_S3_UPLOAD_METHOD,
   buildPresignedS3UploadContract,
   isAllowedGenericS3UploadMimeType,
   isAllowedImageS3UploadMimeType,
+  parseS3UploadSizeBytes,
   resolveImageS3UploadMimeType,
   resolveGenericS3UploadMimeType,
   sanitizeS3UploadFileName,

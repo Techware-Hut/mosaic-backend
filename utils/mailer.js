@@ -12,13 +12,7 @@ let authVerifyPromise = null;
 
 function getTransporter() {
   if (!transporter) {
-    transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.MAIL_USER,
-        pass: process.env.MAIL_PASSWORD,
-      },
-    });
+    transporter = nodemailer.createTransport(buildSmtpTransportConfig());
   }
   return transporter;
 }
@@ -163,7 +157,7 @@ exports.sendWelcomeEmail = async (to, firstName, role) => {
     }
 
     const mailOptions = {
-      from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+      from: formatMosaicFromHeader(),
       to,
       subject,
       html,

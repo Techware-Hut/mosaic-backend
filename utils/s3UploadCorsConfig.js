@@ -3,6 +3,10 @@ const DEFAULT_S3_UPLOAD_CORS_ORIGINS = [
   'https://www.mosaicbizhub.com',
   'https://app.mosaicbizhub.com',
   'https://mosaic-biz-frontend-launch.vercel.app',
+  'https://mosaic-biz-frontend-launch-digital-builders.vercel.app',
+  'https://mosaic-biz-frontend-launch-git-main-digital-builders.vercel.app',
+  'https://mosaic-biz-frontend-launch-git-develop-digital-builders.vercel.app',
+  'https://mosaic-biz-frontend-launch-*.vercel.app',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
 ];

@@ -5,13 +5,16 @@ const Module = require('node:module');
 
 const mailerPath = path.resolve(__dirname, '../../utils/WellcomeMailer.js');
 
-function loadMailerWithMocks(sendMailCalls) {
+function loadMailerWithMocks(sendMailCalls, createdConfigs = []) {
   const nodemailerMock = {
-    createTransport: () => ({
-      sendMail: async (message) => {
-        sendMailCalls.push(message);
-      },
-    }),
+    createTransport: (config) => {
+      createdConfigs.push(config);
+      return {
+        sendMail: async (message) => {
+          sendMailCalls.push(message);
+        },
+      };
+    },
   };
 
   const frontendUrlMock = {
@@ -101,4 +104,55 @@ test('vendor rejection email uses missing-document guidance copy', async () => {
   assert.ok(message.html.includes('Current status:</strong> rejected'));
   assert.ok(message.html.includes('EIN document'));
   assert.ok(message.html.includes('Open Vendor Dashboard'));
+});
+
+test('vendor onboarding mailer uses provider-neutral SMTP config and MAIL_FROM', async () => {
+  const savedEnv = {
+    MAIL_HOST: process.env.MAIL_HOST,
+    MAIL_PORT: process.env.MAIL_PORT,
+    MAIL_SECURE: process.env.MAIL_SECURE,
+    MAIL_USER: process.env.MAIL_USER,
+    MAIL_PASSWORD: process.env.MAIL_PASSWORD,
+    MAIL_FROM: process.env.MAIL_FROM,
+  };
+
+  process.env.MAIL_HOST = 'smtp.resend.com';
+  process.env.MAIL_PORT = '465';
+  process.env.MAIL_SECURE = 'true';
+  process.env.MAIL_USER = 'resend';
+  process.env.MAIL_PASSWORD = 'smtp-password';
+  process.env.MAIL_FROM = 'Mosaic Biz Hub <hello@mosaicbizhub.com>';
+
+  const sendMailCalls = [];
+  const createdConfigs = [];
+  const mailer = loadMailerWithMocks(sendMailCalls, createdConfigs);
+
+  try {
+    await mailer.sendVendorSubmissionConfirmationEmail({
+      to: 'vendor@example.com',
+      vendorName: 'Vendor User',
+      applicationId: 'MBH-APP-SMTP-001',
+    });
+  } finally {
+    Object.entries(savedEnv).forEach(([key, value]) => {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    });
+    delete require.cache[mailerPath];
+  }
+
+  assert.deepEqual(createdConfigs[0], {
+    host: 'smtp.resend.com',
+    port: 465,
+    secure: true,
+    auth: {
+      user: 'resend',
+      pass: 'smtp-password',
+    },
+  });
+  assert.equal(sendMailCalls.length, 1);
+  assert.equal(sendMailCalls[0].from, 'Mosaic Biz Hub <hello@mosaicbizhub.com>');
 });

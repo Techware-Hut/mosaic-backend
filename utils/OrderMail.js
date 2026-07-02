@@ -3,16 +3,17 @@ const nodemailer = require("nodemailer");
 const PDFDocument = require("pdfkit");
 const { renderInvoicePdfBufferForOrder } = require("../services/invoiceService");
 const { buildFrontendUrl, getFrontendLogoUrl } = require("./frontendUrl");
+const {
+  buildSmtpTransportConfig,
+  formatMosaicFromHeader,
+} = require("./smtpTransport");
 
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || process.env.MAIL_USER;
 const LOGO_URL = getFrontendLogoUrl();
 
 const transporter =
   global.__MAILER__ ||
-  nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASSWORD },
-  });
+  nodemailer.createTransport(buildSmtpTransportConfig());
 
 const escapeHtml = (s = "") =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -368,7 +369,7 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
     ].join("\n");
 
     await transporter.sendMail({
-      from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+      from: formatMosaicFromHeader(),
       to: customerEmails,
       subject: `✅ Order #${orderNo} confirmed`,
       text: customerText,
@@ -399,7 +400,7 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
     ].join("\n");
 
     await transporter.sendMail({
-      from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+      from: formatMosaicFromHeader(),
       to: vendorEmails,
       subject: `🛍️ New paid order #${orderNo}`,
       text: vendorText,

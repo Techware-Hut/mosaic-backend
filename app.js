@@ -89,7 +89,7 @@ const { clean: xssClean } = require('xss-clean/lib/xss');
 const sentryHttpCapture = require('./middlewares/sentryHttpCapture');
 const requestIdMiddleware = require('./middlewares/requestId');
 const { isSentryEnabled } = require('./instrument');
-const { getAllowedOrigins } = require('./utils/corsOrigins');
+const { getAllowedOrigins, isAllowedCredentialOrigin } = require('./utils/corsOrigins');
 
 const app = express();
 
@@ -101,7 +101,7 @@ app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
+    if (isAllowedCredentialOrigin(origin, allowedOrigins)) {
       return callback(null, true);
     } else {
       return callback(null, false);

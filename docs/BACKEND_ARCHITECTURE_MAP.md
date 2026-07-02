@@ -178,7 +178,7 @@ All admin routers typically use `router.use(authenticate, isAdmin)` at the top.
 | Auth OTP / password reset | [mailer.js](../utils/mailer.js), [smtpTransport.js](../utils/smtpTransport.js) | Provider-neutral SMTP when `MAIL_HOST` is set; Gmail fallback when unset |
 | Generic notifications | [mailer.js](../utils/mailer.js) | |
 
-Env names: `MAIL_USER`, `MAIL_PASSWORD`, optional auth SMTP `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, `MAIL_FROM`, `ADMIN_EMAIL`, `SUPPORT_EMAIL`, `APP_NAME`, `APP_URL`
+Env names: `MAIL_USER`, `MAIL_PASSWORD`, optional SMTP `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, `MAIL_FROM`, `ADMIN_EMAIL`, `SUPPORT_EMAIL`, `APP_NAME`, `APP_URL`
 
 ---
 

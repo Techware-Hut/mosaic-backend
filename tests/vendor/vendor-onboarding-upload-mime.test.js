@@ -19,11 +19,18 @@ const requireVerifiedVendorPath = path.resolve(
 
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 
-function loadUploadController() {
-  process.env.AWS_S3_BUCKET = process.env.AWS_S3_BUCKET || 'test-bucket';
-  process.env.AWS_REGION = process.env.AWS_REGION || 'us-east-1';
-  process.env.AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID || 'test-key';
-  process.env.AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY || 'test-secret';
+function loadUploadController({ envConfigured = true } = {}) {
+  if (envConfigured) {
+    process.env.AWS_S3_BUCKET = process.env.AWS_S3_BUCKET || 'test-bucket';
+    process.env.AWS_REGION = process.env.AWS_REGION || 'us-east-1';
+    process.env.AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID || 'test-key';
+    process.env.AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY || 'test-secret';
+  } else {
+    delete process.env.AWS_S3_BUCKET;
+    delete process.env.AWS_REGION;
+    delete process.env.AWS_ACCESS_KEY_ID;
+    delete process.env.AWS_SECRET_ACCESS_KEY;
+  }
 
   const originalLoad = Module._load;
   const awsMockState = { sentCommands: [] };
@@ -125,6 +132,9 @@ test('getStage1UploadUrl allows image and PDF MIME types', async () => {
     assert.equal(res.statusCode, null, `${fileType} should succeed`);
     assert.equal(res.body.success, true, `${fileType} should succeed`);
     assert.match(res.body.uploadUrl, /^https:\/\/signed\.example\.com\//);
+    assert.equal(res.body.url, res.body.fileUrl);
+    assert.equal(res.body.mediaUrl, res.body.fileUrl);
+    assert.equal(res.body.location, res.body.fileUrl);
     assert.equal(res.body.documentType, documentType);
     assert.equal(res.body.method, 'PUT');
     assert.equal(res.body.uploadMethod, 'PUT');
@@ -153,7 +163,52 @@ test('getStage1UploadUrl allows PDF when browser omits MIME type but filename is
   assert.equal(res.statusCode, null);
   assert.equal(res.body.success, true);
   assert.match(res.body.uploadUrl, /refund-policy\.PDF/);
+  assert.equal(res.body.url, res.body.fileUrl);
   assert.deepEqual(res.body.requiredHeaders, { 'Content-Type': 'application/pdf' });
+});
+
+test('getStage1UploadUrl returns clear storage config error when S3 env is missing', async () => {
+  const savedEnv = {
+    AWS_S3_BUCKET: process.env.AWS_S3_BUCKET,
+    AWS_REGION: process.env.AWS_REGION,
+    AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+  };
+  const { getStage1UploadUrl } = loadUploadController({ envConfigured: false });
+  const res = mockResponse();
+
+  try {
+    await getStage1UploadUrl(
+      {
+        user: { _id: '507f1f77bcf86cd799439011' },
+        query: {
+          fileName: 'logo.png',
+          fileType: 'image/png',
+          fileSize: String(1024),
+          documentType: 'business-profile',
+        },
+      },
+      res
+    );
+  } finally {
+    Object.entries(savedEnv).forEach(([key, value]) => {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    });
+  }
+
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.success, false);
+  assert.equal(res.body.code, 'UPLOAD_STORAGE_NOT_CONFIGURED');
+  assert.deepEqual(res.body.missingEnv, [
+    'AWS_REGION',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_S3_BUCKET',
+  ]);
 });
 
 test('getStage1UploadUrl rejects unsupported documents even when extension is present', async () => {
@@ -244,6 +299,8 @@ test('uploadStage1File uploads PDF through authenticated API proxy under vendor 
   assert.equal(res.statusCode, null);
   assert.equal(res.body.success, true);
   assert.equal(res.body.uploadMethod, 'api-proxy');
+  assert.equal(res.body.url, res.body.fileUrl);
+  assert.equal(res.body.mediaUrl, res.body.fileUrl);
   assert.equal(res.body.documentType, 'refund-policy');
   assert.match(
     res.body.key,

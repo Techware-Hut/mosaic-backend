@@ -68,12 +68,12 @@ Webhook URL registration: [stripe-webhook-registration.md](stripe-webhook-regist
 
 | Variable | Required for |
 |----------|--------------|
-| `MAIL_USER` | OTP, order, onboarding mail SMTP login; auth mail From fallback |
+| `MAIL_USER` | OTP, order, onboarding mail SMTP login; From fallback |
 | `MAIL_PASSWORD` | SMTP auth password/app password |
-| `MAIL_HOST` | Optional provider-neutral auth SMTP host; leave unset for Gmail fallback |
-| `MAIL_PORT` | Optional provider-neutral auth SMTP port |
-| `MAIL_SECURE` | Optional provider-neutral auth SMTP TLS flag |
-| `MAIL_FROM` | Optional provider-neutral auth mail From header |
+| `MAIL_HOST` | Optional provider-neutral transactional SMTP host; leave unset for Gmail fallback |
+| `MAIL_PORT` | Optional provider-neutral transactional SMTP port |
+| `MAIL_SECURE` | Optional provider-neutral transactional SMTP TLS flag |
+| `MAIL_FROM` | Optional provider-neutral transactional mail From header |
 | `ADMIN_EMAIL` | Admin notifications (vendor onboarding, contact form) — **not** required for auth OTP |
 | `SUPPORT_EMAIL` | Optional; email templates |
 | `APP_NAME` | Optional branding |
@@ -87,11 +87,11 @@ Webhook URL registration: [stripe-webhook-registration.md](stripe-webhook-regist
 
 OTP is sent **by email only** via Nodemailer SMTP (`utils/mailer.js` + `utils/smtpTransport.js`). There is no SMS/mobile OTP channel.
 
-**Auth OTP requires `MAIL_USER` and `MAIL_PASSWORD`.** `ADMIN_EMAIL` does not gate registration or forgot-password OTP delivery. Set `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, and `MAIL_FROM` for provider-neutral SMTP; leave `MAIL_HOST` unset to keep Gmail fallback.
+**Email delivery requires `MAIL_USER` and `MAIL_PASSWORD`.** `ADMIN_EMAIL` does not gate registration or forgot-password OTP delivery. Set `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, and `MAIL_FROM` for provider-neutral SMTP; leave `MAIL_HOST` unset to keep Gmail fallback.
 
 **Production inbox smoke (disposable test account only):**
 
-1. Set the auth SMTP `MAIL_*` env names on Elastic Beanstalk; **restart** the environment.
+1. Set the SMTP `MAIL_*` env names on Elastic Beanstalk; **restart** the environment.
 2. Run spaced probes (≥30s apart to avoid 429 rate limits): `./scripts/auth-email-smoke.ps1 -ApiBaseUrl https://api.mosaicbizhub.com -DisposableDomain <your-disposable-domain>`
 3. Optional known-account forgot-password: set session-only `SMOKE_TEST_CUSTOMER_EMAIL` and `SMOKE_TEST_VENDOR_EMAIL` before running the script.
 4. `POST /api/users/register` with a disposable email you control — expect **201** and inbox delivery within ~2 minutes.

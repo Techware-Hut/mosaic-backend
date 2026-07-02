@@ -74,6 +74,31 @@ test('getAllowedOrigins merges CORS_ORIGINS with approved launch origins when se
   }
 });
 
+test('isAllowedCredentialOrigin allows same-project Vercel preview origins', () => {
+  const { mod, cleanup } = loadCorsOrigins({
+    NODE_ENV: 'production',
+    CORS_ORIGINS: 'https://mosaicbizhub.com',
+  });
+  try {
+    assert.equal(
+      mod.isAllowedCredentialOrigin(
+        'https://mosaic-biz-frontend-launch-git-feature-digital-builders.vercel.app',
+        mod.getAllowedOrigins()
+      ),
+      true
+    );
+    assert.equal(
+      mod.isAllowedCredentialOrigin(
+        'https://not-mosaic-biz-frontend-launch-git-feature.vercel.app',
+        mod.getAllowedOrigins()
+      ),
+      false
+    );
+  } finally {
+    cleanup();
+  }
+});
+
 test('getAllowedOrigins dedupes CORS_ORIGINS entries', () => {
   const { mod, cleanup } = loadCorsOrigins({
     NODE_ENV: 'production',

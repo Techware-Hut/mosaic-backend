@@ -103,6 +103,10 @@
 | --- | --- |
 | `MAIL_USER` | required-prod (email flows) |
 | `MAIL_PASSWORD` | required-prod |
+| `MAIL_HOST` | optional provider-neutral SMTP |
+| `MAIL_PORT` | optional provider-neutral SMTP |
+| `MAIL_SECURE` | optional provider-neutral SMTP |
+| `MAIL_FROM` | optional provider-neutral SMTP |
 | `ADMIN_EMAIL` | required-prod (admin notifications) |
 | `SUPPORT_EMAIL` | optional |
 | `APP_NAME` | optional |

@@ -1,13 +1,11 @@
 const nodemailer = require('nodemailer');
 const { buildFrontendUrl } = require('./frontendUrl');
+const {
+  buildSmtpTransportConfig,
+  formatMosaicFromHeader,
+} = require('./smtpTransport');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASSWORD,
-  },
-});
+const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
 
 const safe = (value, fallback = 'N/A') => {
   const normalized = String(value || '').trim();
@@ -35,7 +33,7 @@ exports.sendVendorNewServiceBookingEmail = async ({
     : '<li>No service names provided</li>';
 
   await transporter.sendMail({
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: 'New service booking request received',
     html: `
@@ -78,7 +76,7 @@ exports.sendCustomerNewServiceBookingConfirmationEmail = async ({
     : '<li>No service names provided</li>';
 
   await transporter.sendMail({
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: 'Your service booking request has been received',
     html: `
@@ -117,7 +115,7 @@ exports.sendCustomerServicePaymentRequestEmail = async ({
   if (!to) return;
 
   await transporter.sendMail({
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: 'Payment requested for your service booking',
     html: `
@@ -160,7 +158,7 @@ exports.sendCustomerServiceBookingDecisionEmail = async ({
     : 'Your booking was not approved';
 
   await transporter.sendMail({
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject,
     html: `

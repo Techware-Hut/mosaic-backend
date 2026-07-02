@@ -12,6 +12,13 @@ const {
   buildPresignedS3UploadContract,
   sanitizeS3UploadFileName,
 } = require("../utils/s3PresignedUploadContract");
+const {
+  buildUploadedMediaResponse,
+  buildUploadStorageConfigError,
+  getMissingS3UploadEnvNames,
+  logUploadConfigFailure,
+  logUploadFailure,
+} = require("../utils/uploadDiagnostics");
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -120,6 +127,12 @@ function buildVendorOnboardingUploadTarget({
 }
 
 exports.getStage1UploadUrl = async (req, res) => {
+  const uploadContext = {
+    route: "GET /api/vendor-onboarding/stage1/upload-url",
+    userId: req.user?._id ? String(req.user._id) : undefined,
+    documentType: req.query?.documentType,
+  };
+
   try {
     const userId = req.user._id;
     const { fileName, fileType, documentType, fileSize } = req.query;
@@ -135,6 +148,12 @@ exports.getStage1UploadUrl = async (req, res) => {
       return res.status(target.status).json(target.body);
     }
 
+    const missingEnv = getMissingS3UploadEnvNames();
+    if (missingEnv.length) {
+      logUploadConfigFailure("vendor_onboarding_presign", missingEnv, uploadContext);
+      return res.status(503).json(buildUploadStorageConfigError(missingEnv));
+    }
+
     const command = new PutObjectCommand({
       Bucket: target.bucketName,
       Key: target.key,
@@ -145,24 +164,31 @@ exports.getStage1UploadUrl = async (req, res) => {
       expiresIn: PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
     });
 
-    return res.json({
+    return res.json(buildUploadedMediaResponse({
       success: true,
       uploadUrl,
       fileUrl: target.fileUrl,
       documentType: target.documentType,
       key: target.key,
       ...buildPresignedS3UploadContract(target.normalizedFileType),
-    });
+    }));
   } catch (error) {
-    console.error("Presigned URL error:", error);
+    logUploadFailure("vendor_onboarding_presign", error, uploadContext);
     return res.status(500).json({
       success: false,
+      code: "UPLOAD_URL_GENERATION_FAILED",
       message: "Failed to generate upload URL",
     });
   }
 };
 
 exports.uploadStage1File = async (req, res) => {
+  const uploadContext = {
+    route: "POST /api/vendor-onboarding/stage1/upload-file",
+    userId: req.user?._id ? String(req.user._id) : undefined,
+    documentType: req.body?.documentType,
+  };
+
   try {
     const userId = req.user._id;
     const { documentType } = req.body;
@@ -186,6 +212,12 @@ exports.uploadStage1File = async (req, res) => {
       return res.status(target.status).json(target.body);
     }
 
+    const missingEnv = getMissingS3UploadEnvNames();
+    if (missingEnv.length) {
+      logUploadConfigFailure("vendor_onboarding_proxy", missingEnv, uploadContext);
+      return res.status(503).json(buildUploadStorageConfigError(missingEnv));
+    }
+
     const command = new PutObjectCommand({
       Bucket: target.bucketName,
       Key: target.key,
@@ -195,20 +227,18 @@ exports.uploadStage1File = async (req, res) => {
 
     await s3Client.send(command);
 
-    return res.json({
+    return res.json(buildUploadedMediaResponse({
       success: true,
       uploadMethod: "api-proxy",
       fileUrl: target.fileUrl,
       documentType: target.documentType,
       key: target.key,
-    });
+    }));
   } catch (error) {
-    console.error("Vendor onboarding upload error:", {
-      message: error.message,
-      name: error.name,
-    });
+    logUploadFailure("vendor_onboarding_proxy", error, uploadContext);
     return res.status(500).json({
       success: false,
+      code: "UPLOAD_FILE_FAILED",
       message: "Failed to upload file",
     });
   }

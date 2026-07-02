@@ -7,11 +7,20 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { hasActiveFoodBookings } = require('../utils/bookingDeleteGuards');
 const {
   PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
+  MAX_IMAGE_S3_UPLOAD_BYTES,
   buildPresignedS3UploadContract,
   isAllowedImageS3UploadMimeType,
+  parseS3UploadSizeBytes,
   resolveImageS3UploadMimeType,
   sanitizeS3UploadFileName,
 } = require('../utils/s3PresignedUploadContract');
+const {
+  buildUploadedMediaResponse,
+  buildUploadStorageConfigError,
+  getMissingS3UploadEnvNames,
+  logUploadConfigFailure,
+  logUploadFailure,
+} = require('../utils/uploadDiagnostics');
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -374,12 +383,19 @@ exports.deleteFood = async (req, res) => {
 };
 
 exports.getFoodUploadUrl = async (req, res) => {
+  const uploadContext = {
+    route: 'GET /api/food/upload-url',
+    userId: req.user?._id ? String(req.user._id) : undefined,
+    documentType: req.query?.documentType,
+  };
+
   try {
     const userId = req.user._id;
-    const { fileName, fileType, documentType, foodId, currentImageCount } = req.query;
+    const { fileName, fileType, fileSize, documentType, foodId, currentImageCount } = req.query;
 
     if (!fileName || !fileType || !documentType) {
       return res.status(400).json({
+        success: false,
         message: 'fileName, fileType, and documentType are required',
       });
     }
@@ -387,6 +403,7 @@ exports.getFoodUploadUrl = async (req, res) => {
     const allowedDocTypes = ['food-cover', 'food-gallery', 'food-menu'];
     if (!allowedDocTypes.includes(documentType)) {
       return res.status(400).json({
+        success: false,
         message: 'Invalid document type. Allowed: food-cover, food-gallery, food-menu',
       });
     }
@@ -394,7 +411,24 @@ exports.getFoodUploadUrl = async (req, res) => {
     const normalizedFileType = resolveImageS3UploadMimeType(fileType, fileName);
     if (!isAllowedImageS3UploadMimeType(fileType, fileName)) {
       return res.status(400).json({
+        success: false,
         message: 'Only image files are allowed (JPEG, JPG, PNG, GIF, WEBP)',
+      });
+    }
+
+    const uploadSizeBytes = parseS3UploadSizeBytes(fileSize);
+    if (Number.isNaN(uploadSizeBytes)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid file size',
+      });
+    }
+
+    if (uploadSizeBytes !== null && uploadSizeBytes > MAX_IMAGE_S3_UPLOAD_BYTES) {
+      return res.status(400).json({
+        success: false,
+        message: `File must be under ${Math.round(MAX_IMAGE_S3_UPLOAD_BYTES / (1024 * 1024))}MB`,
+        maxBytes: MAX_IMAGE_S3_UPLOAD_BYTES,
       });
     }
 
@@ -407,6 +441,7 @@ exports.getFoodUploadUrl = async (req, res) => {
 
       if (!subscription) {
         return res.status(403).json({
+          success: false,
           message: 'Valid subscription not found.',
         });
       }
@@ -417,9 +452,16 @@ exports.getFoodUploadUrl = async (req, res) => {
 
       if (currentCount + 1 > galleryImageLimit) {
         return res.status(403).json({
+          success: false,
           message: `Gallery image upload limit reached. Maximum ${galleryImageLimit} gallery images allowed for your plan.`,
         });
       }
+    }
+
+    const missingEnv = getMissingS3UploadEnvNames();
+    if (missingEnv.length) {
+      logUploadConfigFailure('food_presign', missingEnv, uploadContext);
+      return res.status(503).json(buildUploadStorageConfigError(missingEnv));
     }
 
     const bucketName = process.env.AWS_S3_BUCKET;
@@ -455,18 +497,19 @@ exports.getFoodUploadUrl = async (req, res) => {
     const region = process.env.AWS_REGION || 'us-east-1';
     const fileUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
 
-    return res.status(200).json({
+    return res.status(200).json(buildUploadedMediaResponse({
       success: true,
       uploadUrl,
       fileUrl,
       documentType,
       key,
       ...buildPresignedS3UploadContract(normalizedFileType),
-    });
+    }));
   } catch (err) {
-    console.error('Food presigned URL error:', err.message);
+    logUploadFailure('food_presign', err, uploadContext);
     return res.status(500).json({
       success: false,
+      code: 'UPLOAD_URL_GENERATION_FAILED',
       message: 'Failed to generate upload URL',
     });
   }
