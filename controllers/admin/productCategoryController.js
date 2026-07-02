@@ -2,6 +2,12 @@ const ProductCategory = require('../../models/ProductCategory');
 const ProductSubcategory = require('../../models/ProductSubcategory');
 const deleteCloudinaryFile = require('../../utils/deleteCloudinaryFile');
 const {
+  assertValidCategoryName,
+  buildPublicCategoryFilter,
+  filterPublicCategories,
+  getCategoryVisibilityFields,
+} = require('../../utils/categoryVisibility');
+const {
   ADMIN_AUDIT_ACTIONS,
   ADMIN_AUDIT_TARGET_TYPES,
 } = require('../../utils/audit/actionRegistry');
@@ -14,15 +20,17 @@ const {
 exports.createProductCategory = async (req, res) => {
   try {
     const { name, description, img } = req.body;
+    const normalizedName = assertValidCategoryName(name);
 
-    const existing = await ProductCategory.findOne({ name });
+    const existing = await ProductCategory.findOne({ name: normalizedName });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Category already exists' });
     }
 
     const category = new ProductCategory({
-      name,
+      name: normalizedName,
       description,
+      ...getCategoryVisibilityFields(req.body),
       img, // ✅ Directly saving image URL
     });
 
@@ -37,8 +45,12 @@ exports.createProductCategory = async (req, res) => {
 
     return res.status(201).json({ success: true, data: category });
   } catch (err) {
-    console.error('Create Product Category Error:', err);
-    return res.status(500).json({ success: false, message: err.message });
+    if (err.statusCode && err.statusCode < 500) {
+      console.warn('Create Product Category validation error:', err.message);
+    } else {
+      console.error('Create Product Category Error:', err);
+    }
+    return res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 };
 
@@ -53,9 +65,12 @@ exports.updateProductCategory = async (req, res) => {
     }
 
     const beforeName = category.name;
-    category.name = name || category.name;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'name')) {
+      category.name = assertValidCategoryName(name);
+    }
     category.description = description || category.description;
     category.img = img || category.img;
+    Object.assign(category, getCategoryVisibilityFields(req.body));
 
     await category.save();
 
@@ -68,8 +83,12 @@ exports.updateProductCategory = async (req, res) => {
 
     return res.status(200).json({ success: true, data: category });
   } catch (err) {
-    console.error('Update Product Category Error:', err);
-    return res.status(500).json({ success: false, message: err.message });
+    if (err.statusCode && err.statusCode < 500) {
+      console.warn('Update Product Category validation error:', err.message);
+    } else {
+      console.error('Update Product Category Error:', err);
+    }
+    return res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 };
 
@@ -109,7 +128,9 @@ exports.deleteProductCategory = async (req, res) => {
 // ✅ Get All Product Categories
 exports.getAllProductCategories = async (req, res) => {
   try {
-    const categories = await ProductCategory.find().sort({ createdAt: 1 });
+    const categories = filterPublicCategories(
+      await ProductCategory.find(buildPublicCategoryFilter()).sort({ createdAt: 1 }).lean()
+    );
     return res.status(200).json({ success: true, data: categories });
   } catch (err) {
     console.error('Fetch Categories Error:', err);

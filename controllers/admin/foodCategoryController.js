@@ -1,27 +1,40 @@
 const FoodCategory = require('../../models/FoodCategory');
+const {
+  assertValidCategoryName,
+  buildPublicCategoryFilter,
+  filterPublicCategories,
+  getCategoryVisibilityFields,
+} = require('../../utils/categoryVisibility');
 
 
 exports.createFoodCategory = async (req, res) => {
   try {
     const { name, description } = req.body;
+    const normalizedName = assertValidCategoryName(name);
 
-    const existing = await FoodCategory.findOne({ name });
+    const existing = await FoodCategory.findOne({ name: normalizedName });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Category already exists' });
     }
 
-    const category = await FoodCategory.create({ name, description });
+    const category = await FoodCategory.create({
+      name: normalizedName,
+      description,
+      ...getCategoryVisibilityFields(req.body),
+    });
 
     res.status(201).json({ success: true, data: category });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 };
 
 
 exports.getFoodCategories = async (req, res) => {
   try {
-    const categories = await FoodCategory.find().sort({ createdAt: -1 });
+    const categories = filterPublicCategories(
+      await FoodCategory.find(buildPublicCategoryFilter()).sort({ createdAt: -1 }).lean()
+    );
     res.json({ success: true, data: categories });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -38,14 +51,17 @@ exports.updateFoodCategory = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Category not found' });
     }
 
-    category.name = name || category.name;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'name')) {
+      category.name = assertValidCategoryName(name);
+    }
     category.description = description || category.description;
+    Object.assign(category, getCategoryVisibilityFields(req.body));
 
     await category.save();
 
     res.json({ success: true, data: category });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 };
 
