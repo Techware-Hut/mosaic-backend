@@ -16,11 +16,20 @@ const {
 } = require('../utils/listingTierLimits');
 const {
   PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
+  MAX_IMAGE_S3_UPLOAD_BYTES,
   buildPresignedS3UploadContract,
   isAllowedImageS3UploadMimeType,
+  parseS3UploadSizeBytes,
   resolveImageS3UploadMimeType,
   sanitizeS3UploadFileName,
 } = require('../utils/s3PresignedUploadContract');
+const {
+  buildUploadedMediaResponse,
+  buildUploadStorageConfigError,
+  getMissingS3UploadEnvNames,
+  logUploadConfigFailure,
+  logUploadFailure,
+} = require('../utils/uploadDiagnostics');
 const { Decimal128 } = mongoose.Types;
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -1374,12 +1383,19 @@ exports.updateVariantStock = async (req, res) => {
 
 
 exports.getProductUploadUrl = async (req, res) => {
+  const uploadContext = {
+    route: 'GET /api/product/upload-url',
+    userId: req.user?._id ? String(req.user._id) : undefined,
+    documentType: req.query?.documentType,
+  };
+
   try {
     const userId = req.user._id;
-    const { fileName, fileType, documentType, productId, variantIndex, currentImageCount } = req.query;
+    const { fileName, fileType, fileSize, documentType, productId, variantIndex, currentImageCount } = req.query;
 
     if (!fileName || !fileType || !documentType) {
       return res.status(400).json({
+        success: false,
         message: "fileName, fileType, and documentType are required",
       });
     }
@@ -1393,6 +1409,7 @@ exports.getProductUploadUrl = async (req, res) => {
 
     if (!allowedDocTypes.includes(documentType)) {
       return res.status(400).json({
+        success: false,
         message: "Invalid document type. Allowed: product-cover, product-gallery, product-variant",
       });
     }
@@ -1401,7 +1418,24 @@ exports.getProductUploadUrl = async (req, res) => {
     const normalizedFileType = resolveImageS3UploadMimeType(fileType, fileName);
     if (!isAllowedImageS3UploadMimeType(fileType, fileName)) {
       return res.status(400).json({
+        success: false,
         message: "Only image files are allowed (JPEG, JPG, PNG, GIF, WEBP)",
+      });
+    }
+
+    const uploadSizeBytes = parseS3UploadSizeBytes(fileSize);
+    if (Number.isNaN(uploadSizeBytes)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file size",
+      });
+    }
+
+    if (uploadSizeBytes !== null && uploadSizeBytes > MAX_IMAGE_S3_UPLOAD_BYTES) {
+      return res.status(400).json({
+        success: false,
+        message: `File must be under ${Math.round(MAX_IMAGE_S3_UPLOAD_BYTES / (1024 * 1024))}MB`,
+        maxBytes: MAX_IMAGE_S3_UPLOAD_BYTES,
       });
     }
 
@@ -1414,6 +1448,7 @@ exports.getProductUploadUrl = async (req, res) => {
 
       if (!subscription) {
         return res.status(403).json({
+          success: false,
           message: 'Valid subscription not found.',
         });
       }
@@ -1424,9 +1459,16 @@ exports.getProductUploadUrl = async (req, res) => {
 
       if (currentCount + 1 > galleryImageLimit) {
         return res.status(403).json({
+          success: false,
           message: `Gallery image upload limit reached. Maximum ${galleryImageLimit} gallery images allowed for your plan.`,
         });
       }
+    }
+
+    const missingEnv = getMissingS3UploadEnvNames();
+    if (missingEnv.length) {
+      logUploadConfigFailure('product_presign', missingEnv, uploadContext);
+      return res.status(503).json(buildUploadStorageConfigError(missingEnv));
     }
 
     const bucketName = process.env.AWS_S3_BUCKET;
@@ -1471,31 +1513,39 @@ exports.getProductUploadUrl = async (req, res) => {
     const region = process.env.AWS_REGION || 'us-east-1';
     const fileUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
 
-    return res.json({
+    return res.json(buildUploadedMediaResponse({
       success: true,
       uploadUrl,
       fileUrl,
       documentType,
       key,
       ...buildPresignedS3UploadContract(normalizedFileType),
-    });
+    }));
 
   } catch (error) {
-    console.error("Presigned URL error:", error);
+    logUploadFailure('product_presign', error, uploadContext);
     return res.status(500).json({
       success: false,
+      code: "UPLOAD_URL_GENERATION_FAILED",
       message: "Failed to generate upload URL",
     });
   }
 };
 
 exports.getVariantImageUploadUrl = async (req, res) => {
+  const uploadContext = {
+    route: 'GET /api/product/variant-upload-url',
+    userId: req.user?._id ? String(req.user._id) : undefined,
+    documentType: 'product-variant',
+  };
+
   try {
     const userId = req.user._id;
-    const { fileName, fileType, productId, variantSku } = req.query;
+    const { fileName, fileType, fileSize, productId, variantSku } = req.query;
 
     if (!fileName || !fileType || !productId) {
       return res.status(400).json({
+        success: false,
         message: "fileName, fileType, and productId are required",
       });
     }
@@ -1504,8 +1554,31 @@ exports.getVariantImageUploadUrl = async (req, res) => {
     const normalizedFileType = resolveImageS3UploadMimeType(fileType, fileName);
     if (!isAllowedImageS3UploadMimeType(fileType, fileName)) {
       return res.status(400).json({
+        success: false,
         message: "Only image files are allowed",
       });
+    }
+
+    const uploadSizeBytes = parseS3UploadSizeBytes(fileSize);
+    if (Number.isNaN(uploadSizeBytes)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file size",
+      });
+    }
+
+    if (uploadSizeBytes !== null && uploadSizeBytes > MAX_IMAGE_S3_UPLOAD_BYTES) {
+      return res.status(400).json({
+        success: false,
+        message: `File must be under ${Math.round(MAX_IMAGE_S3_UPLOAD_BYTES / (1024 * 1024))}MB`,
+        maxBytes: MAX_IMAGE_S3_UPLOAD_BYTES,
+      });
+    }
+
+    const missingEnv = getMissingS3UploadEnvNames();
+    if (missingEnv.length) {
+      logUploadConfigFailure('product_variant_presign', missingEnv, uploadContext);
+      return res.status(503).json(buildUploadStorageConfigError(missingEnv));
     }
 
     const bucketName = process.env.AWS_S3_BUCKET;
@@ -1535,18 +1608,19 @@ exports.getVariantImageUploadUrl = async (req, res) => {
     const region = process.env.AWS_REGION || 'us-east-1';
     const fileUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
 
-    return res.json({
+    return res.json(buildUploadedMediaResponse({
       success: true,
       uploadUrl,
       fileUrl,
       key,
       ...buildPresignedS3UploadContract(normalizedFileType),
-    });
+    }));
 
   } catch (error) {
-    console.error("Variant image URL error:", error);
+    logUploadFailure('product_variant_presign', error, uploadContext);
     return res.status(500).json({
       success: false,
+      code: "UPLOAD_URL_GENERATION_FAILED",
       message: "Failed to generate variant image upload URL",
     });
   }

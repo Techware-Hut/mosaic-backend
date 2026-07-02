@@ -384,7 +384,7 @@ Authoritative template: [`.env.example`](../.env.example). Never commit real val
 | Auth | `JWT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `COOKIE_DOMAIN`, `COOKIE_SECURE`, `COOKIE_SAMESITE` | JWT and OAuth |
 | Stripe | `STRIPE_SECRET_KEY`, `STRIPE_ORDER_WEBHOOK_SECRET`, `STRIPE_BUSINESS_DRAFT_WEBHOOK_SECRET`, `STRIPE_SUBSCRIPTION_WEBHOOK_SECRET`, `STRIPE_VENDOR_VERIFICATION_WEBHOOK_SECRET`, `STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET`, `PLATFORM_FEE_CENTS`, `BILLING_PORTAL_RETURN_URL`, `CONNECT_*` | Payments, webhooks, Connect |
 | AWS S3 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET` | File uploads |
-| Email | `MAIL_USER`, `MAIL_PASSWORD`, optional auth SMTP `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, `MAIL_FROM`, `ADMIN_EMAIL`, `SUPPORT_EMAIL`, `APP_NAME`, `APP_URL` | Nodemailer notifications |
+| Email | `MAIL_USER`, `MAIL_PASSWORD`, optional SMTP `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, `MAIL_FROM`, `ADMIN_EMAIL`, `SUPPORT_EMAIL`, `APP_NAME`, `APP_URL` | Nodemailer notifications |
 | Optional | `PAYPAL_*`, `CLOUDINARY_*`, `GOOGLE_GEOCODING_API_KEY`, `PUPPETEER_EXECUTABLE_PATH`, `LISTING_DEBUG` | Legacy or feature-specific |
 
 Database connection: [`config/Db.js`](../config/Db.js) reads `MONGODB_URI` (falls back to `mongodb://localhost:27017/mbh`).

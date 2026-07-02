@@ -22,6 +22,10 @@ const DEV_ORIGINS = [
   'exp://192.168.0.104:3001',
 ];
 
+const CREDENTIAL_ORIGIN_PATTERNS = [
+  /^https:\/\/mosaic-biz-frontend-launch-[a-z0-9-]+\.vercel\.app$/i,
+];
+
 function parseCorsOrigins(value) {
   return value
     .split(',')
@@ -52,10 +56,19 @@ function getAllowedOrigins() {
   return [...new Set(origins)];
 }
 
+function isAllowedCredentialOrigin(origin, allowedOrigins = getAllowedOrigins()) {
+  if (!origin) return true;
+  if (DISALLOWED_CREDENTIAL_ORIGINS.has(origin)) return false;
+  if (allowedOrigins.includes(origin)) return true;
+  return CREDENTIAL_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin));
+}
+
 module.exports = {
+  CREDENTIAL_ORIGIN_PATTERNS,
   DEFAULT_CREDENTIAL_ORIGINS,
   DEV_ORIGINS,
   DISALLOWED_CREDENTIAL_ORIGINS,
+  isAllowedCredentialOrigin,
   parseCorsOrigins,
   getAllowedOrigins,
 };

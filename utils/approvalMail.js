@@ -1,15 +1,15 @@
 // mailer/businessStatusEmails.js
 const nodemailer = require("nodemailer");
 const { getFrontendBaseUrl } = require("./frontendUrl");
+const {
+  buildSmtpTransportConfig,
+  formatMosaicFromHeader,
+} = require("./smtpTransport");
 
 const APP_URL = getFrontendBaseUrl();
 const SUPPORT_EMAIL ="support@mosaicbizhub.com";
 
-// If you already have a transporter elsewhere, delete this block and import that one.
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASSWORD },
-});
+const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
 
 const TYPE_TITLES = {
   service: "Services",
@@ -129,7 +129,7 @@ async function sendApproved({ to, vendorName = "there", business }) {
   ].join("\n");
 
   await transporter.sendMail({
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to, // string or string[]
     subject: `✅ ${business.name} is approved on Mosaic Biz Hub`,
     text,
@@ -193,7 +193,7 @@ async function sendBlocked({ to, vendorName = "there", business, adminNote }) {
   ].join("\n");
 
   await transporter.sendMail({
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to, // string or string[]
     subject: `⛔ ${business.name} has been temporarily blocked`,
     text,
@@ -257,7 +257,7 @@ async function sendDeactivated({ to, vendorName = "there", business, adminNote }
   ].join("\n");
 
   await transporter.sendMail({
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: `${business.name} has been deactivated on Mosaic Biz Hub`,
     text,

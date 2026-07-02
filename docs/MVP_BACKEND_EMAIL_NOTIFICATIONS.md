@@ -35,7 +35,7 @@ Audit and document launch-safe backend email notification behavior for vendor on
 
 | File | Functions | Domain |
 | --- | --- | --- |
-| [`utils/smtpTransport.js`](../utils/smtpTransport.js) | Provider-neutral auth SMTP config + Gmail fallback | Auth |
+| [`utils/smtpTransport.js`](../utils/smtpTransport.js) | Provider-neutral SMTP config + Gmail fallback | Auth and transactional mail |
 | [`utils/mailer.js`](../utils/mailer.js) | `sendOtpEmail`, `sendPasswordResetOtpEmail`, `sendWelcomeEmail` | Auth |
 | [`utils/WellcomeMailer.js`](../utils/WellcomeMailer.js) | Onboarding submit/approve/reject/badge, admin alerts | Vendor onboarding |
 | [`utils/vendorOnboardingEmailDelivery.js`](../utils/vendorOnboardingEmailDelivery.js) | `deliverVendorOnboardingEmail(s)` | Graceful SMTP gate |
@@ -65,7 +65,7 @@ Audit and document launch-safe backend email notification behavior for vendor on
 | `POST /api/users/login` (unverified) | **403** `otpPending: true` — OTP emailed | **502** `OTP_DELIVERY_FAILED` — no session/cookie |
 | `POST /api/users/forgot-password` | **200** generic anti-enumeration response | **200** same generic response; sanitized log only |
 
-**Auth SMTP setup:** `MAIL_USER` + `MAIL_PASSWORD` are required. When `MAIL_HOST` is unset, auth mail uses the existing Gmail fallback. When `MAIL_HOST` is set, auth mail uses `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, and `MAIL_FROM` for provider-neutral SMTP.
+**SMTP setup:** `MAIL_USER` + `MAIL_PASSWORD` are required. When `MAIL_HOST` is unset, transactional mail uses the existing Gmail fallback. When `MAIL_HOST` is set, transactional mail uses `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, and `MAIL_FROM` for provider-neutral SMTP.
 
 **Production inbox smoke (auth OTP):** Register with a disposable inbox; confirm delivery or **502** + log grep for `Auth OTP email delivery failed` and sanitized code/response-code markers. Never log OTP values or `MAIL_PASSWORD`.
 
@@ -75,10 +75,10 @@ Audit and document launch-safe backend email notification behavior for vendor on
 | --- | --- |
 | `MAIL_USER` | SMTP auth + from address |
 | `MAIL_PASSWORD` | SMTP auth password/app password |
-| `MAIL_HOST` | Optional provider-neutral auth SMTP host |
-| `MAIL_PORT` | Optional provider-neutral auth SMTP port |
-| `MAIL_SECURE` | Optional provider-neutral auth SMTP TLS flag |
-| `MAIL_FROM` | Optional provider-neutral auth mail From header |
+| `MAIL_HOST` | Optional provider-neutral transactional SMTP host |
+| `MAIL_PORT` | Optional provider-neutral transactional SMTP port |
+| `MAIL_SECURE` | Optional provider-neutral transactional SMTP TLS flag |
+| `MAIL_FROM` | Optional provider-neutral transactional mail From header |
 | `ADMIN_EMAIL` | Admin notification recipients |
 | `SUPPORT_EMAIL` | Order mail support line fallback |
 | `APP_NAME` | Order phase subject branding |

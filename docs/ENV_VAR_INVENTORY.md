@@ -95,10 +95,10 @@ Sources compared: [`.env.example`](../.env.example), [README.md](../README.md), 
 | --- | --- | --- |
 | `MAIL_USER` | Required-prod mail | Yes |
 | `MAIL_PASSWORD` | Required-prod mail | Yes |
-| `MAIL_HOST` | Optional auth SMTP provider | Yes for provider-neutral auth mail |
-| `MAIL_PORT` | Optional auth SMTP provider | Yes for provider-neutral auth mail |
-| `MAIL_SECURE` | Optional auth SMTP provider | Yes for provider-neutral auth mail |
-| `MAIL_FROM` | Optional auth SMTP From header | Yes for provider-neutral auth mail |
+| `MAIL_HOST` | Optional SMTP provider | Yes for provider-neutral transactional mail |
+| `MAIL_PORT` | Optional SMTP provider | Yes for provider-neutral transactional mail |
+| `MAIL_SECURE` | Optional SMTP provider | Yes for provider-neutral transactional mail |
+| `MAIL_FROM` | Optional SMTP From header | Yes for provider-neutral transactional mail |
 | `ADMIN_EMAIL` | Optional | Yes |
 | `SUPPORT_EMAIL` | Optional | Optional |
 | `APP_NAME` | Optional | Optional |

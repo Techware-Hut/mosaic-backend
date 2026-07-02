@@ -1,13 +1,11 @@
 const nodemailer = require('nodemailer');
 const { buildFrontendUrl, getFrontendLogoUrl } = require('./frontendUrl');
+const {
+  buildSmtpTransportConfig,
+  formatMosaicFromHeader,
+} = require('./smtpTransport');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.MAIL_USER,     // your email
-    pass: process.env.MAIL_PASSWORD, // app password
-  },
-});
+const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
 
 const escapeHtml = (value = '') =>
   String(value ?? '')
@@ -105,7 +103,7 @@ exports.sendVendorVerificationGuidanceEmail = async ({
   const correctionUrl = buildFrontendUrl(correctionPath);
 
   const mailOptions = {
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: copy.subject,
     html: `
@@ -167,7 +165,7 @@ exports.sendVendorVerificationGuidanceEmail = async ({
 
 exports.sendWelcomeEmail = async (to, vendorName) => {
   const mailOptions = {
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: 'Welcome to Mosaic Biz Hub!',
     html: `
@@ -216,7 +214,7 @@ exports.sendAdminOnboardingSubmissionEmail = async ({
   });
 
   const mailOptions = {
-    from: `"Mosaic Biz Hub System Notification" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to: adminEmail,
     subject: `New Vendor Application Submitted – Review Required (Application #${applicationId})`,
     html: `
@@ -262,7 +260,7 @@ exports.sendVendorSubmissionConfirmationEmail = async ({
   applicationId,
 }) => {
   const mailOptions = {
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: "Your Mosaic Biz Hub Application Is Under Review",
     html: `
@@ -298,7 +296,7 @@ exports.sendVendorApprovedEmail = async ({
   applicationId,
 }) => {
   const mailOptions = {
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: "Your Business Has Been Successfully Verified 🎉",
     html: `
@@ -490,7 +488,7 @@ exports.sendAdminVendorProfileCompletedEmail = async ({
   const dashboardLink = buildFrontendUrl(`/admin/vendor-applications/${applicationId}`);
 
   const mailOptions = {
-    from: `"Mosaic Biz Hub System Notification" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to: safeAdminEmail,
     subject:
       "Vendor Profile Completed - Documentation Ready for Trust Badge Verification",
@@ -549,7 +547,7 @@ exports.sendVendorTrustBadgeAssignedEmail = async ({
   const dashboardLink = buildFrontendUrl("/login?type=vendor");
 
   const mailOptions = {
-    from: `"Mosaic Biz Hub" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to,
     subject: "Your Trust Badge Has Been Verified and Activated",
     html: `
@@ -617,7 +615,7 @@ exports.sendAdminVendorCategoryRequestEmail = async ({
   const dashboardLink = buildFrontendUrl("/admin/category-requests");
 
   const mailOptions = {
-    from: `"Mosaic Biz Hub System Notification" <${process.env.MAIL_USER}>`,
+    from: formatMosaicFromHeader(),
     to: safeAdminEmail,
     subject: "New Vendor Category Request Submitted",
     html: `

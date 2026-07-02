@@ -17,7 +17,12 @@ test('vendor upload S3 CORS origins include app and local browser origins', () =
   assert.ok(origins.includes('https://preview.example.vercel.app'));
   assert.ok(origins.includes('https://mosaicbizhub.com'));
   assert.ok(origins.includes('https://www.mosaicbizhub.com'));
+  assert.ok(origins.includes('https://app.mosaicbizhub.com'));
   assert.ok(origins.includes('https://mosaic-biz-frontend-launch.vercel.app'));
+  assert.ok(origins.includes('https://mosaic-biz-frontend-launch-digital-builders.vercel.app'));
+  assert.ok(origins.includes('https://mosaic-biz-frontend-launch-git-main-digital-builders.vercel.app'));
+  assert.ok(origins.includes('https://mosaic-biz-frontend-launch-git-develop-digital-builders.vercel.app'));
+  assert.ok(origins.includes('https://mosaic-biz-frontend-launch-*.vercel.app'));
   assert.ok(origins.includes('http://localhost:3000'));
   assert.ok(origins.includes('http://127.0.0.1:3000'));
   assert.equal(origins.includes('https://api.mosaicbizhub.com'), false);
