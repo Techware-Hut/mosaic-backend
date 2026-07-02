@@ -17,6 +17,11 @@ const { toPublicBusinessCard } = require("../lib/listing/publicListingDto");
 const {
   publicMarketplaceBusinessFilter,
 } = require("../lib/marketplace/businessEligibility");
+const {
+  attachListingSnapshotToBusiness,
+  enrichBusinessesWithListingSnapshots,
+  publishBusinessListings,
+} = require("../utils/businessListingVisibility");
 
 exports.createBusiness = async (req, res) => {
   try {
@@ -186,15 +191,74 @@ exports.getMyBusinesses = async (req, res) => {
       .populate("serviceCategories.category")
       .populate("foodCategories.category")
       .populate("subscriptionId")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const businessesWithListings = await enrichBusinessesWithListingSnapshots(businesses);
 
     res.status(200).json({
-      count: businesses.length,
-      businesses,
+      count: businessesWithListings.length,
+      businesses: businessesWithListings,
     });
   } catch (error) {
     console.error("Error fetching businesses:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.publishStorefront = async (req, res) => {
+  try {
+    const business = await Business.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+    });
+
+    if (!business) {
+      return res.status(404).json({
+        success: false,
+        message: "Business not found",
+      });
+    }
+
+    const publication = await publishBusinessListings({
+      business,
+      userId: req.user._id,
+    });
+
+    if (!publication.ok) {
+      return res.status(publication.status).json({
+        success: false,
+        message: "Storefront is not ready to publish.",
+        blockers: publication.blockers,
+        publication: publication.publication,
+        business: attachListingSnapshotToBusiness(
+          business,
+          publication.snapshot,
+          publication.onboarding
+        ),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Storefront and eligible listings published successfully.",
+      publication: publication.publication,
+      business: attachListingSnapshotToBusiness(
+        business,
+        publication.snapshot,
+        publication.onboarding
+      ),
+    });
+  } catch (error) {
+    console.error("Storefront publish error:", {
+      businessId: req.params?.id,
+      userId: req.user?._id ? String(req.user._id) : undefined,
+      message: error?.message || "Unknown storefront publish failure",
+    });
+    return res.status(500).json({
+      success: false,
+      message: "Unable to publish storefront right now. Please try again.",
+    });
   }
 };
 

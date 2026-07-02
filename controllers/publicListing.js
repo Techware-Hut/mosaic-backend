@@ -682,6 +682,13 @@ exports.getFoodById = async (req, res) => {
       });
     }
 
+    if (food.isPublished !== true) {
+      return res.status(404).json({
+        success: false,
+        message: 'Food item not found',
+      });
+    }
+
     const visibleBusiness = await Business.findOne(
       publicMarketplaceBusinessFilter({ _id: food.businessId?._id })
     ).select('_id').lean();
