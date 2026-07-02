@@ -160,7 +160,7 @@ exports.sendVendorVerificationGuidanceEmail = async ({
     `,
   };
 
-  await transporter.sendMail(mailOptions);
+  return transporter.sendMail(mailOptions);
 };
 
 exports.sendWelcomeEmail = async (to, vendorName) => {
@@ -196,7 +196,7 @@ exports.sendWelcomeEmail = async (to, vendorName) => {
     ]
   };
 
-  await transporter.sendMail(mailOptions);
+  return transporter.sendMail(mailOptions);
 };
 
 
@@ -250,7 +250,7 @@ exports.sendAdminOnboardingSubmissionEmail = async ({
     `,
   };
 
-  await transporter.sendMail(mailOptions);
+  return transporter.sendMail(mailOptions);
 };
 
 
@@ -286,7 +286,7 @@ exports.sendVendorSubmissionConfirmationEmail = async ({
     `,
   };
 
-  await transporter.sendMail(mailOptions);
+  return transporter.sendMail(mailOptions);
 };
 
 
@@ -324,7 +324,7 @@ exports.sendVendorApprovedEmail = async ({
     `,
   };
 
-  await transporter.sendMail(mailOptions);
+  return transporter.sendMail(mailOptions);
 };
 
 
@@ -339,7 +339,7 @@ exports.sendVendorRejectionEmail = async ({
   documentsNeeded,
   responseWindowDays,
 }) => {
-  await exports.sendVendorVerificationGuidanceEmail({
+  return exports.sendVendorVerificationGuidanceEmail({
     to,
     vendorName,
     businessName,
@@ -535,7 +535,7 @@ exports.sendAdminVendorProfileCompletedEmail = async ({
     `,
   };
 
-  await transporter.sendMail(mailOptions);
+  return transporter.sendMail(mailOptions);
 };
 
 
@@ -593,7 +593,7 @@ exports.sendVendorTrustBadgeAssignedEmail = async ({
     `,
   };
 
-  await transporter.sendMail(mailOptions);
+  return transporter.sendMail(mailOptions);
 };
 
 
@@ -657,5 +657,5 @@ exports.sendAdminVendorCategoryRequestEmail = async ({
     `,
   };
 
-  await transporter.sendMail(mailOptions);
+  return transporter.sendMail(mailOptions);
 };

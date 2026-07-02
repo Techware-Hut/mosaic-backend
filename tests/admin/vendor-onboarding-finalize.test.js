@@ -77,16 +77,20 @@ function loadController({ application, mailerCalls = {}, emailConfigured = true,
   const mailerMock = {
     sendVendorApprovedEmail: mailerOverrides.sendVendorApprovedEmail || (async (payload) => {
       mailerCalls.approved = payload;
+      return { messageId: 'vendor-approved-message' };
     }),
     sendVendorRejectionEmail: mailerOverrides.sendVendorRejectionEmail || (async (payload) => {
       mailerCalls.rejection = payload;
+      return { messageId: 'vendor-rejection-message' };
     }),
     sendVendorTrustBadgeAssignedEmail: mailerOverrides.sendVendorTrustBadgeAssignedEmail || (async (payload) => {
       mailerCalls.badge = payload;
+      return { messageId: 'vendor-badge-message' };
     }),
     sendVendorVerificationGuidanceEmail: mailerOverrides.sendVendorVerificationGuidanceEmail || (async (payload) => {
       mailerCalls.guidance = mailerCalls.guidance || [];
       mailerCalls.guidance.push(payload);
+      return { messageId: `vendor-guidance-message-${mailerCalls.guidance.length}` };
     }),
   };
 
@@ -171,6 +175,7 @@ test('finalizeVerification rejects when required docs missing', async () => {
   assert.equal(application.verificationNotificationLog.length, 1);
   assert.equal(application.verificationNotificationLog[0].event, 'missing_documents');
   assert.equal(application.verificationNotificationLog[0].deliveryStatus, 'sent');
+  assert.deepEqual(application.verificationNotificationLog[0].messageIds, ['vendor-rejection-message']);
   assert.deepEqual(application.verificationNotificationLog[0].documentsNeeded, ['EIN document']);
   assert.equal(businessUpdates.at(-1).update.$set.isApproved, false);
 });
@@ -271,6 +276,7 @@ test('sendVerificationGuidanceNotification sends failed-validation email and log
   assert.equal(application.verificationNotificationLog.length, 1);
   assert.equal(application.verificationNotificationLog[0].event, 'failed_validation');
   assert.equal(application.verificationNotificationLog[0].deliveryStatus, 'sent');
+  assert.deepEqual(application.verificationNotificationLog[0].messageIds, ['vendor-guidance-message-1']);
 });
 
 test('sendVerificationGuidanceNotification supports discrepancy, under-review, and manual-review outcomes', async () => {
