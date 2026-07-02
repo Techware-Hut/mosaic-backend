@@ -175,6 +175,7 @@ const VendorOnboardingStage1Schema = new mongoose.Schema(
           enum: ["sent", "skipped", "failed"],
         },
         labels: [String],
+        messageIds: [String],
         reasonSummary: String,
         documentsNeeded: [String],
         fieldsNeeded: [String],
