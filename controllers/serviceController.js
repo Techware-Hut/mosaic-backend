@@ -222,14 +222,17 @@ exports.createService = async (req, res) => {
       });
     }
 
+    const publishValidation = validatePublishRequest({ isPublished, normalizedServices });
+    if (!publishValidation.ok) {
+      return res.status(400).json(formatValidationErrorResponse(
+        publishValidation.fieldErrors,
+        publishValidation.message
+      ));
+    }
+
     const childValidation = validateChildServices(normalizedServices);
     if (!childValidation.ok) {
       return res.status(400).json(formatValidationErrorResponse(childValidation.fieldErrors));
-    }
-
-    const publishValidation = validatePublishRequest({ isPublished, normalizedServices });
-    if (!publishValidation.ok) {
-      return res.status(400).json(formatValidationErrorResponse(publishValidation.fieldErrors));
     }
 
     const subscription = await Subscription.findOne({
@@ -745,28 +748,39 @@ exports.updateService = async (req, res) => {
       }
     }
 
+    const requestedPublish =
+      req.body.isPublished === true || req.body.isPublished === 'true';
+
     let nextServices = service.services;
     if (req.body.services !== undefined) {
       const payload = normalizeServicePayload({
         ...req.body,
         services: req.body.services,
       });
-      const childValidation = validateChildServices(payload.normalizedServices);
-      if (!childValidation.ok) {
-        return res.status(400).json(formatValidationErrorResponse(childValidation.fieldErrors));
-      }
 
-      const otherChildServiceCount = await getOwnerChildServiceCount(userId, service._id);
-      if (otherChildServiceCount + payload.normalizedServices.length > serviceLimit) {
-        return res.status(403).json({
-          message: `Service listing limit reached. You can add only ${Math.max(serviceLimit - otherChildServiceCount, 0)} more child services.`,
-        });
-      }
+      if (payload.normalizedServices.length === 0 && !requestedPublish) {
+        nextServices = [];
+        service.services = nextServices;
+        service.price = 0;
+        service.duration = '';
+      } else {
+        const childValidation = validateChildServices(payload.normalizedServices);
+        if (!childValidation.ok) {
+          return res.status(400).json(formatValidationErrorResponse(childValidation.fieldErrors));
+        }
 
-      nextServices = payload.normalizedServices;
-      service.services = nextServices;
-      service.price = getMinimumChildServicePrice(nextServices, service.price);
-      service.duration = '';
+        const otherChildServiceCount = await getOwnerChildServiceCount(userId, service._id);
+        if (otherChildServiceCount + payload.normalizedServices.length > serviceLimit) {
+          return res.status(403).json({
+            message: `Service listing limit reached. You can add only ${Math.max(serviceLimit - otherChildServiceCount, 0)} more child services.`,
+          });
+        }
+
+        nextServices = payload.normalizedServices;
+        service.services = nextServices;
+        service.price = getMinimumChildServicePrice(nextServices, service.price);
+        service.duration = '';
+      }
     }
 
     const updatableFields = [
@@ -789,7 +803,7 @@ exports.updateService = async (req, res) => {
     }
 
     if (req.body.isPublished !== undefined) {
-      service.isPublished = req.body.isPublished === true || req.body.isPublished === 'true';
+      service.isPublished = requestedPublish;
     }
 
     const publishValidation = validatePublishRequest({
@@ -797,7 +811,10 @@ exports.updateService = async (req, res) => {
       normalizedServices: nextServices,
     });
     if (!publishValidation.ok) {
-      return res.status(400).json(formatValidationErrorResponse(publishValidation.fieldErrors));
+      return res.status(400).json(formatValidationErrorResponse(
+        publishValidation.fieldErrors,
+        publishValidation.message
+      ));
     }
 
     const nextGalleryImages = req.body.images !== undefined ? req.body.images : service.images;
@@ -856,6 +873,53 @@ exports.getServiceById = async (req, res) => {
     console.error('Failed to fetch service:', err.message);
     res.status(500).json({
       message: 'Internal server error'
+    });
+  }
+};
+
+exports.getPrivateBusinessServiceByBusinessId = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { businessId } = req.params;
+
+    const business = await Business.findOne({ _id: businessId, owner: userId })
+      .select('_id isActive isApproved owner businessName name');
+
+    if (!business) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not own this business.',
+      });
+    }
+
+    const service = await Service.findOne({ businessId, ownerId: userId })
+      .sort({ createdAt: -1 })
+      .populate('categoryId', 'name')
+      .populate('subcategoryId', 'name')
+      .populate('businessId', 'businessName name owner isActive isApproved');
+
+    if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: 'Service draft not found for this business.',
+      });
+    }
+
+    const response = formatOwnerServiceResponse(
+      service,
+      business,
+      'Service draft retrieved successfully.'
+    );
+
+    return res.status(200).json({
+      ...response,
+      hasChildServices: Array.isArray(service.services) && service.services.length > 0,
+    });
+  } catch (err) {
+    console.error('Failed to fetch private business service:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
     });
   }
 };

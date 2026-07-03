@@ -84,6 +84,12 @@ Vendor product inventory uses `ProductVariant.stock` as the source of truth. The
 
 ---
 
+## Vendor service drafts
+
+Vendor service draft lookup uses authenticated `GET /api/service/private/business/:businessId`. Public `GET /api/service/business-service/:id` still hides unpublished services and must not be used for vendor draft prefill. See [`docs/service-draft-lookup-contract.md`](../service-draft-lookup-contract.md).
+
+---
+
 ## Public marketplace
 
 ### GET `/api/public/search`
