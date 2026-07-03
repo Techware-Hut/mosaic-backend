@@ -120,6 +120,134 @@ const normalizeVariantShipping = (incomingShipping, existingShipping) => {
   return base;
 };
 
+const LOW_STOCK_THRESHOLD = 5;
+
+const hasOwnField = (value, field) =>
+  value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, field);
+
+const getFirstVariantSize = (variant) =>
+  Array.isArray(variant?.sizes) ? variant.sizes.find((size) => size && typeof size === "object") : null;
+
+const resolveVariantField = (variant, field) => {
+  if (hasOwnField(variant, field)) {
+    return { found: true, value: variant[field] };
+  }
+
+  const firstSize = getFirstVariantSize(variant);
+  if (hasOwnField(firstSize, field)) {
+    return { found: true, value: firstSize[field] };
+  }
+
+  return { found: false, value: undefined };
+};
+
+const parseNonNegativeVariantNumber = (variant, field, options = {}) => {
+  const { required = false, defaultValue } = options;
+  const resolved = resolveVariantField(variant, field);
+  const rawValue = resolved.value;
+
+  if (!resolved.found || rawValue === undefined || rawValue === null || rawValue === "") {
+    if (required) {
+      return { ok: false, error: `${field} is required` };
+    }
+
+    return {
+      ok: true,
+      found: false,
+      value: defaultValue,
+    };
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { ok: false, error: `${field} must be a non-negative number` };
+  }
+
+  return {
+    ok: true,
+    found: true,
+    value: parsed,
+  };
+};
+
+const resolveVariantSku = (variant) => {
+  const resolved = resolveVariantField(variant, "sku");
+  if (!resolved.found || resolved.value === undefined || resolved.value === null) {
+    return undefined;
+  }
+
+  const sku = String(resolved.value).trim();
+  return sku || undefined;
+};
+
+const normalizeVariantPayload = (variant, options = {}) => {
+  const { requirePrice = true, defaultStock = 0 } = options;
+  const price = parseNonNegativeVariantNumber(variant, "price", { required: requirePrice });
+  if (!price.ok) return price;
+
+  const salePrice = parseNonNegativeVariantNumber(variant, "salePrice");
+  if (!salePrice.ok) return salePrice;
+
+  const stock = parseNonNegativeVariantNumber(variant, "stock", { defaultValue: defaultStock });
+  if (!stock.ok) return stock;
+
+  return {
+    ok: true,
+    price: price.value,
+    hasPrice: price.found,
+    salePrice: salePrice.found ? salePrice.value : null,
+    hasSalePrice: salePrice.found,
+    stock: stock.value,
+    hasStock: stock.found,
+    sku: resolveVariantSku(variant),
+  };
+};
+
+const toDecimal128 = (value) => Decimal128.fromString(String(value));
+
+const toStockNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const getStockStatus = (stock, threshold = LOW_STOCK_THRESHOLD) => {
+  if (stock <= 0) return "out_of_stock";
+  if (stock <= threshold) return "low_stock";
+  return "in_stock";
+};
+
+const addStockMetadataToVariant = (variant, threshold = LOW_STOCK_THRESHOLD) => {
+  const stock = toStockNumber(variant.stock);
+
+  return {
+    ...variant,
+    stock,
+    totalStock: stock,
+    stockStatus: getStockStatus(stock, threshold),
+    lowStockThreshold: threshold,
+  };
+};
+
+const buildProductStockSummary = (variants, threshold = LOW_STOCK_THRESHOLD) => {
+  const variantsWithStock = variants.map((variant) => addStockMetadataToVariant(variant, threshold));
+  const totalStock = variantsWithStock.reduce((sum, variant) => sum + variant.stock, 0);
+  const stockSummary = variantsWithStock.reduce(
+    (summary, variant) => {
+      summary[variant.stockStatus] += 1;
+      return summary;
+    },
+    { in_stock: 0, low_stock: 0, out_of_stock: 0 }
+  );
+
+  return {
+    variantsWithStock,
+    totalStock,
+    stockSummary,
+    stockStatus: getStockStatus(totalStock, threshold),
+    lowStockThreshold: threshold,
+  };
+};
+
 
 /**
  * Generate SKU for variant
@@ -251,8 +379,12 @@ exports.createProductWithVariants = async (req, res) => {
 
 for (const variant of variants) {
   const attrMap = new Map(Object.entries(variant.attributes || {}));
+  const normalizedVariant = normalizeVariantPayload(variant);
+  if (!normalizedVariant.ok) {
+    return res.status(400).json({ error: normalizedVariant.error });
+  }
 
-  let sku = variant.sku;
+  let sku = normalizedVariant.sku;
 
   // If frontend didn't send SKU
   if (!sku) {
@@ -274,7 +406,7 @@ for (const variant of variants) {
 
   if (existingSku) {
     const newSku = await generateUniqueSKU(businessId, product._id, attrMap);
-    sku = `${onboarding.applicationId}-${newSku}`;
+    sku = onboarding?.applicationId ? `${onboarding.applicationId}-${newSku}` : newSku;
   }
 
   variantDocs.push({
@@ -283,11 +415,9 @@ for (const variant of variants) {
     ownerId: userId,
     attributes: attrMap,
     sku,
-    price: Decimal128.fromString(variant.price.toString()),
-    salePrice: variant.salePrice
-      ? Decimal128.fromString(variant.salePrice.toString())
-      : null,
-    stock: variant.stock || 0,
+    price: toDecimal128(normalizedVariant.price),
+    salePrice: normalizedVariant.hasSalePrice ? toDecimal128(normalizedVariant.salePrice) : null,
+    stock: normalizedVariant.stock,
     shipping: normalizeVariantShipping(variant.shipping),
     images: variant.images || [],
     isPublished: isPublished || false,
@@ -757,6 +887,10 @@ exports.updateProduct = async (req, res) => {
 
       for (const variant of variants) {
         const attrMap = new Map(Object.entries(variant.attributes || {}));
+        const normalizedVariant = normalizeVariantPayload(variant, { requirePrice: Boolean(!variant._id) });
+        if (!normalizedVariant.ok) {
+          return res.status(400).json({ error: normalizedVariant.error });
+        }
 
         // UPDATE existing variant
         if (variant._id) {
@@ -767,13 +901,15 @@ exports.updateProduct = async (req, res) => {
 
           if (existingVariant) {
             existingVariant.attributes = attrMap;
-            existingVariant.price = Decimal128.fromString(
-              variant.price.toString()
-            );
-            existingVariant.salePrice = variant.salePrice
-              ? Decimal128.fromString(variant.salePrice.toString())
-              : null;
-            existingVariant.stock = variant.stock || 0;
+            if (normalizedVariant.hasPrice) {
+              existingVariant.price = toDecimal128(normalizedVariant.price);
+            }
+            if (normalizedVariant.hasSalePrice) {
+              existingVariant.salePrice = toDecimal128(normalizedVariant.salePrice);
+            }
+            if (normalizedVariant.hasStock) {
+              existingVariant.stock = normalizedVariant.stock;
+            }
             existingVariant.shipping = normalizeVariantShipping(
               variant.shipping,
               existingVariant.shipping
@@ -812,11 +948,9 @@ exports.updateProduct = async (req, res) => {
             ownerId: userId,
             attributes: attrMap,
             sku,
-            price: Decimal128.fromString(variant.price.toString()),
-            salePrice: variant.salePrice
-              ? Decimal128.fromString(variant.salePrice.toString())
-              : null,
-            stock: variant.stock || 0,
+            price: toDecimal128(normalizedVariant.price),
+            salePrice: normalizedVariant.hasSalePrice ? toDecimal128(normalizedVariant.salePrice) : null,
+            stock: normalizedVariant.stock,
             shipping: normalizeVariantShipping(variant.shipping),
             images: variant.images || [],
             isPublished: isPublished || false
@@ -1001,7 +1135,8 @@ exports.getBusinessProducts = async (req, res) => {
           isDeleted: false,
         }).lean();
         
-        const totalStock = variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+        const stockDetails = buildProductStockSummary(variants);
+        const totalStock = stockDetails.totalStock;
         const minPrice = variants.length > 0 
           ? Math.min(...variants.map(v => parseFloat(v.price?.toString() || 0)))
           : 0;
@@ -1013,6 +1148,10 @@ exports.getBusinessProducts = async (req, res) => {
           ...product,
           variantCount: variants.length,
           totalStock,
+          variants: stockDetails.variantsWithStock,
+          stockStatus: stockDetails.stockStatus,
+          stockSummary: stockDetails.stockSummary,
+          lowStockThreshold: stockDetails.lowStockThreshold,
           priceRange: {
             min: minPrice,
             max: maxPrice,
@@ -1102,27 +1241,33 @@ exports.addVariants = async (req, res) => {
     }
 
     // Create new variants with unique SKUs
-    const variantDocs = variants.map((variant) => {
+    const variantDocs = [];
+    for (const variant of variants) {
+      const normalizedVariant = normalizeVariantPayload(variant);
+      if (!normalizedVariant.ok) {
+        return res.status(400).json({ error: normalizedVariant.error });
+      }
+
       // Generate unique SKU for each variant
       const attributeMap = new Map(Object.entries(variant.attributes || {}));
       const timestamp = Date.now();
       const random = Math.floor(1000 + Math.random() * 9000);
-      const sku = variant.sku || `PRD-${timestamp}-${random}`;
+      const sku = normalizedVariant.sku || `PRD-${timestamp}-${random}`;
       
-      return {
+      variantDocs.push({
         productId: product._id,
         businessId: business._id,
         ownerId: req.user._id,
         attributes: attributeMap,
         sku: sku,
-        price: variant.price,
-        salePrice: variant.salePrice,
-        stock: variant.stock || 0,
+        price: toDecimal128(normalizedVariant.price),
+        salePrice: normalizedVariant.hasSalePrice ? toDecimal128(normalizedVariant.salePrice) : null,
+        stock: normalizedVariant.stock,
         shipping: normalizeVariantShipping(variant.shipping),
         images: variant.images || [],
         isPublished: product.isPublished,
-      };
-    });
+      });
+    }
 
     const savedVariants = await ProductVariant.insertMany(variantDocs);
     const variantIds = savedVariants.map(v => v._id);
@@ -1156,9 +1301,6 @@ exports.updateVariant = async (req, res) => {
     const {
       attributes,
       sku,
-      price,
-      salePrice,
-      stock,
       shipping,
       images,
       isPublished,
@@ -1169,6 +1311,10 @@ exports.updateVariant = async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
+    if (product.ownerId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
     if (!mongoose.Types.ObjectId.isValid(variantId)) {
   return res.status(400).json({ error: 'Invalid variant ID' });
 }
@@ -1176,6 +1322,14 @@ exports.updateVariant = async (req, res) => {
     const variant = await ProductVariant.findOne({ _id: variantId, productId });
     if (!variant) {
       return res.status(404).json({ error: 'Variant not found' });
+    }
+
+    const normalizedVariant = normalizeVariantPayload(req.body, {
+      requirePrice: false,
+      defaultStock: undefined,
+    });
+    if (!normalizedVariant.ok) {
+      return res.status(400).json({ error: normalizedVariant.error });
     }
 
     // Handle image cleanup if changed
@@ -1189,10 +1343,12 @@ exports.updateVariant = async (req, res) => {
 
     // Update variant
     if (attributes) variant.attributes = new Map(Object.entries(attributes));
-    if (sku) variant.sku = sku;
-    if (price !== undefined) variant.price = price;
-    if (salePrice !== undefined) variant.salePrice = salePrice;
-    if (stock !== undefined) variant.stock = stock;
+    if (sku || normalizedVariant.sku) variant.sku = normalizedVariant.sku || sku;
+    if (normalizedVariant.hasPrice) variant.price = toDecimal128(normalizedVariant.price);
+    if (normalizedVariant.hasSalePrice) {
+      variant.salePrice = normalizedVariant.hasSalePrice ? toDecimal128(normalizedVariant.salePrice) : null;
+    }
+    if (normalizedVariant.hasStock) variant.stock = normalizedVariant.stock;
     if (shipping !== undefined) {
       variant.shipping = normalizeVariantShipping(shipping, variant.shipping);
     }
