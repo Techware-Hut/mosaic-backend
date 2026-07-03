@@ -367,3 +367,24 @@ test('updateService publish response exposes publication block without duplicate
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.data.publication.isPublished, true);
 });
+
+test('updateService returns clear validation when publishing without child services', async () => {
+  const draft = buildServiceDoc({ isPublished: false, services: [] });
+  const { controller } = loadServiceController({
+    existingService: draft,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: { isPublished: true },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, 'Add at least one service offering before publishing.');
+  assert.equal(res.body.fieldErrors.services, 'Add at least one service offering before publishing.');
+});

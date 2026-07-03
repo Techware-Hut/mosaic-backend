@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   normalizeServicePayload,
+  PUBLISH_CHILD_SERVICE_REQUIRED_MESSAGE,
   validateChildServices,
   validatePublishRequest,
   evaluateServicePublication,
@@ -68,6 +69,18 @@ test('validatePublishRequest rejects publish without valid children', () => {
 
   assert.equal(result.ok, false);
   assert.ok(result.fieldErrors.isPublished);
+});
+
+test('validatePublishRequest uses clear copy when publishing without child services', () => {
+  const result = validatePublishRequest({
+    isPublished: true,
+    normalizedServices: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.message, PUBLISH_CHILD_SERVICE_REQUIRED_MESSAGE);
+  assert.equal(result.fieldErrors.services, PUBLISH_CHILD_SERVICE_REQUIRED_MESSAGE);
+  assert.equal(result.fieldErrors.isPublished, PUBLISH_CHILD_SERVICE_REQUIRED_MESSAGE);
 });
 
 test('evaluateServicePublication returns SERVICE_UNPUBLISHED for drafts', () => {
