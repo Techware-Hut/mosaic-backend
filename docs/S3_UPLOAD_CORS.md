@@ -3,7 +3,7 @@
 **Issue:** Vendor onboarding browser upload fails when `PUT`ing directly to S3 pre-signed URL (not Express API CORS).  
 **Evidence date:** 2026-06-19 (UTC)  
 **Production API:** `https://api.mosaicbizhub.com`  
-**Production bucket (from presigned URL host):** `mosaic-biz-hub` · region `us-east-1`
+**Production bucket:** value of `AWS_S3_BUCKET` in the backend environment.
 
 No AWS keys, signed URLs, ETag values, cookies, JWTs, or env values in this document.
 
@@ -11,9 +11,11 @@ No AWS keys, signed URLs, ETag values, cookies, JWTs, or env values in this docu
 
 ## Executive verdict
 
-**S3 upload CORS: PASS**
+**Managed policy updated; production AWS apply still required**
 
-After bucket CORS was updated on `mosaic-biz-hub`, production probes confirm browser-allowed origins, successful OPTIONS preflight, and successful presigned PUT for vendor onboarding Stage 1 documents.
+The backend now generates the production-safe bucket CORS rule for direct browser S3 uploads. Production uploads can still fail until the release owner applies the managed rule to the bucket named by `AWS_S3_BUCKET`.
+
+Historical probes from 2026-06-19 confirmed successful OPTIONS preflight and presigned PUT after the then-current bucket CORS was updated. Run the smoke plan below again after applying this rule for the active production origins.
 
 ---
 
@@ -49,27 +51,31 @@ See also [`docs/CORS_PRODUCTION_SMOKE_PROOF.md`](CORS_PRODUCTION_SMOKE_PROOF.md)
 
 ## Required S3 bucket CORS policy
 
-Apply on bucket **`mosaic-biz-hub`** (must match production `AWS_S3_BUCKET`):
+Apply on the bucket named by production `AWS_S3_BUCKET`:
 
 ```json
 [
   {
+    "ID": "MosaicVendorPresignedUploads",
     "AllowedOrigins": [
       "https://mosaicbizhub.com",
       "https://www.mosaicbizhub.com",
       "https://app.mosaicbizhub.com",
-      "https://mosaic-biz-frontend-launch.vercel.app"
+      "https://mosaic-biz-frontend-launch.vercel.app",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000"
     ],
-    "AllowedMethods": ["PUT", "GET", "HEAD"],
-    "AllowedHeaders": ["Content-Type"],
-    "ExposeHeaders": ["ETag"],
+    "AllowedMethods": ["GET", "HEAD", "PUT", "POST"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag", "x-amz-request-id", "x-amz-id-2"],
     "MaxAgeSeconds": 3000
   }
 ]
 ```
 
-**Console:** S3 → `mosaic-biz-hub` → Permissions → Cross-origin resource sharing (CORS)  
-**CLI (release owner):** `aws s3api get-bucket-cors --bucket mosaic-biz-hub --region us-east-1`
+**Console:** S3 → bucket from `AWS_S3_BUCKET` → Permissions → Cross-origin resource sharing (CORS)
+
+**CLI (release owner):** `npm run s3:cors:vendor-upload` to preview, then `npm run s3:cors:vendor-upload -- --apply` to update the managed rule.
 
 ---
 
@@ -93,7 +99,7 @@ Probes used credentialed vendor session against production API; signed URL query
 | `https://mosaic-biz-frontend-launch.vercel.app` | exact match | **200** | **PASS** |
 | `https://app.mosaicbizhub.com` | exact match | **200** | **PASS** |
 
-Observed on launch origin (sanitized): `Access-Control-Allow-Methods` includes PUT; `Access-Control-Expose-Headers` includes ETag.
+Observed on launch origin (sanitized): `Access-Control-Allow-Methods` includes PUT; `Access-Control-Expose-Headers` includes ETag. Current managed policy also exposes AWS request IDs for production diagnostics.
 
 ### S3 presigned PUT
 
@@ -137,9 +143,9 @@ Unit tests prove MIME allowlist, auth wiring, and `ContentType` on `PutObjectCom
 
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
-| No `Access-Control-Allow-Origin` on S3 PUT | Bucket CORS missing/wrong origin | Re-apply policy above on correct bucket |
-| CORS OK, PUT 403 | Content-Type ≠ signed type | Align `fileType` query with PUT header |
-| `upload-url` 401/403 | Vendor auth / OTP | Express auth — not S3 |
+| No `Access-Control-Allow-Origin` on S3 PUT | Bucket CORS missing/wrong origin/header/method | Re-apply policy above on correct bucket |
+| CORS OK, PUT 403 | Content-Type does not match signed type | Align `fileType` query with PUT header |
+| `upload-url` 401/403 | Vendor auth / OTP | Express auth, not S3 |
 | PUT OK, file not viewable | Bucket policy / object ACL | Separate from upload CORS |
 
 ---
