@@ -243,6 +243,79 @@ const ProductVariant = require('../models/ProductVariant');
 const Product = require('../models/Product');
 const ProductCategory = require('../models/ProductCategory');
 
+const LOW_STOCK_THRESHOLD = 5;
+
+const toStockNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const getStockStatus = (stock, threshold = LOW_STOCK_THRESHOLD) => {
+  if (stock <= 0) return 'out_of_stock';
+  if (stock <= threshold) return 'low_stock';
+  return 'in_stock';
+};
+
+const toPriceNumber = (value) => {
+  if (value === undefined || value === null || value === '') return 0;
+  const parsed = Number(value.toString());
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatVariantAttributes = (attributes) => {
+  if (!attributes) return 'Default';
+
+  if (attributes instanceof Map) {
+    const values = Array.from(attributes.values()).filter(Boolean);
+    return values.length ? values.join(' / ') : 'Default';
+  }
+
+  if (typeof attributes === 'object') {
+    const values = Object.values(attributes).filter(Boolean);
+    return values.length ? values.join(' / ') : 'Default';
+  }
+
+  return 'Default';
+};
+
+const buildVariantSizes = (variant) => {
+  const legacySizes = Array.isArray(variant.sizes) ? variant.sizes : [];
+
+  if (legacySizes.length > 0) {
+    return legacySizes.map((size) => {
+      const stock = toStockNumber(size.stock);
+
+      return {
+        sizeId: size._id,
+        size: size.size,
+        sku: size.sku,
+        stock,
+        stockStatus: getStockStatus(stock),
+        lowStockThreshold: LOW_STOCK_THRESHOLD,
+        price: toPriceNumber(size.price),
+        salePrice: size.salePrice ? toPriceNumber(size.salePrice) : null,
+        discountEndDate: size.discountEndDate || null,
+      };
+    });
+  }
+
+  const stock = toStockNumber(variant.stock);
+
+  return [
+    {
+      sizeId: variant._id,
+      size: variant.label || formatVariantAttributes(variant.attributes),
+      sku: variant.sku,
+      stock,
+      stockStatus: getStockStatus(stock),
+      lowStockThreshold: LOW_STOCK_THRESHOLD,
+      price: toPriceNumber(variant.price),
+      salePrice: variant.salePrice ? toPriceNumber(variant.salePrice) : null,
+      discountEndDate: null,
+    },
+  ];
+};
+
 
 // exports.getAllProducts = async (req, res) => {
 //   try {
@@ -402,18 +475,32 @@ exports.getAllProducts = async (req, res) => {
     }
 
     if (offers === 'true') filters.features = { $in: ['Offers Available'] };
-    if (outOfStock === 'true') filters['sizes.stock'] = { $lte: 0 };
+    if (outOfStock === 'true') {
+      const outOfStockFilter = {
+        $or: [
+          { stock: { $lte: 0 } },
+          { 'sizes.stock': { $lte: 0 } },
+        ],
+      };
+
+      if (filters.$or) {
+        filters.$and = [{ $or: filters.$or }, outOfStockFilter];
+        delete filters.$or;
+      } else {
+        filters.$or = outOfStockFilter.$or;
+      }
+    }
     if (showUnpublished === 'true') filters.isPublished = false;
     filters.isDeleted = false;
 
 
     let sortOption = { createdAt: -1 };
-    if (sort === 'price_asc') sortOption = { 'sizes.price': 1 };
-    if (sort === 'price_desc') sortOption = { 'sizes.price': -1 };
+    if (sort === 'price_asc') sortOption = { price: 1, 'sizes.price': 1 };
+    if (sort === 'price_desc') sortOption = { price: -1, 'sizes.price': -1 };
     if (sort === 'rating') sortOption = { averageRating: -1 };
 
     const productVariants = await ProductVariant.find(filters)
-      .select('color label sizes isPublished images totalReviews averageRating')
+      .select('color label attributes sku price salePrice stock sizes isPublished images totalReviews averageRating')
       .populate('productId', 'title description coverImage')
       .sort(sortOption)
       .lean();
@@ -432,23 +519,26 @@ exports.getAllProducts = async (req, res) => {
           description: variant.productId.description,
           coverImage: variant.productId.coverImage,
           variants: [],
+          totalStock: 0,
+          stockSummary: { in_stock: 0, low_stock: 0, out_of_stock: 0 },
+          lowStockThreshold: LOW_STOCK_THRESHOLD,
         };
       }
 
-      const sizes = variant.sizes.map(size => ({
-        sizeId: size._id,
-        size: size.size,
-        sku: size.sku,
-        stock: size.stock,
-        price: size.price ? Number(size.price) : 0,
-        salePrice: size.salePrice ? Number(size.salePrice) : null,
-        discountEndDate: size.discountEndDate || null,
-      }));
+      const sizes = buildVariantSizes(variant);
+      const variantTotalStock = sizes.reduce((sum, size) => sum + toStockNumber(size.stock), 0);
+      const variantStockStatus = getStockStatus(variantTotalStock);
 
       groupedProductsMap[productId].variants.push({
         variantId: variant._id,
         color: variant.color,
         label: variant.label,
+        attributes: variant.attributes,
+        sku: variant.sku,
+        stock: variantTotalStock,
+        totalStock: variantTotalStock,
+        stockStatus: variantStockStatus,
+        lowStockThreshold: LOW_STOCK_THRESHOLD,
         isPublished: variant.isPublished,
         images: variant.images,
         averageRating: variant.averageRating,
@@ -457,14 +547,18 @@ exports.getAllProducts = async (req, res) => {
       });
 
       // ✅ Count if this variant is sellable
-      if (
-        variant.sizes.some(s => s.stock > 0)
-      ) {
+      groupedProductsMap[productId].totalStock += variantTotalStock;
+      groupedProductsMap[productId].stockSummary[variantStockStatus] += 1;
+
+      if (variantTotalStock > 0) {
         sellableCount++;
       }
     }
 
-    const groupedProducts = Object.values(groupedProductsMap);
+    const groupedProducts = Object.values(groupedProductsMap).map((product) => ({
+      ...product,
+      stockStatus: getStockStatus(product.totalStock),
+    }));
     const total = groupedProducts.length;
     const totalVariants = productVariants.length;
     const pageNum = parseInt(page);

@@ -78,6 +78,12 @@
 
 ---
 
+## Vendor product stock
+
+Vendor product inventory uses `ProductVariant.stock` as the source of truth. The vendor inventory endpoints now expose derived stock metadata while keeping existing fields backward compatible. See [`docs/product-stock-contract.md`](../product-stock-contract.md) for the route matrix, request payloads, response fields, QA checklist, and release limitations.
+
+---
+
 ## Public marketplace
 
 ### GET `/api/public/search`
