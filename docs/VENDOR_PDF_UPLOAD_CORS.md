@@ -61,9 +61,9 @@ Required rule shape:
         "http://localhost:3000",
         "http://127.0.0.1:3000"
       ],
-      "AllowedMethods": ["PUT", "GET", "HEAD"],
-      "AllowedHeaders": ["Content-Type"],
-      "ExposeHeaders": ["ETag"],
+      "AllowedMethods": ["GET", "HEAD", "PUT", "POST"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag", "x-amz-request-id", "x-amz-id-2"],
       "MaxAgeSeconds": 3000
     }
   ]

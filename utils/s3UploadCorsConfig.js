@@ -11,9 +11,9 @@ const DEFAULT_S3_UPLOAD_CORS_ORIGINS = [
   'http://127.0.0.1:3000',
 ];
 
-const S3_UPLOAD_CORS_ALLOWED_METHODS = ['PUT', 'GET', 'HEAD'];
-const S3_UPLOAD_CORS_ALLOWED_HEADERS = ['Content-Type'];
-const S3_UPLOAD_CORS_EXPOSE_HEADERS = ['ETag'];
+const S3_UPLOAD_CORS_ALLOWED_METHODS = ['GET', 'HEAD', 'PUT', 'POST'];
+const S3_UPLOAD_CORS_ALLOWED_HEADERS = ['*'];
+const S3_UPLOAD_CORS_EXPOSE_HEADERS = ['ETag', 'x-amz-request-id', 'x-amz-id-2'];
 const S3_UPLOAD_CORS_MAX_AGE_SECONDS = 3000;
 const S3_UPLOAD_CORS_RULE_ID = 'MosaicVendorPresignedUploads';
 
@@ -24,26 +24,48 @@ function parseOriginList(value) {
 
   return value
     .split(',')
-    .map((origin) => origin.trim())
+    .map(normalizeCorsOrigin)
     .filter(Boolean);
 }
 
-function isSafeBrowserOrigin(origin) {
-  if (origin === '*' || /\/\*$/.test(origin)) {
-    return false;
-  }
-
-  if (/^https:\/\/\*\.[a-z0-9.-]+$/i.test(origin)) {
-    return true;
+function normalizeCorsOrigin(origin) {
+  const trimmed = String(origin || '').trim();
+  if (!trimmed) {
+    return '';
   }
 
   try {
-    const parsed = new URL(origin);
+    const parsed = new URL(trimmed);
+    if (parsed.pathname === '/' && !parsed.search && !parsed.hash) {
+      return parsed.origin;
+    }
+  } catch (_error) {
+    // Wildcard S3 origins are not valid URL hostnames; validate them separately.
+  }
+
+  return trimmed.replace(/\/+$/, '');
+}
+
+function isSafeBrowserOrigin(origin) {
+  const normalizedOrigin = normalizeCorsOrigin(origin);
+
+  if (normalizedOrigin === '*' || /\/\*$/.test(normalizedOrigin)) {
+    return false;
+  }
+
+  const wildcardMatch = normalizedOrigin.match(/^https:\/\/([^/\s]*\*[^/\s]*)$/i);
+  if (wildcardMatch) {
+    const wildcardHost = wildcardMatch[1].toLowerCase();
+    return wildcardHost !== '*' && wildcardHost.endsWith('.vercel.app');
+  }
+
+  try {
+    const parsed = new URL(normalizedOrigin);
     if (!['http:', 'https:'].includes(parsed.protocol)) {
       return false;
     }
 
-    if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
+    if (parsed.origin !== normalizedOrigin || parsed.search || parsed.hash) {
       return false;
     }
 
