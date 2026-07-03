@@ -11,9 +11,11 @@ No AWS keys, signed URLs, ETag values, cookies, JWTs, or env values in this docu
 
 ## Executive verdict
 
-**S3 upload CORS: PASS**
+**Managed policy updated; production AWS apply still required**
 
-After bucket CORS was updated on `mosaic-biz-hub`, production probes confirm browser-allowed origins, successful OPTIONS preflight, and successful presigned PUT for vendor onboarding Stage 1 documents.
+The backend now generates the production-safe bucket CORS rule for direct browser S3 uploads. Production uploads can still fail until the release owner applies the managed rule to the bucket named by `AWS_S3_BUCKET`.
+
+Historical probes from 2026-06-19 confirmed successful OPTIONS preflight and presigned PUT after the then-current bucket CORS was updated. Run the smoke plan below again after applying this rule for the active production origins.
 
 ---
 
