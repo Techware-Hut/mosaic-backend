@@ -8,6 +8,20 @@ const {
 } = require('../lib/marketplace/businessEligibility');
 
 const LISTING_TYPES = new Set(['product', 'service', 'food']);
+const PAYOUT_REQUIRED_LISTING_TYPES = new Set(['product']);
+
+function normalizeListingType(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function requiresPayoutSetupForBusiness(business) {
+  return PAYOUT_REQUIRED_LISTING_TYPES.has(normalizeListingType(business?.listingType));
+}
+
+function isPayoutCompleteForBusiness(business) {
+  if (!requiresPayoutSetupForBusiness(business)) return true;
+  return Boolean(business?.chargesEnabled === true && business?.payoutsEnabled === true);
+}
 
 function normalizeId(value) {
   if (!value) return null;
@@ -280,7 +294,7 @@ async function enrichBusinessesWithListingSnapshots(businesses = []) {
 
 function buildPublicationBlockers({ business, onboarding, snapshot }) {
   const blockers = [];
-  const listingType = String(business?.listingType || '').trim().toLowerCase();
+  const listingType = normalizeListingType(business?.listingType);
   const eligible = getEligibleListingsForBusiness(business, snapshot);
 
   if (!onboarding || onboarding.status !== 'verified') {
@@ -304,7 +318,7 @@ function buildPublicationBlockers({ business, onboarding, snapshot }) {
     });
   }
 
-  if (business?.chargesEnabled !== true || business?.payoutsEnabled !== true) {
+  if (requiresPayoutSetupForBusiness(business) && !isPayoutCompleteForBusiness(business)) {
     blockers.push({
       code: 'PAYOUT_SETUP_REQUIRED',
       message: 'Complete payout setup before publishing.',
@@ -330,13 +344,15 @@ function buildOnboardingReadiness({ business, onboarding, snapshot }) {
   const eligible = getEligibleListingsForBusiness(business, snapshot);
   const hasListing = eligible.listings.length > 0;
   const requiredListingCount = countRequiredListings(eligible);
-  const payoutComplete = Boolean(business?.chargesEnabled && business?.payoutsEnabled);
+  const payoutRequired = requiresPayoutSetupForBusiness(business);
+  const payoutComplete = isPayoutCompleteForBusiness(business);
   const blockers = buildPublicationBlockers({ business, onboarding, snapshot });
 
   return {
     listingType: business?.listingType || null,
     hasListing,
     requiredListingCount,
+    payoutRequired,
     payoutComplete,
     vendorVerificationStatus: onboarding?.status || null,
     canFinalReview: hasListing && payoutComplete,
@@ -374,6 +390,8 @@ async function publishBusinessListings({ business, userId }) {
         publicMarketplaceEligible: isPublicMarketplaceBusiness(business),
         hasRequiredListing: eligibleBeforePublication.listings.length > 0,
         requiredListingCount,
+        payoutRequired: requiresPayoutSetupForBusiness(business),
+        payoutComplete: isPayoutCompleteForBusiness(business),
         blockers,
       },
     };
@@ -439,6 +457,8 @@ async function publishBusinessListings({ business, userId }) {
       publicMarketplaceEligible: isPublicMarketplaceBusiness(business),
       hasRequiredListing: true,
       requiredListingCount: countRequiredListings(eligible),
+      payoutRequired: requiresPayoutSetupForBusiness(business),
+      payoutComplete: isPayoutCompleteForBusiness(business),
       published,
       blockers: [],
     },
@@ -452,4 +472,5 @@ module.exports = {
   getEligibleListingsForBusiness,
   loadListingSnapshotsByBusinessIds,
   publishBusinessListings,
+  requiresPayoutSetupForBusiness,
 };

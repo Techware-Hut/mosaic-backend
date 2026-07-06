@@ -124,12 +124,85 @@ test('getPendingApplications returns only submitted applications for admin revie
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.success, true);
   assert.deepEqual(queryLog.query, { status: { $in: ['submitted'] } });
+  assert.deepEqual(res.body.meta.statuses, ['submitted']);
   assert.deepEqual(queryLog.populate, { path: 'userId', select: 'name email' });
   assert.deepEqual(queryLog.sort, { submittedAt: -1, createdAt: -1 });
   assert.deepEqual(
     res.body.data.map((application) => application.status),
     ['submitted']
   );
+});
+
+test('getPendingApplications status=all returns every application status', async () => {
+  const applications = [
+    buildApplication('draft'),
+    buildApplication('payment_pending'),
+    buildApplication('submitted'),
+    buildApplication('rejected'),
+    buildApplication('verified'),
+  ];
+  const { controller, queryLog } = loadControllerWithMocks(applications);
+  const res = createResponse();
+
+  await controller.getPendingApplications({ query: { status: 'all' } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(queryLog.query, {});
+  assert.equal(res.body.meta.statusFilter, 'all');
+  assert.deepEqual(
+    res.body.data.map((application) => application.status),
+    ['draft', 'payment_pending', 'submitted', 'rejected', 'verified']
+  );
+});
+
+test('getPendingApplications filters specific statuses and maps approved alias to verified', async () => {
+  const applications = [
+    buildApplication('submitted'),
+    buildApplication('rejected'),
+    buildApplication('verified'),
+  ];
+  const { controller, queryLog } = loadControllerWithMocks(applications);
+  const res = createResponse();
+
+  await controller.getPendingApplications({ query: { status: 'rejected,approved' } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(queryLog.query, { status: { $in: ['rejected', 'verified'] } });
+  assert.deepEqual(res.body.meta.statuses, ['rejected', 'verified']);
+  assert.deepEqual(
+    res.body.data.map((application) => application.status),
+    ['rejected', 'verified']
+  );
+});
+
+test('getPendingApplications maps under_review and pending aliases to submitted queue', async () => {
+  const applications = [
+    buildApplication('draft'),
+    buildApplication('submitted'),
+  ];
+  const { controller, queryLog } = loadControllerWithMocks(applications);
+  const res = createResponse();
+
+  await controller.getPendingApplications({ query: { status: ['under_review', 'pending'] } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(queryLog.query, { status: { $in: ['submitted'] } });
+  assert.deepEqual(res.body.meta.statuses, ['submitted']);
+  assert.deepEqual(
+    res.body.data.map((application) => application.status),
+    ['submitted']
+  );
+});
+
+test('getPendingApplications rejects invalid status filters', async () => {
+  const { controller } = loadControllerWithMocks([buildApplication('submitted')]);
+  const res = createResponse();
+
+  await controller.getPendingApplications({ query: { status: 'archived' } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+  assert.ok(res.body.fieldErrors.status.includes('archived'));
 });
 
 test('getPendingApplications includes resubmitted applications once they return to submitted status', async () => {
@@ -185,8 +258,15 @@ test('getPendingApplications excludes payment_pending applications with failed v
 });
 
 test('getPendingApplications uses submitted-only allowlist constant', () => {
-  const { PENDING_REVIEW_STATUSES } = require(controllerPath);
+  const { APPLICATION_STATUS_FILTERS, PENDING_REVIEW_STATUSES } = require(controllerPath);
   assert.deepEqual(PENDING_REVIEW_STATUSES, ['submitted']);
+  assert.deepEqual(APPLICATION_STATUS_FILTERS, [
+    'draft',
+    'payment_pending',
+    'submitted',
+    'verified',
+    'rejected',
+  ]);
 });
 
 test('vendor onboarding pending route blocks non-admin users', () => {

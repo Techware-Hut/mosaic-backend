@@ -240,12 +240,16 @@ test('vendorLogo comes from populated businessId without inventing values', () =
         _id: '507f1f77bcf86cd799439012',
         businessName: 'Acme Co',
         logo: 'https://cdn.example.com/logo.jpg',
+        address: { city: 'Atlanta', state: 'GA', country: 'US' },
       },
     },
     { listingType: 'product' }
   );
   assert.equal(card.vendorLogo, 'https://cdn.example.com/logo.jpg');
   assert.equal(card.business?.logo, 'https://cdn.example.com/logo.jpg');
+  assert.equal(card.state, 'GA');
+  assert.equal(card.business?.state, 'GA');
+  assert.equal(card.business?.address.state, 'GA');
 });
 
 test('normalizeLocation extracts city and state from address when present', () => {

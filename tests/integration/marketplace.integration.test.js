@@ -50,12 +50,17 @@ test('GET /api/public/product/:id returns product detail when seeded', async () 
   const agent = createAgent(getApp());
   const vendor = await registerAndVerify(agent, { role: 'business_owner' });
   const user = await User.findOne({ email: vendor.email });
-  const business = await seedApprovedBusiness(user);
+  const business = await seedApprovedBusiness(user, {
+    address: { city: 'Atlanta', state: 'GA', country: 'USA', zipCode: '30301' },
+  });
   const product = await seedPublishedProduct(business, user);
 
   const res = await agent.get(`/api/public/product/${product._id}`);
   assert.equal(res.status, 200);
   assert.equal(res.body.data.title, 'Integration Test Product');
+  assert.equal(res.body.data.state, 'GA');
+  assert.equal(res.body.data.business.state, 'GA');
+  assert.equal(res.body.data.business.address.state, 'GA');
 });
 
 test('GET /api/services/list and /api/food/list return safe empty arrays', async () => {

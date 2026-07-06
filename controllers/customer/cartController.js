@@ -36,6 +36,11 @@ const normalizeShipping = (shipping) => {
     };
 };
 
+const getBusinessState = (business) => {
+    const state = business?.address?.state || business?.state || null;
+    return state ? String(state) : null;
+};
+
 const getEffectiveShipping = (productDoc, variantDoc) => {
     const variantShipping = normalizeShipping(variantDoc?.shipping);
     const productShipping = normalizeShipping(productDoc?.shipping);
@@ -109,7 +114,7 @@ const buildCartPricing = async ({ cartDoc, items, deliverySpeed, businessDoc, co
 
     const business = businessDoc || (cartDoc?.businessId
         ? await Business.findById(cartDoc.businessId)
-            .select('businessName slug shippingSettings taxSettings owner')
+            .select('businessName slug shippingSettings taxSettings owner address')
             .lean()
         : null);
 
@@ -174,6 +179,8 @@ const buildCartPricing = async ({ cartDoc, items, deliverySpeed, businessDoc, co
                 _id: business._id,
                 businessName: business.businessName,
                 slug: business.slug,
+                vendorState: getBusinessState(business),
+                state: getBusinessState(business),
             }
             : null,
         availableDeliverySpeeds: ['standard', 'express', 'local'],
@@ -419,7 +426,7 @@ async function fetchEnrichedCart(userId, { deliverySpeed, couponCode } = {}) {
 
     const businesses = cartBusinessIds.length
         ? await Business.find({ _id: { $in: cartBusinessIds } })
-            .select('businessName slug shippingSettings taxSettings owner isApproved isActive')
+            .select('businessName slug shippingSettings taxSettings owner isApproved isActive address')
             .lean()
         : [];
 
@@ -495,6 +502,7 @@ async function fetchEnrichedCart(userId, { deliverySpeed, couponCode } = {}) {
             taxRate,
         });
         const shipping = getEffectiveShipping(product, variant);
+        const vendorState = getBusinessState(itemBusiness);
         const shippingMethod = ['standard', 'overnight', 'local'].includes(cartItem.shippingMethod)
             ? cartItem.shippingMethod
             : 'standard';
@@ -534,6 +542,9 @@ async function fetchEnrichedCart(userId, { deliverySpeed, couponCode } = {}) {
             lineTotalAmount: lineAmounts.amountInclTax,
             shippingMethod,
             shippingCharge,
+            shipping,
+            vendorState,
+            state: vendorState,
             imageUrl: Array.isArray(variant.images) ? variant.images[0] : null,
             allowBackorder: selectedVariant.allowBackorder,
         };

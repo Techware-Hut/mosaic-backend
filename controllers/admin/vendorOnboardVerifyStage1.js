@@ -23,8 +23,21 @@ const {
 // submission and are waiting for stage-1 review. Rejected resubmissions re-enter
 // the queue by transitioning back to `submitted` in vendorOnboarding.controller.
 const PENDING_REVIEW_STATUSES = Object.freeze(['submitted']);
+const APPLICATION_STATUS_FILTERS = Object.freeze([
+  'draft',
+  'payment_pending',
+  'submitted',
+  'verified',
+  'rejected',
+]);
+const APPLICATION_STATUS_ALIASES = Object.freeze({
+  pending: PENDING_REVIEW_STATUSES,
+  under_review: PENDING_REVIEW_STATUSES,
+  approved: ['verified'],
+});
 
 exports.PENDING_REVIEW_STATUSES = PENDING_REVIEW_STATUSES;
+exports.APPLICATION_STATUS_FILTERS = APPLICATION_STATUS_FILTERS;
 
 const VERIFICATION_GUIDANCE_OUTCOMES = Object.freeze({
   missing_documents: {
@@ -195,6 +208,56 @@ const autoVerifyMinorityDocsIfMissing = async (application) => {
   return 10;
 };
 
+const buildApplicationStatusQuery = (rawStatus) => {
+  if (rawStatus === undefined || rawStatus === null || rawStatus === '') {
+    return {
+      query: { status: { $in: [...PENDING_REVIEW_STATUSES] } },
+      statusFilter: 'pending',
+      statuses: [...PENDING_REVIEW_STATUSES],
+    };
+  }
+
+  const values = (Array.isArray(rawStatus) ? rawStatus : String(rawStatus).split(','))
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  if (values.length === 0 || values.includes('all')) {
+    return {
+      query: {},
+      statusFilter: 'all',
+      statuses: [...APPLICATION_STATUS_FILTERS],
+    };
+  }
+
+  const statuses = [];
+  const invalidStatuses = [];
+
+  for (const value of values) {
+    const mapped = APPLICATION_STATUS_ALIASES[value] || [value];
+    for (const status of mapped) {
+      if (!APPLICATION_STATUS_FILTERS.includes(status)) {
+        invalidStatuses.push(value);
+      } else if (!statuses.includes(status)) {
+        statuses.push(status);
+      }
+    }
+  }
+
+  if (invalidStatuses.length > 0 || statuses.length === 0) {
+    return {
+      error: `Invalid application status filter: ${[...new Set(invalidStatuses)].join(', ')}`,
+    };
+  }
+
+  return {
+    query: { status: { $in: statuses } },
+    statusFilter: values.join(','),
+    statuses,
+  };
+};
+
+exports.buildApplicationStatusQuery = buildApplicationStatusQuery;
+
 /* =====================================================
    GET PENDING APPLICATIONS
 ===================================================== */
@@ -202,19 +265,36 @@ const autoVerifyMinorityDocsIfMissing = async (application) => {
 
 exports.getPendingApplications = async (req, res) => {
   try {
-    const applications = await VendorOnboarding.find({
-      status: { $in: PENDING_REVIEW_STATUSES }
-    })
+    const statusQuery = buildApplicationStatusQuery(req.query?.status);
+
+    if (statusQuery.error) {
+      return res.status(400).json({
+        success: false,
+        message: statusQuery.error,
+        fieldErrors: {
+          status: statusQuery.error,
+        },
+      });
+    }
+
+    const applications = await VendorOnboarding.find(statusQuery.query)
       .populate('userId', 'name email')
       .sort({ submittedAt: -1, createdAt: -1 });
 
     await Promise.all(
-      applications.map((application) => autoVerifyMinorityDocsIfMissing(application))
+      applications
+        .filter((application) => PENDING_REVIEW_STATUSES.includes(application.status))
+        .map((application) => autoVerifyMinorityDocsIfMissing(application))
     );
 
     return res.status(200).json({
       success: true,
-      data: applications
+      data: applications,
+      meta: {
+        statusFilter: statusQuery.statusFilter,
+        statuses: statusQuery.statuses,
+        availableStatuses: [...APPLICATION_STATUS_FILTERS],
+      },
     });
   } catch (error) {
     console.error('Get all applications error:', error);

@@ -294,8 +294,8 @@ test('vendor publish-storefront publishes draft service listings', async () => {
   const vendor = await registerAndVerify(agent, { role: 'business_owner' });
   const user = await User.findOne({ email: vendor.email });
   const business = await seedServiceBusiness(user, {
-    chargesEnabled: true,
-    payoutsEnabled: true,
+    chargesEnabled: false,
+    payoutsEnabled: false,
   });
   const { category, subcategory } = await seedServiceCategories();
   await seedVendorOnboarding(user, {
@@ -326,6 +326,8 @@ test('vendor publish-storefront publishes draft service listings', async () => {
 
   const publishRes = await agent.post(`/api/business/${business._id}/publish-storefront`);
   assert.equal(publishRes.status, 200, JSON.stringify(publishRes.body));
+  assert.equal(publishRes.body.publication.payoutRequired, false);
+  assert.equal(publishRes.body.publication.payoutComplete, true);
   assert.equal(publishRes.body.publication.requiredListingCount, 2);
   assert.equal(publishRes.body.publication.published.services, 2);
   assert.equal(publishRes.body.publication.published.serviceListings, 1);
@@ -343,8 +345,8 @@ test('vendor publish-storefront publishes draft food listings and public food de
   const user = await User.findOne({ email: vendor.email });
   const business = await seedApprovedBusiness(user, {
     listingType: 'food',
-    chargesEnabled: true,
-    payoutsEnabled: true,
+    chargesEnabled: false,
+    payoutsEnabled: false,
   });
   await seedVendorOnboarding(user, {
     businessId: business._id,
@@ -371,6 +373,8 @@ test('vendor publish-storefront publishes draft food listings and public food de
 
   const publishRes = await agent.post(`/api/business/${business._id}/publish-storefront`);
   assert.equal(publishRes.status, 200, JSON.stringify(publishRes.body));
+  assert.equal(publishRes.body.publication.payoutRequired, false);
+  assert.equal(publishRes.body.publication.payoutComplete, true);
   assert.equal(publishRes.body.publication.published.foods, 1);
 
   const reloadedFood = await Food.findById(food._id).lean();
