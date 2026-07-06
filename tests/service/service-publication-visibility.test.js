@@ -319,6 +319,30 @@ test('createService returns field errors for frontend name-only child without to
   assert.ok(res.body.fieldErrors['services[0].durationMinutes']);
 });
 
+test('createService persists normalized listing features on first save', async () => {
+  const { controller, savedDocs } = loadServiceController({ existingService: null });
+  const res = mockResponse();
+
+  await controller.createService(
+    {
+      user: { _id: ownerId },
+      body: {
+        businessId,
+        categoryId: '507f1f77bcf86cd799439014',
+        subcategoryId: '507f1f77bcf86cd799439015',
+        title: 'Hair Styling',
+        features: [' Mobile appointments ', '', 'Consultation included'],
+        services: [{ name: 'Cut', price: 45, durationMinutes: 60 }],
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(savedDocs[0].features, ['Mobile appointments', 'Consultation included']);
+  assert.deepEqual(res.body.data.service.features, ['Mobile appointments', 'Consultation included']);
+});
+
 test('public getServiceById excludes unpublished services', async () => {
   const { controller } = loadPublicListingController({
     service: buildServiceDoc({ isPublished: false }),
