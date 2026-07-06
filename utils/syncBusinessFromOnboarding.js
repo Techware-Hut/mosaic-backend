@@ -30,7 +30,9 @@ async function syncBusinessFromOnboarding({
     business = new Business({
       owner: userId,
       ...businessData,
-      isApproved: true,
+      // Public marketplace approval mirrors the Stage-1 application decision;
+      // never grant visibility before admin verification.
+      isApproved: onboarding.status === 'verified',
       isActive: true,
       usage: {
         totalProducts: 0,

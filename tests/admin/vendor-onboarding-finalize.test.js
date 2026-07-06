@@ -180,6 +180,149 @@ test('finalizeVerification rejects when required docs missing', async () => {
   assert.equal(businessUpdates.at(-1).update.$set.isApproved, false);
 });
 
+test('finalizeVerification explicit approve persists reviewer identity and timestamps', async () => {
+  const application = buildApplication();
+  const { controller } = loadController({ application });
+  const res = createResponse();
+
+  await controller.finalizeVerification(
+    {
+      params: { applicationId: application.applicationId },
+      body: { decision: 'approve', adminNotes: 'All documents check out' },
+      user: { _id: 'admin-user-id' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(application.status, 'verified');
+  assert.equal(application.reviewDecision, 'approved');
+  assert.equal(application.reviewedBy, 'admin-user-id');
+  assert.ok(application.reviewedAt instanceof Date);
+  assert.ok(application.verifiedAt instanceof Date);
+  assert.equal(application.rejectionReason, undefined);
+  assert.equal(application.adminReviewNotes, 'All documents check out');
+  assert.equal(res.body.data.status, 'approved');
+  assert.equal(res.body.data.applicationStatus, 'verified');
+  assert.equal(res.body.data.reviewedBy, 'admin-user-id');
+  assert.equal(res.body.data.adminReviewNotes, 'All documents check out');
+});
+
+test('finalizeVerification explicit approve fails with 400 when required docs missing', async () => {
+  const application = buildApplication({
+    verificationChecklist: {
+      taxDocs: false,
+      businessLicense: true,
+      minorityDocs: false,
+    },
+  });
+  const { controller, mailerCalls, auditEvents } = loadController({ application });
+  const res = createResponse();
+
+  await controller.finalizeVerification(
+    {
+      params: { applicationId: application.applicationId },
+      body: { decision: 'approve' },
+      user: { _id: 'admin-user-id' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+  assert.equal(application.status, 'submitted');
+  assert.deepEqual(res.body.data.missingRequiredDocuments, ['EIN document']);
+  assert.equal(mailerCalls.rejection, undefined);
+  assert.equal(mailerCalls.approved, undefined);
+  assert.equal(auditEvents.at(-1).outcome, 'failure');
+});
+
+test('finalizeVerification explicit reject stores reason, notes, next action, and reviewer', async () => {
+  // Docs are fully verified — auto behavior would approve, but admin rejects.
+  const application = buildApplication();
+  const { controller, mailerCalls, businessUpdates } = loadController({ application });
+  const res = createResponse();
+
+  await controller.finalizeVerification(
+    {
+      params: { applicationId: application.applicationId },
+      body: {
+        decision: 'reject',
+        rejectionReason: 'Business license appears expired',
+        adminNotes: 'Verify renewal before approving',
+        requiredNextAction: 'Upload a current business license and resubmit.',
+      },
+      user: { _id: 'admin-user-id' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(application.status, 'rejected');
+  assert.equal(application.reviewDecision, 'rejected');
+  assert.equal(application.rejectionReason, 'Business license appears expired');
+  assert.equal(application.adminReviewNotes, 'Verify renewal before approving');
+  assert.equal(application.requiredNextAction, 'Upload a current business license and resubmit.');
+  assert.equal(application.reviewedBy, 'admin-user-id');
+  assert.ok(application.rejectedAt instanceof Date);
+  assert.equal(application.verifiedAt, undefined);
+  assert.equal(res.body.data.status, 'rejected');
+  assert.equal(res.body.data.applicationStatus, 'rejected');
+  assert.equal(res.body.data.rejectionReason, 'Business license appears expired');
+  assert.equal(res.body.data.requiredNextAction, 'Upload a current business license and resubmit.');
+  assert.equal(mailerCalls.rejection.rejectionReason, 'Business license appears expired');
+  assert.equal(businessUpdates.at(-1).update.$set.isApproved, false);
+});
+
+test('finalizeVerification auto reject persists default review metadata', async () => {
+  const application = buildApplication({
+    verificationChecklist: {
+      taxDocs: false,
+      businessLicense: false,
+      minorityDocs: false,
+    },
+  });
+  const { controller } = loadController({ application });
+  const res = createResponse();
+
+  await controller.finalizeVerification(
+    {
+      params: { applicationId: application.applicationId },
+      user: { _id: 'admin-user-id' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(application.status, 'rejected');
+  assert.equal(
+    application.rejectionReason,
+    'Missing required documents: EIN document, business license document.'
+  );
+  assert.equal(application.requiredNextAction, 'Update your application and resubmit for review.');
+  assert.equal(application.reviewedBy, 'admin-user-id');
+  assert.ok(application.rejectedAt instanceof Date);
+  assert.equal(res.body.data.requiredNextAction, 'Update your application and resubmit for review.');
+});
+
+test('finalizeVerification rejects invalid decision values', async () => {
+  const application = buildApplication();
+  const { controller } = loadController({ application });
+  const res = createResponse();
+
+  await controller.finalizeVerification(
+    {
+      params: { applicationId: application.applicationId },
+      body: { decision: 'maybe' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+  assert.equal(application.status, 'submitted');
+});
+
 test('finalizeVerification blocks non-submitted applications', async () => {
   const application = buildApplication({ status: 'verified' });
   const { controller } = loadController({ application });

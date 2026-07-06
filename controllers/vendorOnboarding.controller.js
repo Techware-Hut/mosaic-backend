@@ -1347,7 +1347,8 @@ exports.getStatusByApplicationId = async (req, res) => {
 
       case 'rejected':
         status = 'Stage 1 - Rejected';
-        nextAction = 'Your application did not meet verification criteria. Our team will contact you for further assistance.';
+        nextAction = onboarding.requiredNextAction
+          || 'Update your application and resubmit for review.';
         break;
 
       default:
@@ -1369,7 +1370,15 @@ exports.getStatusByApplicationId = async (req, res) => {
             status: onboarding.status,
             points: onboarding.totalVerificationPoints || 0,
             submittedAt: onboarding.submittedAt,
-            paymentStatus: onboarding.verificationPayment?.status || 'not_started'
+            paymentStatus: onboarding.verificationPayment?.status || 'not_started',
+            // Admin review outcome (present after finalize; vendor-visible)
+            rejectionReason: onboarding.status === 'rejected'
+              ? (onboarding.rejectionReason || null)
+              : null,
+            requiredNextAction: onboarding.status === 'rejected'
+              ? (onboarding.requiredNextAction || 'Update your application and resubmit for review.')
+              : null,
+            reviewedAt: onboarding.reviewedAt || null
           },
           stage2: {
             status: subscription?.status || 'not_started',

@@ -99,8 +99,11 @@ stateDiagram-v2
 | `draft` / `payment_pending` / `rejected` | `submitForReview` (paid) | `submitForReview` | `submitted` | Sets `submittedAt`; emails admin + vendor |
 | `submitted` | `submitForReview` again | `submitForReview` | `submitted` | Idempotent `200` — no error |
 | `rejected` | `saveDraft` | `saveDraft` | `draft` | **Does not** auto-resubmit |
-| `submitted` | `finalizeVerification` (docs OK) | `finalizeVerification` | `verified` | Badge from points; approval email |
-| `submitted` | `finalizeVerification` (docs missing) | `finalizeVerification` | `rejected` | Rejection email with reason |
+| `submitted` | `finalizeVerification` (explicit `decision: 'approve'`, docs OK) | `finalizeVerification` | `verified` | Badge from points; approval email; review metadata persisted |
+| `submitted` | `finalizeVerification` (explicit `decision: 'approve'`, docs missing) | `finalizeVerification` | — | **Blocked** `400` with `missingRequiredDocuments` — never silently rejects against admin intent |
+| `submitted` | `finalizeVerification` (explicit `decision: 'reject'`) | `finalizeVerification` | `rejected` | Always allowed; admin `rejectionReason` takes precedence; rejection email |
+| `submitted` | `finalizeVerification` (no `decision`, docs OK) | `finalizeVerification` | `verified` | Legacy auto behavior preserved |
+| `submitted` | `finalizeVerification` (no `decision`, docs missing) | `finalizeVerification` | `rejected` | Legacy auto behavior; generated missing-docs reason persisted |
 | `verified` | `saveDraft` | `saveDraft` | — | **Blocked** `400` |
 
 ---
@@ -194,6 +197,21 @@ Admin approval is a two-step process:
 **Route:** `POST /api/vendor-onboarding/:applicationId/finalize` (admin)  
 **Handler:** `finalizeVerification`
 
+**Request body (all optional — omitting `decision` preserves the legacy auto-decide contract):**
+
+| Field | Meaning |
+|-------|---------|
+| `decision` | `'approve'` or `'reject'` — explicit admin intent |
+| `rejectionReason` | Vendor-visible rejection reason (falls back to generated missing-docs list) |
+| `adminNotes` | Internal review notes (persisted, not emailed) |
+| `requiredNextAction` | Vendor-visible next step (defaults to "Update your application and resubmit for review.") |
+
+**Decision rules:**
+
+- `decision: 'approve'` — requires the document checklist below; if docs are missing, returns `400` with `missingRequiredDocuments` (never silently rejects against admin intent).
+- `decision: 'reject'` — always allowed from `submitted`.
+- No `decision` — auto: approve when required docs verified, reject otherwise.
+
 **Approval criteria (launch-critical):** Required **document checklist** flags, not point total:
 
 | Check | Required when |
@@ -202,7 +220,9 @@ Admin approval is a two-step process:
 | `verificationChecklist.businessLicense` | Always |
 | `verificationChecklist.minorityDocs` | Only if `isMinorityOwned === true` |
 
-If all required → `status = 'verified'`. Else → `status = 'rejected'`.
+If approved → `status = 'verified'`. If rejected → `status = 'rejected'`.
+
+**Persisted review metadata (on `VendorOnboardingStage1`):** `reviewDecision`, `rejectionReason`, `adminReviewNotes`, `requiredNextAction`, `reviewedBy`, `reviewedAt`, `verifiedAt` / `rejectedAt`. All are vendor-write-protected (stripped by `saveDraft`). The response includes `data.applicationStatus` with the real stored enum value alongside the legacy `data.status` (`approved`/`rejected`).
 
 **Badge assignment (does not affect approve/reject):**
 
@@ -242,12 +262,13 @@ There is no Stage-1 stalled/deactivated application workflow in the current mode
 
 ## Phase 6: Rejected state
 
-When `finalizeVerification` finds missing required documents:
+When `finalizeVerification` rejects (explicit `decision: 'reject'` or missing required documents):
 
-- `status = 'rejected'`
-- `sendVendorRejectionEmail` with `rejectionReason` listing missing docs
+- `status = 'rejected'`, plus persisted `rejectionReason`, `requiredNextAction`, `adminReviewNotes`, `reviewedBy`, `reviewedAt`, `rejectedAt`
+- `sendVendorRejectionEmail` with the persisted `rejectionReason`
 - Application **leaves** admin queue (queue is `submitted` only)
 - Badge may still be assigned based on points at rejection time
+- `GET /status/:applicationId` surfaces `rejectionReason` and `requiredNextAction` in `details.stage1`, and `nextAction` directs the vendor to revise and resubmit
 
 ### Resubmission path (launch-critical)
 
@@ -359,7 +380,7 @@ From [`utils/vendorOnboardingUploadMimeAllowlist.js`](../utils/vendorOnboardingU
 
 From `VENDOR_PROTECTED_ONBOARDING_FIELDS`:
 
-`verificationPayment`, `status`, `applicationId`, `badge`, `totalVerificationPoints`, `verificationChecklist`, `businessId`, `submittedAt`, `profileCompletionNotifiedAt`, `userId`, `trustScore`, `isApproved`, `isVerified`, `role`, `adminNotes`
+`verificationPayment`, `status`, `applicationId`, `badge`, `totalVerificationPoints`, `verificationChecklist`, `businessId`, `submittedAt`, `profileCompletionNotifiedAt`, `userId`, `trustScore`, `isApproved`, `isVerified`, `role`, `adminNotes`, `reviewDecision`, `rejectionReason`, `adminReviewNotes`, `requiredNextAction`, `reviewedBy`, `reviewedAt`, `verifiedAt`, `rejectedAt`
 
 `saveDraft` calls `stripProtectedVendorFields` before applying payload. Tests confirm protected fields are not applied even on rejected resubmit.
 

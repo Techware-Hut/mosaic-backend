@@ -42,6 +42,15 @@ const VENDOR_PROTECTED_ONBOARDING_FIELDS = [
   'isVerified',
   'role',
   'adminNotes',
+  // Admin review metadata — set only by finalizeVerification
+  'reviewDecision',
+  'rejectionReason',
+  'adminReviewNotes',
+  'requiredNextAction',
+  'reviewedBy',
+  'reviewedAt',
+  'verifiedAt',
+  'rejectedAt',
 ];
 
 const VENDOR_MEDIA_SUBDOC_FIELDS = new Set([
