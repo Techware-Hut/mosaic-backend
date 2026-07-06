@@ -142,3 +142,66 @@ test('rejected application state is readable by admin', async () => {
   assert.equal(detail.status, 200);
   assert.equal(detail.body.data.status, 'rejected');
 });
+
+test('admin can list vendor applications by status filter', async () => {
+  const vendorAgent = createAgent(getApp());
+  const submittedVendor = await registerAndVerify(vendorAgent, {
+    role: 'business_owner',
+  });
+  const submittedUser = await User.findOne({ email: submittedVendor.email });
+  await seedVendorOnboarding(submittedUser, {
+    applicationId: 'MBH-INT-SUBMITTED-FILTER',
+    status: 'submitted',
+  });
+
+  const rejectedVendor = await registerAndVerify(createAgent(getApp()), {
+    role: 'business_owner',
+  });
+  const rejectedUser = await User.findOne({ email: rejectedVendor.email });
+  await seedVendorOnboarding(rejectedUser, {
+    applicationId: 'MBH-INT-REJECTED-FILTER',
+    status: 'rejected',
+    rejectionReason: 'Integration rejected filter proof',
+  });
+
+  const verifiedVendor = await registerAndVerify(createAgent(getApp()), {
+    role: 'business_owner',
+  });
+  const verifiedUser = await User.findOne({ email: verifiedVendor.email });
+  await seedVendorOnboarding(verifiedUser, {
+    applicationId: 'MBH-INT-VERIFIED-FILTER',
+    status: 'verified',
+  });
+
+  const { email, password } = await createAdminDirect();
+  const adminAgent = createAgent(getApp());
+  await login(adminAgent, email, password);
+
+  const all = await adminAgent.get('/api/vendor-onboarding/pending').query({ status: 'all' });
+  assert.equal(all.status, 200);
+  assert.deepEqual(all.body.meta.statuses, [
+    'draft',
+    'payment_pending',
+    'submitted',
+    'verified',
+    'rejected',
+  ]);
+  assert.ok(all.body.data.some((application) => application.applicationId === 'MBH-INT-SUBMITTED-FILTER'));
+  assert.ok(all.body.data.some((application) => application.applicationId === 'MBH-INT-REJECTED-FILTER'));
+  assert.ok(all.body.data.some((application) => application.applicationId === 'MBH-INT-VERIFIED-FILTER'));
+
+  const rejected = await adminAgent.get('/api/vendor-onboarding/pending').query({ status: 'rejected' });
+  assert.equal(rejected.status, 200);
+  assert.deepEqual(
+    rejected.body.data.map((application) => application.applicationId),
+    ['MBH-INT-REJECTED-FILTER']
+  );
+
+  const approvedAlias = await adminAgent.get('/api/vendor-onboarding/pending').query({ status: 'approved' });
+  assert.equal(approvedAlias.status, 200);
+  assert.deepEqual(approvedAlias.body.meta.statuses, ['verified']);
+  assert.deepEqual(
+    approvedAlias.body.data.map((application) => application.applicationId),
+    ['MBH-INT-VERIFIED-FILTER']
+  );
+});
