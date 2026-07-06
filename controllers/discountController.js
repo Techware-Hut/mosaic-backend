@@ -1,6 +1,7 @@
 const Discount = require('../models/Discounts');
 const Business = require('../models/Business');
 const mongoose = require('mongoose');
+const { evaluateCouponDiscount } = require('../utils/couponDiscount');
 
 const UPDATABLE_DISCOUNT_FIELDS = [
   'name',
@@ -220,46 +221,22 @@ exports.validateCoupon = async (req, res) => {
   try {
     const { couponCode, businessId, amount } = req.body;
 
-    const discount = await Discount.findOne({
-      couponCode: couponCode.toUpperCase(),
+    const result = await evaluateCouponDiscount({
+      couponCode,
       businessId,
-      isActive: true
+      subtotalAmount: amount,
     });
 
-    if (!discount) {
+    if (!result.ok) {
       return res.status(400).json({
         success: false,
-        message: "Invalid coupon"
-      });
-    }
-
-    // Check expiry
-    if (discount.validTill && new Date() > discount.validTill) {
-      return res.status(400).json({
-        success: false,
-        message: "Coupon expired"
-      });
-    }
-
-    // Check usage limit
-    if (discount.usageLimit && discount.usedCount >= discount.usageLimit) {
-      return res.status(400).json({
-        success: false,
-        message: "Coupon usage limit reached"
-      });
-    }
-
-    // Check minimum amount
-    if (amount < discount.minOrderAmount) {
-      return res.status(400).json({
-        success: false,
-        message: `Minimum order amount is ${discount.minOrderAmount}`
+        message: result.message,
       });
     }
 
     res.json({
       success: true,
-      data: discount
+      data: result.discount,
     });
 
   } catch (error) {
@@ -279,42 +256,27 @@ exports.applyCoupon = async (req, res) => {
   try {
     const { couponCode, businessId, amount } = req.body;
 
-    const discount = await Discount.findOne({
-      couponCode: couponCode.toUpperCase(),
+    const result = await evaluateCouponDiscount({
+      couponCode,
       businessId,
-      isActive: true
+      subtotalAmount: amount,
     });
 
-    if (!discount) {
+    if (!result.ok) {
       return res.status(400).json({
         success: false,
-        message: "Invalid coupon"
+        message: result.message,
       });
     }
-
-    let discountAmount = 0;
-
-    // Calculate discount
-    if (discount.type === "percentage") {
-      discountAmount = (amount * discount.value) / 100;
-
-      if (discount.maxDiscountAmount) {
-        discountAmount = Math.min(discountAmount, discount.maxDiscountAmount);
-      }
-    } else {
-      discountAmount = discount.value;
-    }
-
-    const finalAmount = Math.max(0, amount - discountAmount);
 
     res.json({
       success: true,
       data: {
-        originalAmount: amount,
-        discountAmount,
-        finalAmount,
-        couponCode: discount.couponCode
-      }
+        originalAmount: Number(amount),
+        discountAmount: result.discountAmount,
+        finalAmount: result.discountedSubtotal,
+        couponCode: result.couponCode,
+      },
     });
 
   } catch (error) {
