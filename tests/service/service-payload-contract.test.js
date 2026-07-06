@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  normalizeStringList,
   normalizeServicePayload,
   PUBLISH_CHILD_SERVICE_REQUIRED_MESSAGE,
   validateChildServices,
@@ -31,6 +32,7 @@ test('normalizeServicePayload persists canonical parent and child fields', () =>
   const payload = normalizeServicePayload({
     title: 'Hair Styling',
     description: 'Full salon menu',
+    features: [' Mobile appointments ', '', null, 'Consultation included'],
     services: [{
       name: 'Basic Cut',
       price: 45,
@@ -43,6 +45,16 @@ test('normalizeServicePayload persists canonical parent and child fields', () =>
   assert.equal(payload.parentPrice, 45);
   assert.equal(payload.normalizedServices[0].price, 45);
   assert.equal(payload.normalizedServices[0].durationMinutes, 60);
+  assert.deepEqual(payload.features, ['Mobile appointments', 'Consultation included']);
+});
+
+test('normalizeStringList accepts arrays and single strings', () => {
+  assert.deepEqual(
+    normalizeStringList(['  One ', '', undefined, 'Two']),
+    ['One', 'Two']
+  );
+  assert.deepEqual(normalizeStringList(' One feature '), ['One feature']);
+  assert.deepEqual(normalizeStringList({ label: 'nope' }), []);
 });
 
 test('normalizeServicePayload backfills single name-only child from top-level price and duration', () => {

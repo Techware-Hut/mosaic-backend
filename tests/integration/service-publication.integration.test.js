@@ -33,6 +33,7 @@ const canonicalChildPayload = {
   description: 'Full salon menu for integration proof',
   price: 45,
   duration: '60',
+  features: ['Mobile appointments', 'Consultation included'],
   services: [{ name: 'Basic Cut' }],
 };
 
@@ -117,6 +118,10 @@ test('service publication flow: draft private, publish public list + detail, unp
   assert.equal(createRes.body.data.service.title, 'Integration Hair Styling');
   assert.equal(createRes.body.data.service.services[0].price, 45);
   assert.equal(createRes.body.data.service.services[0].durationMinutes, 60);
+  assert.deepEqual(createRes.body.data.service.features, [
+    'Mobile appointments',
+    'Consultation included',
+  ]);
 
   const privateList = await agent.get('/api/private/services/list').query({
     businessId: String(business._id),
@@ -127,6 +132,10 @@ test('service publication flow: draft private, publish public list + detail, unp
   const myServicesDraft = await agent.get('/api/service/my-services');
   assert.equal(myServicesDraft.status, 200);
   assert.ok(myServicesDraft.body.services.some((entry) => String(entry._id) === serviceId));
+  assert.deepEqual(
+    myServicesDraft.body.services.find((entry) => String(entry._id) === serviceId).features,
+    ['Mobile appointments', 'Consultation included']
+  );
   assert.equal(myServicesDraft.body.publicationByServiceId[serviceId].isPublished, false);
 
   await assertPublicSurfacesExcludeService(agent, serviceId, slug);
