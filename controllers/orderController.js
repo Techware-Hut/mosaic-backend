@@ -116,6 +116,8 @@ const {
   roundCurrency,
 } = require("../utils/vendorTax");
 
+const { evaluateCouponDiscount } = require("../utils/couponDiscount");
+
 const toNum = (value) => {
   if (value && typeof value === "object" && value.$numberDecimal != null) {
     return Number(value.$numberDecimal);
@@ -315,6 +317,36 @@ const resolveRequestedDeliverySpeed = (body) => {
       body?.shipping?.type
   );
 };
+
+const TOTAL_TOLERANCE = 0.01;
+
+function assertClientTotalsMatch(body, serverTotals) {
+  const checks = [
+    ["totalAmount", serverTotals.totalAmount],
+    ["discountAmount", serverTotals.discountAmount],
+    ["expectedTotal", serverTotals.totalAmount],
+    ["finalAmount", serverTotals.totalAmount],
+  ];
+
+  for (const [field, expected] of checks) {
+    if (body[field] === undefined) {
+      continue;
+    }
+
+    const clientValue = Number(body[field]);
+    if (
+      !Number.isFinite(clientValue) ||
+      Math.abs(clientValue - Number(expected || 0)) > TOTAL_TOLERANCE
+    ) {
+      return {
+        ok: false,
+        message: "Client total does not match server-calculated total",
+      };
+    }
+  }
+
+  return { ok: true };
+}
 
 // exports.initiateOrder = async (req, res) => {
 //   try {
@@ -544,7 +576,7 @@ const resolveRequestedDeliverySpeed = (body) => {
 
 exports.initiateOrder = async (req, res) => {
   try {
-    const { items, shippingAddress, userNote } = req.body;
+    const { items, shippingAddress, userNote, couponCode } = req.body;
     const userId = req.user.id;
     const deliverySpeed = resolveRequestedDeliverySpeed(req.body);
 
@@ -781,13 +813,36 @@ exports.initiateOrder = async (req, res) => {
       0
     );
 
+    let discountAmount = 0;
+    let discountedSubtotal = subtotalAmount;
+    let appliedCouponCode = null;
+
+    if (couponCode) {
+      const couponResult = await evaluateCouponDiscount({
+        couponCode,
+        businessId,
+        subtotalAmount,
+      });
+
+      if (!couponResult.ok) {
+        return res.status(400).json({
+          success: false,
+          message: couponResult.message,
+        });
+      }
+
+      discountAmount = couponResult.discountAmount;
+      discountedSubtotal = couponResult.discountedSubtotal;
+      appliedCouponCode = couponResult.couponCode;
+    }
+
     let shippingCalculation;
     try {
       shippingCalculation = calculateShippingForVendor(
         business.shippingSettings,
         {
           deliverySpeed,
-          subtotal: subtotalAmount,
+          subtotal: discountedSubtotal,
           totalQuantity,
         }
       );
@@ -799,7 +854,19 @@ exports.initiateOrder = async (req, res) => {
     }
 
     const totalAmount =
-      subtotalAmount + Number(shippingCalculation.amount || 0);
+      discountedSubtotal + Number(shippingCalculation.amount || 0);
+
+    const tamperCheck = assertClientTotalsMatch(req.body, {
+      totalAmount,
+      discountAmount,
+    });
+
+    if (!tamperCheck.ok) {
+      return res.status(400).json({
+        success: false,
+        message: tamperCheck.message,
+      });
+    }
 
     const groupOrderId = uuidv4();
 
@@ -810,6 +877,8 @@ exports.initiateOrder = async (req, res) => {
       businessId,
       items: vendorItems,
       subtotalAmount,
+      couponCode: appliedCouponCode,
+      discountAmount,
       taxSummary: {
         subtotalExclTaxAmount,
         taxTotal,
@@ -890,6 +959,9 @@ exports.initiateOrder = async (req, res) => {
       totals: {
         subtotalExclTaxAmount,
         subtotalAmount,
+        discountAmount,
+        discountedSubtotal,
+        couponCode: appliedCouponCode,
         taxTotal,
         shippingAmount: Number(shippingCalculation.amount || 0),
         totalAmount,

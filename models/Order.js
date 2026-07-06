@@ -83,6 +83,13 @@ const orderSchema = new Schema(
       type: Number,
       required: true,
     },
+    couponCode: {
+      type: String,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0,
+    },
     taxSummary: {
       subtotalExclTaxAmount: {
         type: Number,
