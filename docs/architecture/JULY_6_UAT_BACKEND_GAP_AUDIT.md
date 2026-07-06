@@ -31,13 +31,13 @@ Classify the backend side of the July 6 UAT defects before additional patch work
 | 5 service vendor shows payout/bank setup | Backend checkout still requires Connect for order checkout; publish requirement is not backend-decided per listing type. | Client decision plus contract | P0/P1 | `utils/checkoutGuards.js`. |
 | 6 product description renders HTML | Backend stores/returns raw description; frontend owns safe rendering. | Ready for Review | P2 Medium | Public product detail returns description as data. |
 | 7 local shipping hidden for same-state user | Backend calculates local cost but does not expose vendor state in cart/product detail contract. | Corrective Work / Bug if state-based local delivery is launch scope | P1 High | `cartController.js`, `publicListing.js`, `models/Business.js`. |
-| 8 cart quantity cannot reduce | Already fixed on staging. | Accepted | P0 closed | `cartItemId` returned; ID update route exists. |
-| 9 coupon min cart value ignored | Already fixed on staging. | Accepted | P0 closed | `couponDiscount.js` evaluates `minOrderAmount` on subtotal. |
-| 10 cart and checkout totals differ | Already fixed on staging. | Accepted | P0 closed | PR #199; `orderController.js` recomputes and validates totals. |
+| 8 cart quantity cannot reduce | Already fixed on staging. | Fixed pending UAT | P0 fix implemented | `cartItemId` returned; ID update route exists. |
+| 9 coupon min cart value ignored | Already fixed on staging. | Fixed pending UAT | P0 fix implemented | `couponDiscount.js` evaluates `minOrderAmount` on subtotal. |
+| 10 cart and checkout totals differ | Already fixed on staging. | Fixed pending UAT | P0 fix implemented | PR #199; `orderController.js` recomputes and validates totals. |
 | 11 shipped order email missing tracking link | Already fixed in code; runtime provider smoke still needed. | Ready for Review | P1 High | `shipOrder` sends `sendOrderUpdateEmail(... trackingUrl ...)`; tests cover success/failure. |
 | 12 PDF upload issue | Code supports PDF and generic MIME fallback; hosted S3/CORS smoke still needed. | Ready for Review with evidence needed | P1 High | Upload MIME allowlist and tests. |
 | 13 admin status filtering/profile review | List endpoint only returns submitted/pending; detail has richer data. | Corrective Work / Bug | P1 High | `getPendingApplications` pending statuses only. |
-| 14 approval/disapproval/finalize broken | Backend staging supports reject next action, resubmit, explicit finalize decisions. | Accepted backend, frontend alignment needed | P0 closed backend | PR #200; tests cover status next step and finalize. |
+| 14 approval/disapproval/finalize broken | Backend staging supports reject next action, resubmit, explicit finalize decisions. | Fixed pending UAT on backend, frontend alignment needed | P0 backend fix implemented | PR #200; tests cover status next step and finalize. |
 | 15 restaurant forced into Stripe Connect | Backend checkout requires Connect; publishing requirement for food/service is not separated. | Client decision plus possible corrective work | P0/P1 | `getBusinessCheckoutBlock`. |
 
 ## Confirmed Backend Gaps

@@ -186,7 +186,7 @@ What not to change: Do not commit real credentials, raw email tokens, or S3 secr
 
 ## Deferred/Closed Tracking
 
-- Cart quantity reduce: fixed by current backend/frontend branches.
-- Coupon cart value logic: fixed by PR #199.
-- Cart/checkout totals: fixed by PR #199 and frontend PR #323/#324.
-- Backend application rejection/resubmission/finalize state: fixed by PR #200; frontend explicit decision UI still needs follow-up in frontend repo.
+- Cart quantity reduce: fixed pending UAT by current backend/frontend branches.
+- Coupon cart value logic: fixed pending UAT by PR #199.
+- Cart/checkout totals: fixed pending UAT by PR #199 and frontend PR #323/#324.
+- Backend application rejection/resubmission/finalize state: fixed pending UAT by PR #200; frontend explicit decision UI still needs follow-up in frontend repo.
