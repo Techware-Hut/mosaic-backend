@@ -65,11 +65,31 @@ function countDraft(items = []) {
   return items.filter((item) => item.isPublished !== true).length;
 }
 
+function getServiceOfferings(service) {
+  if (!Array.isArray(service?.services)) return [];
+  return service.services.filter((item) => item && (item._id || item.name));
+}
+
+function countServiceOfferings(services = []) {
+  return services.reduce((sum, service) => sum + getServiceOfferings(service).length, 0);
+}
+
+function countPublishedServiceOfferings(services = []) {
+  return countServiceOfferings(services.filter((service) => service.isPublished === true));
+}
+
+function countDraftServiceOfferings(services = []) {
+  return countServiceOfferings(services.filter((service) => service.isPublished !== true));
+}
+
 function summarizeCounts(snapshot) {
   const products = snapshot.products || [];
   const services = snapshot.services || [];
   const foods = snapshot.foods || [];
   const productVariants = products.flatMap((product) => product.variants || []);
+  const serviceOfferings = countServiceOfferings(services);
+  const publishedServiceOfferings = countPublishedServiceOfferings(services);
+  const draftServiceOfferings = countDraftServiceOfferings(services);
 
   return {
     products: products.length,
@@ -78,21 +98,22 @@ function summarizeCounts(snapshot) {
     productVariants: productVariants.length,
     publishedProductVariants: countPublished(productVariants),
     draftProductVariants: countDraft(productVariants),
-    services: services.length,
-    publishedServices: countPublished(services),
-    draftServices: countDraft(services),
+    services: serviceOfferings,
+    serviceListings: services.length,
+    publishedServices: publishedServiceOfferings,
+    draftServices: draftServiceOfferings,
     foods: foods.length,
     publishedFoods: countPublished(foods),
     draftFoods: countDraft(foods),
-    total: products.length + services.length + foods.length,
+    total: products.length + serviceOfferings + foods.length,
     statusBreakdown: {
       products: {
         draft: countDraft(products),
         published: countPublished(products),
       },
       services: {
-        draft: countDraft(services),
-        published: countPublished(services),
+        draft: draftServiceOfferings,
+        published: publishedServiceOfferings,
       },
       foods: {
         draft: countDraft(foods),
@@ -133,6 +154,13 @@ function getEligibleListingsForBusiness(business, snapshot) {
   }
 
   return { type: listingType, listings: [] };
+}
+
+function countRequiredListings(eligible) {
+  if (eligible?.type === 'service') {
+    return countServiceOfferings(eligible.listings || []);
+  }
+  return eligible?.listings?.length || 0;
 }
 
 function resolveOnboardingForBusiness(business, onboardingRows = []) {
@@ -216,6 +244,7 @@ function attachListingSnapshotToBusiness(business, snapshot, onboarding = null) 
   const plain = toPlain(business);
   const listingSnapshot = snapshot || { products: [], services: [], foods: [] };
   const eligible = getEligibleListingsForBusiness(plain, listingSnapshot);
+  const requiredListingCount = countRequiredListings(eligible);
   const onboardingReadiness = buildOnboardingReadiness({
     business: plain,
     onboarding,
@@ -232,7 +261,7 @@ function attachListingSnapshotToBusiness(business, snapshot, onboarding = null) 
       listingType: plain?.listingType || null,
       publicMarketplaceEligible: isPublicMarketplaceBusiness(plain),
       hasRequiredListing: eligible.listings.length > 0,
-      requiredListingCount: eligible.listings.length,
+      requiredListingCount,
     },
     onboardingReadiness,
   };
@@ -314,6 +343,7 @@ function buildPublicationBlockers({ business, onboarding, snapshot }) {
 function buildOnboardingReadiness({ business, onboarding, snapshot }) {
   const eligible = getEligibleListingsForBusiness(business, snapshot);
   const hasListing = eligible.listings.length > 0;
+  const requiredListingCount = countRequiredListings(eligible);
   const payoutRequired = requiresPayoutSetupForBusiness(business);
   const payoutComplete = isPayoutCompleteForBusiness(business);
   const blockers = buildPublicationBlockers({ business, onboarding, snapshot });
@@ -321,7 +351,7 @@ function buildOnboardingReadiness({ business, onboarding, snapshot }) {
   return {
     listingType: business?.listingType || null,
     hasListing,
-    requiredListingCount: eligible.listings.length,
+    requiredListingCount,
     payoutRequired,
     payoutComplete,
     vendorVerificationStatus: onboarding?.status || null,
@@ -345,6 +375,8 @@ async function publishBusinessListings({ business, userId }) {
     ],
   }).select('status applicationId businessId').sort({ updatedAt: -1 }).lean();
   const blockers = buildPublicationBlockers({ business, onboarding, snapshot });
+  const eligibleBeforePublication = getEligibleListingsForBusiness(business, snapshot);
+  const requiredListingCount = countRequiredListings(eligibleBeforePublication);
 
   if (blockers.length) {
     return {
@@ -356,7 +388,8 @@ async function publishBusinessListings({ business, userId }) {
       publication: {
         listingType: business.listingType,
         publicMarketplaceEligible: isPublicMarketplaceBusiness(business),
-        hasRequiredListing: getEligibleListingsForBusiness(business, snapshot).listings.length > 0,
+        hasRequiredListing: eligibleBeforePublication.listings.length > 0,
+        requiredListingCount,
         payoutRequired: requiresPayoutSetupForBusiness(business),
         payoutComplete: isPayoutCompleteForBusiness(business),
         blockers,
@@ -364,12 +397,13 @@ async function publishBusinessListings({ business, userId }) {
     };
   }
 
-  const eligible = getEligibleListingsForBusiness(business, snapshot);
+  const eligible = eligibleBeforePublication;
   const listingIds = eligible.listings.map((item) => item._id).filter(Boolean);
   const published = {
     products: 0,
     productVariants: 0,
     services: 0,
+    serviceListings: 0,
     foods: 0,
   };
 
@@ -397,7 +431,8 @@ async function publishBusinessListings({ business, userId }) {
       { _id: { $in: listingIds }, businessId: business._id, ownerId: userId },
       { $set: { isPublished: true } }
     );
-    published.services = serviceResult.modifiedCount ?? serviceResult.nModified ?? 0;
+    published.services = countRequiredListings(eligible);
+    published.serviceListings = serviceResult.modifiedCount ?? serviceResult.nModified ?? 0;
   }
 
   if (eligible.type === 'food') {
@@ -421,7 +456,7 @@ async function publishBusinessListings({ business, userId }) {
       listingType: business.listingType,
       publicMarketplaceEligible: isPublicMarketplaceBusiness(business),
       hasRequiredListing: true,
-      requiredListingCount: eligible.listings.length,
+      requiredListingCount: countRequiredListings(eligible),
       payoutRequired: requiresPayoutSetupForBusiness(business),
       payoutComplete: isPayoutCompleteForBusiness(business),
       published,

@@ -109,6 +109,7 @@ test('GET /api/business/my returns zero listing counts and readiness blockers wh
   assert.equal(returnedBusiness.foods.length, 0);
   assert.equal(returnedBusiness.listingCounts.products, 0);
   assert.equal(returnedBusiness.listingCounts.services, 0);
+  assert.equal(returnedBusiness.listingCounts.serviceListings, 0);
   assert.equal(returnedBusiness.listingCounts.foods, 0);
   assert.equal(returnedBusiness.listingCounts.total, 0);
   assert.equal(returnedBusiness.onboardingReadiness.hasListing, false);
@@ -159,7 +160,7 @@ test('GET /api/business/my reports draft and published listing status counts fro
   assert.equal(publicProduct.status, 200, JSON.stringify(publicProduct.body));
 });
 
-test('GET /api/business/my counts product service and food records by business', async () => {
+test('GET /api/business/my counts product records, service offerings, and food records by business', async () => {
   const agent = createAgent(getApp());
   const vendor = await registerAndVerify(agent, { role: 'business_owner' });
   const user = await User.findOne({ email: vendor.email });
@@ -190,13 +191,17 @@ test('GET /api/business/my counts product service and food records by business',
   });
   await Service.create({
     title: 'Counted Service',
-    description: 'Service counted from Service collection.',
+    description: 'Service offerings counted from Service collection.',
     categoryId: category._id,
     subcategoryId: subcategory._id,
     ownerId: user._id,
     businessId: serviceBusiness._id,
     coverImage: 'https://example.test/counted-service.png',
-    services: [{ name: 'Session', durationMinutes: 45, price: 75 }],
+    services: [
+      { name: 'Session', durationMinutes: 45, price: 75 },
+      { name: 'Follow-up', durationMinutes: 30, price: 45 },
+      { name: 'Planning', durationMinutes: 60, price: 95 },
+    ],
     isPublished: false,
   });
   await Food.create({
@@ -221,8 +226,13 @@ test('GET /api/business/my counts product service and food records by business',
   const byId = new Map(res.body.businesses.map((item) => [String(item._id), item]));
   assert.equal(byId.get(String(productBusiness._id)).listingCounts.products, 1);
   assert.equal(byId.get(String(productBusiness._id)).listingCounts.total, 1);
-  assert.equal(byId.get(String(serviceBusiness._id)).listingCounts.services, 1);
-  assert.equal(byId.get(String(serviceBusiness._id)).listingCounts.total, 1);
+  assert.equal(byId.get(String(serviceBusiness._id)).services.length, 1);
+  assert.equal(byId.get(String(serviceBusiness._id)).listingCounts.services, 3);
+  assert.equal(byId.get(String(serviceBusiness._id)).listingCounts.serviceListings, 1);
+  assert.equal(byId.get(String(serviceBusiness._id)).listingCounts.draftServices, 3);
+  assert.equal(byId.get(String(serviceBusiness._id)).listingCounts.total, 3);
+  assert.equal(byId.get(String(serviceBusiness._id)).publication.requiredListingCount, 3);
+  assert.equal(byId.get(String(serviceBusiness._id)).onboardingReadiness.requiredListingCount, 3);
   assert.equal(byId.get(String(foodBusiness._id)).listingCounts.foods, 1);
   assert.equal(byId.get(String(foodBusiness._id)).listingCounts.total, 1);
 });
@@ -300,7 +310,10 @@ test('vendor publish-storefront publishes draft service listings', async () => {
     ownerId: user._id,
     businessId: business._id,
     coverImage: 'https://example.test/storefront-service.png',
-    services: [{ name: 'Consultation', durationMinutes: 30, price: 50 }],
+    services: [
+      { name: 'Consultation', durationMinutes: 30, price: 50 },
+      { name: 'Implementation', durationMinutes: 60, price: 125 },
+    ],
     isPublished: false,
   });
 
@@ -315,7 +328,9 @@ test('vendor publish-storefront publishes draft service listings', async () => {
   assert.equal(publishRes.status, 200, JSON.stringify(publishRes.body));
   assert.equal(publishRes.body.publication.payoutRequired, false);
   assert.equal(publishRes.body.publication.payoutComplete, true);
-  assert.equal(publishRes.body.publication.published.services, 1);
+  assert.equal(publishRes.body.publication.requiredListingCount, 2);
+  assert.equal(publishRes.body.publication.published.services, 2);
+  assert.equal(publishRes.body.publication.published.serviceListings, 1);
 
   const reloadedService = await Service.findById(service._id).lean();
   assert.equal(reloadedService.isPublished, true);
