@@ -39,7 +39,7 @@ Frontend evidence from paired repo: `utils/cartUtils.ts`, `app/(home)/cart/page.
 | Admin application detail | Admin detail page | `GET /api/vendor-onboarding/:applicationId` | Admin/vendor onboarding controllers | Review detail, profile data, documents, status, and admin decision metadata | Fixed / Ready for Review for current profile-review visibility; final visual clarity still needs UAT screenshots. | Fixed / Ready for Review | P1 UAT |
 | Finalize application | `finalizeVendorApplication` | `POST /api/vendor-onboarding/:applicationId/finalize` | `admin/vendorOnboardVerifyStage1.js` | Approve/reject result and email warning metadata | Fixed by July 6 PRs: frontend sends explicit decision/reason/next-action payload and backend validates/persists it. | Fixed / Ready for Review | P1 UAT |
 | Shipment tracking email | Vendor orders action | `PUT /api/orders/ship/:orderId` | `orderController.js`, `orderPhase.js` | Order shipped, emailDelivery | Fixed in code; hosted provider evidence needed. | Backend evidence | P1 |
-| Stripe Connect prompt/status | Dashboard/final review/connect tab | `/api/connect/:businessId/status`, account-link | `connectRoutes.js`, `checkoutGuards.js` | Connect status/link with product-vendor payout requirement and service/food optionality messaging | Fixed / Ready for Review for July 6 service/food optionality; policy wording still needs client/UAT sign-off. | Fixed / Ready for Review + Pending Client Input | P0/P1 |
+| Stripe Connect prompt/status | Dashboard/final review/connect tab | `/api/connect/:businessId/status`, account-link | `connectRoutes.js`, `checkoutGuards.js`, `businessListingVisibility.js` | Connect optional for service/food onboarding/publication; required for product online payouts (`POST /api/orders/initiate`) | **Business decision recorded 2026-07-07 (#218):** backend `PAYOUT_REQUIRED_LISTING_TYPES = ['product']`; checkout guard unchanged. Frontend messaging/UAT still needs controlled production verification. | Implemented / Ready for QA | P0/P1 |
 
 ## Required Response Shape Additions
 
@@ -67,7 +67,7 @@ Frontend evidence from paired repo: `utils/cartUtils.ts`, `app/(home)/cart/page.
 ## Open Decisions
 
 - Client/UAT sign-off on local delivery behavior.
-- Client/UAT sign-off on Stripe Connect messaging by listing type and payment mode.
+- Controlled production UAT verification of Stripe Connect **messaging** by listing type (backend policy decided #218).
 - Mandatory admin badge review fields beyond the currently visible profile/document fields.
 - Coupon basis confirmation.
 

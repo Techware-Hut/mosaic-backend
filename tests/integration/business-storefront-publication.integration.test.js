@@ -289,11 +289,59 @@ test('publish-storefront returns actionable blockers and keeps listings private 
   assert.equal(publicRes.status, 404);
 });
 
+test('service vendor onboarding readiness allows final review without Connect account', async () => {
+  const agent = createAgent(getApp());
+  const vendor = await registerAndVerify(agent, { role: 'business_owner' });
+  const user = await User.findOne({ email: vendor.email });
+  const business = await seedServiceBusiness(user, {
+    stripeConnectAccountId: null,
+    chargesEnabled: false,
+    payoutsEnabled: false,
+  });
+  const { category, subcategory } = await seedServiceCategories();
+  await seedVendorOnboarding(user, {
+    businessId: business._id,
+    status: 'verified',
+  });
+  await Service.create({
+    title: 'Non-Connect Service Listing',
+    description: 'Service listing for Connect policy test.',
+    categoryId: category._id,
+    subcategoryId: subcategory._id,
+    ownerId: user._id,
+    businessId: business._id,
+    coverImage: 'https://example.test/non-connect-service.png',
+    services: [{ name: 'Session', durationMinutes: 45, price: 75 }],
+    isPublished: false,
+  });
+
+  const loginRes = await login(agent, vendor.email, vendor.password);
+  assert.equal(loginRes.status, 200);
+
+  const res = await agent.get('/api/business/my');
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  const returnedBusiness = res.body.businesses.find((item) =>
+    String(item._id) === String(business._id)
+  );
+
+  assert.ok(returnedBusiness);
+  assert.equal(returnedBusiness.onboardingReadiness.payoutRequired, false);
+  assert.equal(returnedBusiness.onboardingReadiness.payoutComplete, true);
+  assert.equal(returnedBusiness.onboardingReadiness.canFinalReview, true);
+  assert.equal(returnedBusiness.onboardingReadiness.canPublish, true);
+  assert.ok(
+    !returnedBusiness.onboardingReadiness.blockers.some((blocker) =>
+      blocker.code === 'PAYOUT_SETUP_REQUIRED'
+    )
+  );
+});
+
 test('vendor publish-storefront publishes draft service listings', async () => {
   const agent = createAgent(getApp());
   const vendor = await registerAndVerify(agent, { role: 'business_owner' });
   const user = await User.findOne({ email: vendor.email });
   const business = await seedServiceBusiness(user, {
+    stripeConnectAccountId: null,
     chargesEnabled: false,
     payoutsEnabled: false,
   });
@@ -345,6 +393,7 @@ test('vendor publish-storefront publishes draft food listings and public food de
   const user = await User.findOne({ email: vendor.email });
   const business = await seedApprovedBusiness(user, {
     listingType: 'food',
+    stripeConnectAccountId: null,
     chargesEnabled: false,
     payoutsEnabled: false,
   });
