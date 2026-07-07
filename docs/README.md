@@ -1,7 +1,7 @@
 # Mosaic Backend - Documentation Home
 
 **Audience:** backend engineers, QA, release control, AI agents
-**Last updated:** 2026-06-28
+**Last updated:** 2026-07-07
 
 This is the entry point for current backend documentation. Older sprint, smoke, and proof-pack docs are retained as evidence, but the living docs below are the source of truth for current behavior.
 
@@ -21,6 +21,24 @@ Repository root: [README.md](../README.md). Deployment entry point: [../DEPLOYME
 | Payments | Stripe test-mode flows are allowed for controlled QA; do not present as unrestricted live commerce |
 | Release evidence | Exact deployed SHA, EB version, and latest promotion live in [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) and dated proof packs |
 | Main status hub | [MVP_BACKEND_PROGRAM_STATUS.md](MVP_BACKEND_PROGRAM_STATUS.md) |
+
+---
+
+## July 6 Controlled Production UAT (Current)
+
+**Agents: read [AGENT_CONTEXT_INDEX.md](AGENT_CONTEXT_INDEX.md) first.** It maps the July 6 Controlled Production UAT posture, the GitHub issue control board (parent epic [#211](https://github.com/Techware-Hut/mosaic-backend/issues/211), child issues #212–#220), the audit PRs, and the key documents:
+
+| Document | Use for |
+| --- | --- |
+| [AGENT_CONTEXT_INDEX.md](AGENT_CONTEXT_INDEX.md) | Entry point: issue board, agent rules, release posture |
+| [uat/JULY_6_PRODUCTION_UAT_CHECKLIST.md](uat/JULY_6_PRODUCTION_UAT_CHECKLIST.md) | Tester steps and evidence requirements for the 15 QA items |
+| [audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md](audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md) | Docs-to-code conformance findings and follow-up work orders |
+| [audit/JULY_6_BACKEND_IMPLEMENTATION_TRACE.md](audit/JULY_6_BACKEND_IMPLEMENTATION_TRACE.md) | Backend implementation evidence per QA area |
+| [audit/JULY_6_CROSS_REPO_ROUTE_CONTRACT_TRACE.md](audit/JULY_6_CROSS_REPO_ROUTE_CONTRACT_TRACE.md) | Cross-repo route/API contract table |
+| [release/STAGING_ENVIRONMENT_AUDIT.md](release/STAGING_ENVIRONMENT_AUDIT.md) | Why UAT runs in controlled production |
+| [release/JULY_6_CONTROLLED_PRODUCTION_UAT_PLAN.md](release/JULY_6_CONTROLLED_PRODUCTION_UAT_PLAN.md) | Controlled production UAT plan and safeguards |
+
+Status: Controlled Production UAT — **not final launch approval**. Lionel technical and Bryan written business approvals are pending.
 
 ---
 
