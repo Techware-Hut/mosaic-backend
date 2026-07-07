@@ -25,7 +25,7 @@ Frontend evidence from paired repo: `utils/cartUtils.ts`, `app/(home)/cart/page.
 | Feature | Frontend caller | Backend route | Backend owner | Expected response | Known mismatch | Owner repo | Priority |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Featured products | Home/marketplace feature calls | `GET /api/featured-products` | `featuredProductRoutes.js` | Featured product list | None. Preserve canonical route. | Both | P1 governance |
-| Cart read/pricing | `getCartDetailedResponse` | `GET /api/cart` | `cartController.js` | Items plus pricing, discount, available speeds, selected speed, vendor state/local eligibility data when available | Fixed by July 6 PRs: cart items and pricing business expose `vendorState`; frontend consumes `vendorState`/`localDeliveryEligible`. | Implemented / Ready for QA | P1 UAT |
+| Cart read/pricing | `getCartDetailedResponse` | `GET /api/cart` | `cartController.js` | Items plus pricing, discount, available speeds, selected speed, `vendorState` per item | Conformance audit 2026-07-07: backend returns `vendorState` only; it does **not** emit `localDeliveryEligible`. Frontend treats `localDeliveryEligible` as optional and falls back to same-state `vendorState` matching. Same-state gating is client-side only (follow-up FW-6 in `docs/audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md`). | Implemented / Ready for QA | P1 UAT |
 | Cart quantity update | `updateCartQuantity` | `PUT /api/cart/update/:cartItemId` | `cartController.js` | Updated cart | Fixed on staging/develop, pending UAT/client review. | Fixed pending UAT | P0 fix implemented |
 | Coupon validate/apply | Cart and buy-now coupon actions | `/api/discounts/validate`, `/apply`, cart pricing | `discountController.js`, `couponDiscount.js` | Reject/accept with discount totals | Fixed pending UAT. Business must approve subtotal basis. | Fixed pending UAT | P0 fix implemented |
 | Checkout total | Buy-now/order flow | `POST /api/orders/initiate` | `orderController.js` | Server total, discount, shipping, order/payment data | Fixed by PR #199, pending UAT/client review. | Fixed pending UAT | P0 fix implemented |
@@ -44,7 +44,7 @@ Frontend evidence from paired repo: `utils/cartUtils.ts`, `app/(home)/cart/page.
 
 | Contract | Required field | Reason | Recommended source |
 | --- | --- | --- | --- |
-| Cart item | `vendorState` or `localDeliveryEligible` | Implemented / Ready for QA; required for local delivery UI. | `Business.address.state` and backend eligibility metadata where available. |
+| Cart item | `vendorState` (returned today). `localDeliveryEligible` is **not** returned by the backend; adding it is follow-up FW-2. | Implemented / Ready for QA; required for local delivery UI. | `Business.address.state`. |
 | Public product detail | `business.address.state` or `business.state` | Implemented / Ready for QA; buy-now checks vendor state for local delivery. | `Business.address.state`. |
 | Admin application list | `status`, `reviewDecision`, `reviewedAt`, profile summary | Implemented / Ready for QA for status filtering and review triage. | `VendorOnboardingStage1` plus `Business` profile. |
 | Service create response | `features` | Implemented / Ready for QA; create persists user-entered features. | `Service.features`. |

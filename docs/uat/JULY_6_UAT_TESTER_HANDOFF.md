@@ -1,5 +1,7 @@
 # July 6 UAT Tester Handoff
 
+> **Conformance audit update (2026-07-07):** production promotion has since occurred (backend PR #209 -> `main` `ad9ddd14`, frontend PR #335 -> `main` `b3a86cb4`). Testing now runs as **controlled production UAT** — use [`docs/uat/JULY_6_PRODUCTION_UAT_CHECKLIST.md`](JULY_6_PRODUCTION_UAT_CHECKLIST.md) for the current tester steps and safeguards. Branch/SHA references below (`staging` @ `65b89d5`, `develop` @ `8f000a15`) are historical. This is not final launch approval.
+
 Date: July 6, 2026
 
 Status: **Evidence Needed**
