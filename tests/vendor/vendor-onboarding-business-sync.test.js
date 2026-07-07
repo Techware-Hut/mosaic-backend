@@ -84,7 +84,7 @@ function buildBusinessMocks({ existingBusiness = null, saveError = null } = {}) 
 
 test('syncBusinessFromOnboarding creates Business when none exists', async () => {
   const { syncBusinessFromOnboarding } = require(syncUtilPath);
-  const onboarding = buildOnboarding();
+  const onboarding = buildOnboarding({ status: 'verified' });
   const { Business, Subscription, getCreatedBusiness } = buildBusinessMocks();
 
   const business = await syncBusinessFromOnboarding({
@@ -98,7 +98,30 @@ test('syncBusinessFromOnboarding creates Business when none exists', async () =>
   assert.equal(created.businessName, 'Synced Business');
   assert.equal(created.owner, userId);
   assert.equal(created.subscriptionId, subscriptionId);
+  assert.equal(created.isApproved, true);
   assert.equal(onboarding.businessId, business._id);
+});
+
+test('syncBusinessFromOnboarding does not grant marketplace approval before Stage-1 verification', async () => {
+  const { syncBusinessFromOnboarding } = require(syncUtilPath);
+
+  for (const status of ['draft', 'payment_pending', 'submitted', 'rejected']) {
+    const onboarding = buildOnboarding({ status });
+    const { Business, Subscription, getCreatedBusiness } = buildBusinessMocks();
+
+    await syncBusinessFromOnboarding({
+      userId,
+      onboarding,
+      Business,
+      Subscription,
+    });
+
+    assert.equal(
+      getCreatedBusiness().isApproved,
+      false,
+      `Business created from '${status}' onboarding must not be approved`
+    );
+  }
 });
 
 test('syncBusinessFromOnboarding updates existing Business', async () => {

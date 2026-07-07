@@ -163,6 +163,31 @@ const VendorOnboardingStage1Schema = new mongoose.Schema(
 
     submittedAt: Date,
 
+    /* ADMIN REVIEW METADATA (set by finalizeVerification only) */
+    reviewDecision: {
+      type: String,
+      enum: ["approved", "rejected"],
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+    },
+    adminReviewNotes: {
+      type: String,
+      trim: true,
+    },
+    requiredNextAction: {
+      type: String,
+      trim: true,
+    },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    reviewedAt: Date,
+    verifiedAt: Date,
+    rejectedAt: Date,
+
     profileCompletionNotifiedAt: Date,
 
     verificationNotificationLog: [

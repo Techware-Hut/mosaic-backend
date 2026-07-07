@@ -8,6 +8,7 @@ const {
   normalizeImages,
   normalizeListingStatus,
   normalizeLocation,
+  normalizeServiceOfferings,
   toPublicListingCard,
   toPublicListingDetail,
   toPublicBusinessCard,
@@ -128,6 +129,30 @@ test('toPublicListingCard handles service businessDetails legacy shape', () => {
   assert.equal(card.imageUrl, 'https://cdn.example.com/logo.jpg');
 });
 
+test('toPublicListingCard exposes service offering summaries', () => {
+  const card = toPublicListingCard(
+    {
+      _id: '507f1f77bcf86cd799439011',
+      title: 'Consulting',
+      services: [
+        { _id: 'svc-child-1', name: 'Planning', price: 50, durationMinutes: 30 },
+        { _id: 'svc-child-2', name: 'Build', price: 150, durationMinutes: 90 },
+        { name: 'Review' },
+      ],
+    },
+    { listingType: 'service' }
+  );
+
+  assert.equal(card.serviceOfferingCount, 3);
+  assert.deepEqual(card.serviceOfferingNames, ['Planning', 'Build', 'Review']);
+  assert.equal(card.serviceOfferings[0].price, 50);
+  assert.equal(card.serviceOfferings[1].durationMinutes, 90);
+  assert.deepEqual(
+    normalizeServiceOfferings([{ name: 'Valid' }, {}, null]),
+    [{ id: null, name: 'Valid', price: null, durationMinutes: null }]
+  );
+});
+
 test('toPublicBusinessCard normalizes vendor browse card fields', () => {
   const card = toPublicBusinessCard({
     _id: '507f1f77bcf86cd799439011',
@@ -215,12 +240,16 @@ test('vendorLogo comes from populated businessId without inventing values', () =
         _id: '507f1f77bcf86cd799439012',
         businessName: 'Acme Co',
         logo: 'https://cdn.example.com/logo.jpg',
+        address: { city: 'Atlanta', state: 'GA', country: 'US' },
       },
     },
     { listingType: 'product' }
   );
   assert.equal(card.vendorLogo, 'https://cdn.example.com/logo.jpg');
   assert.equal(card.business?.logo, 'https://cdn.example.com/logo.jpg');
+  assert.equal(card.state, 'GA');
+  assert.equal(card.business?.state, 'GA');
+  assert.equal(card.business?.address.state, 'GA');
 });
 
 test('normalizeLocation extracts city and state from address when present', () => {

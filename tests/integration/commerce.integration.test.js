@@ -109,6 +109,168 @@ test('customer removes cart item by id and keeps quantity-based totalItems', asy
   assert.deepEqual(reloadedCart.items.map(String), [String(lineToKeep._id)]);
 });
 
+test('customer can decrease cart quantity via update by cartItemId', async () => {
+  const vendorAgent = createAgent(getApp());
+  const vendor = await registerAndVerify(vendorAgent, { role: 'business_owner' });
+  const vendorUser = await User.findOne({ email: vendor.email });
+  const business = await seedApprovedBusiness(vendorUser, {
+    shippingSettings: { method: 'flat_rate', flatRate: { standard: 5 } },
+  });
+  const product = await seedPublishedProduct(business, vendorUser);
+  const variant = await ProductVariant.create({
+    productId: product._id,
+    businessId: business._id,
+    ownerId: vendorUser._id,
+    attributes: { size: 'M' },
+    sku: `SKU-CART-DEC-${Date.now()}`,
+    price: 25,
+    stock: 10,
+    isPublished: true,
+  });
+
+  const customerAgent = createAgent(getApp());
+  const customer = await registerAndVerify(customerAgent, { role: 'customer' });
+  await login(customerAgent, customer.email, customer.password);
+  const customerUser = await User.findOne({ email: customer.email });
+
+  const line = await CartItem.create({
+    userId: customerUser._id,
+    productId: product._id,
+    variantId: variant._id,
+    businessId: business._id,
+    quantity: 3,
+    variant: 'M',
+    shippingMethod: 'standard',
+  });
+  await Cart.create({
+    userId: customerUser._id,
+    businessId: business._id,
+    items: [line._id],
+    totalItems: 3,
+  });
+
+  const updateRes = await customerAgent
+    .put(`/api/cart/update/${line._id}`)
+    .send({ quantity: 1 });
+
+  assert.equal(updateRes.status, 200);
+  assert.equal(updateRes.body.cart.totalItems, 1);
+  assert.equal(updateRes.body.cart.items[0].quantity, 1);
+  assert.ok(updateRes.body.cart.pricing);
+  assert.equal(updateRes.body.cart.pricing.subtotalAmount, 25);
+});
+
+test('authenticated cart exposes vendor state for local delivery UI', async () => {
+  const vendorAgent = createAgent(getApp());
+  const vendor = await registerAndVerify(vendorAgent, { role: 'business_owner' });
+  const vendorUser = await User.findOne({ email: vendor.email });
+  const business = await seedApprovedBusiness(vendorUser, {
+    address: { city: 'Atlanta', state: 'GA', country: 'USA', zipCode: '30301' },
+    shippingSettings: {
+      method: 'flat_rate',
+      flatRate: { standard: 5, express: 10, local: 2 },
+    },
+  });
+  const product = await seedPublishedProduct(business, vendorUser);
+  const variant = await ProductVariant.create({
+    productId: product._id,
+    businessId: business._id,
+    ownerId: vendorUser._id,
+    attributes: { size: 'M' },
+    sku: `SKU-CART-LOCAL-${Date.now()}`,
+    price: 25,
+    stock: 10,
+    isPublished: true,
+  });
+
+  const customerAgent = createAgent(getApp());
+  const customer = await registerAndVerify(customerAgent, { role: 'customer' });
+  await login(customerAgent, customer.email, customer.password);
+  const customerUser = await User.findOne({ email: customer.email });
+
+  const line = await CartItem.create({
+    userId: customerUser._id,
+    productId: product._id,
+    variantId: variant._id,
+    businessId: business._id,
+    quantity: 1,
+    variant: 'M',
+    shippingMethod: 'local',
+  });
+  await Cart.create({
+    userId: customerUser._id,
+    businessId: business._id,
+    items: [line._id],
+    totalItems: 1,
+  });
+
+  const cartRes = await customerAgent.get('/api/cart').query({ deliverySpeed: 'local' });
+
+  assert.equal(cartRes.status, 200);
+  assert.equal(cartRes.body.cart.items[0].vendorState, 'GA');
+  assert.equal(cartRes.body.cart.items[0].state, 'GA');
+  assert.equal(cartRes.body.cart.items[0].shipping.local, 0);
+  assert.equal(cartRes.body.cart.pricing.business.vendorState, 'GA');
+  assert.deepEqual(cartRes.body.cart.pricing.availableDeliverySpeeds, ['standard', 'express', 'local']);
+  assert.equal(cartRes.body.cart.pricing.shipping.deliverySpeed, 'local');
+  assert.equal(cartRes.body.cart.pricing.shipping.amount, 2);
+});
+
+test('composite cart quantity update succeeds with mixed-case shippingMethod', async () => {
+  const vendorAgent = createAgent(getApp());
+  const vendor = await registerAndVerify(vendorAgent, { role: 'business_owner' });
+  const vendorUser = await User.findOne({ email: vendor.email });
+  const business = await seedApprovedBusiness(vendorUser, {
+    shippingSettings: { method: 'flat_rate', flatRate: { standard: 5 } },
+  });
+  const product = await seedPublishedProduct(business, vendorUser);
+  const variant = await ProductVariant.create({
+    productId: product._id,
+    businessId: business._id,
+    ownerId: vendorUser._id,
+    attributes: { size: 'M' },
+    sku: `SKU-CART-COMP-${Date.now()}`,
+    price: 25,
+    stock: 10,
+    isPublished: true,
+  });
+
+  const customerAgent = createAgent(getApp());
+  const customer = await registerAndVerify(customerAgent, { role: 'customer' });
+  await login(customerAgent, customer.email, customer.password);
+  const customerUser = await User.findOne({ email: customer.email });
+
+  const line = await CartItem.create({
+    userId: customerUser._id,
+    productId: product._id,
+    variantId: variant._id,
+    businessId: business._id,
+    quantity: 3,
+    variant: 'M',
+    shippingMethod: 'standard',
+  });
+  await Cart.create({
+    userId: customerUser._id,
+    businessId: business._id,
+    items: [line._id],
+    totalItems: 3,
+  });
+
+  const updateRes = await customerAgent
+    .put('/api/cart/update-quantity')
+    .send({
+      productId: product._id,
+      variantId: variant._id,
+      size: 'M',
+      quantity: 2,
+      shippingMethod: 'Standard',
+    });
+
+  assert.equal(updateRes.status, 200);
+  assert.equal(updateRes.body.cart.totalItems, 2);
+  assert.equal(updateRes.body.cart.items[0].quantity, 2);
+});
+
 test('order initiate rejects empty cart for customer', async () => {
   const agent = createAgent(getApp());
   const customer = await registerAndVerify(agent, { role: 'customer' });

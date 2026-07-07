@@ -200,7 +200,7 @@ exports.createService = async (req, res) => {
 
     const userId = req.user._id;
     const payload = normalizeServicePayload(req.body);
-    const { title, description, isPublished, normalizedServices, parentPrice, parentDuration } = payload;
+    const { title, description, isPublished, normalizedServices, parentPrice, parentDuration, features } = payload;
 
     const business = await Business.findOne({ _id: businessId, owner: userId });
     if (!business)
@@ -288,7 +288,7 @@ exports.createService = async (req, res) => {
       ownerId: userId,
       minorityType: business.minorityType,
       maxBookingsPerSlot: 1,
-      features: [],
+      features,
       amenities: [],
       videos: [],
       faq: []

@@ -225,3 +225,43 @@ test('saveDraft on rejected application still strips protected vendor fields', a
   assert.equal(onboarding.totalVerificationPoints, 0);
   assert.equal(onboarding.status, 'draft');
 });
+
+test('saveDraft strips admin review metadata fields from vendor payload', async () => {
+  const onboarding = buildOnboarding({
+    status: 'rejected',
+    rejectionReason: 'Missing required documents: EIN document.',
+    adminReviewNotes: 'Internal note',
+    requiredNextAction: 'Update your application and resubmit for review.',
+    reviewDecision: 'rejected',
+    reviewedBy: 'admin-user-id',
+  });
+  const controller = loadController(onboarding);
+  const res = mockResponse();
+
+  await controller.saveDraft(
+    {
+      user: { _id: userId },
+      body: {
+        businessName: 'Revised Name',
+        rejectionReason: 'vendor-forged reason',
+        adminReviewNotes: 'vendor-forged notes',
+        requiredNextAction: 'vendor-forged action',
+        reviewDecision: 'approved',
+        reviewedBy: userId,
+        reviewedAt: new Date(),
+        verifiedAt: new Date(),
+        rejectedAt: null,
+      },
+    },
+    res
+  );
+
+  assert.equal(res.body.success, true);
+  assert.equal(onboarding.businessName, 'Revised Name');
+  assert.equal(onboarding.rejectionReason, 'Missing required documents: EIN document.');
+  assert.equal(onboarding.adminReviewNotes, 'Internal note');
+  assert.equal(onboarding.requiredNextAction, 'Update your application and resubmit for review.');
+  assert.equal(onboarding.reviewDecision, 'rejected');
+  assert.equal(onboarding.reviewedBy, 'admin-user-id');
+  assert.equal(onboarding.status, 'draft');
+});

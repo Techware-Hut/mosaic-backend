@@ -1283,7 +1283,7 @@ exports.getProductById = async (req, res) => {
     })
       .populate({
         path: "businessId",
-        select: "businessName owner taxSettings"
+        select: "businessName owner taxSettings address"
       })
       .lean();
 
@@ -1375,6 +1375,8 @@ exports.getProductById = async (req, res) => {
           business: {
             businessId: product.businessId?._id,
             businessName: product.businessId?.businessName,
+            address: product.businessId?.address || null,
+            state: product.businessId?.address?.state || null,
           },
         },
         {

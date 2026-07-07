@@ -17,6 +17,7 @@ const {
     getPublicMarketplaceBusinessBlock,
     isPublicMarketplaceBusiness,
 } = require('../../lib/marketplace/businessEligibility');
+const { evaluateCouponDiscount } = require('../../utils/couponDiscount');
 
 const toNum = (value) => {
     if (value && typeof value === 'object' && value.$numberDecimal != null) {
@@ -35,6 +36,11 @@ const normalizeShipping = (shipping) => {
     };
 };
 
+const getBusinessState = (business) => {
+    const state = business?.address?.state || business?.state || null;
+    return state ? String(state) : null;
+};
+
 const getEffectiveShipping = (productDoc, variantDoc) => {
     const variantShipping = normalizeShipping(variantDoc?.shipping);
     const productShipping = normalizeShipping(productDoc?.shipping);
@@ -47,7 +53,11 @@ const getEffectiveShipping = (productDoc, variantDoc) => {
 };
 
 const resolveRequestedShippingMethod = (body) => {
-    return body?.shippingMethod || body?.shippingType || body?.shippingOption || body?.shipping?.method || body?.shipping?.type || null;
+    const raw = body?.shippingMethod || body?.shippingType || body?.shippingOption || body?.shipping?.method || body?.shipping?.type || null;
+    if (!raw) return null;
+    const requested = String(raw).trim().toLowerCase();
+    const validMethods = ['standard', 'overnight', 'local'];
+    return validMethods.includes(requested) ? requested : null;
 };
 
 const resolveRequestedDeliverySpeed = (source) => {
@@ -84,7 +94,7 @@ const resolveShippingSelection = (productDoc, variantDoc, requestedMethod) => {
     };
 };
 
-const buildCartPricing = async ({ cartDoc, items, deliverySpeed, businessDoc }) => {
+const buildCartPricing = async ({ cartDoc, items, deliverySpeed, businessDoc, couponCode }) => {
     const subtotalAmount = items.reduce(
         (sum, item) => sum + (Number(item.lineTotalAmount || 0)),
         0
@@ -104,9 +114,33 @@ const buildCartPricing = async ({ cartDoc, items, deliverySpeed, businessDoc }) 
 
     const business = businessDoc || (cartDoc?.businessId
         ? await Business.findById(cartDoc.businessId)
-            .select('businessName slug shippingSettings taxSettings owner')
+            .select('businessName slug shippingSettings taxSettings owner address')
             .lean()
         : null);
+
+    let discount = null;
+    let discountAmount = 0;
+    let discountedSubtotal = subtotalAmount;
+
+    if (couponCode && business?._id) {
+        const couponResult = await evaluateCouponDiscount({
+            couponCode,
+            businessId: business._id,
+            subtotalAmount,
+        });
+
+        if (!couponResult.ok) {
+            return { error: couponResult };
+        }
+
+        discountAmount = couponResult.discountAmount;
+        discountedSubtotal = couponResult.discountedSubtotal;
+        discount = {
+            couponCode: couponResult.couponCode,
+            discountAmount,
+            discountedSubtotal,
+        };
+    }
 
     let shipping = null;
     let shippingError = null;
@@ -117,7 +151,7 @@ const buildCartPricing = async ({ cartDoc, items, deliverySpeed, businessDoc }) 
                 business.shippingSettings,
                 {
                     deliverySpeed,
-                    subtotal: subtotalAmount,
+                    subtotal: discountedSubtotal,
                     totalQuantity,
                 }
             );
@@ -145,6 +179,8 @@ const buildCartPricing = async ({ cartDoc, items, deliverySpeed, businessDoc }) 
                 _id: business._id,
                 businessName: business.businessName,
                 slug: business.slug,
+                vendorState: getBusinessState(business),
+                state: getBusinessState(business),
             }
             : null,
         availableDeliverySpeeds: ['standard', 'express', 'local'],
@@ -154,9 +190,12 @@ const buildCartPricing = async ({ cartDoc, items, deliverySpeed, businessDoc }) 
         taxTotal,
         taxIncluded: true,
         totalQuantity,
+        discount,
+        discountAmount,
+        discountedSubtotal,
         shipping,
         shippingError,
-        totalAmount: subtotalAmount + shippingAmount,
+        totalAmount: discountedSubtotal + shippingAmount,
         currency: 'USD',
     };
 };
@@ -358,211 +397,244 @@ const addItemToCart = async (req, res) => {
 
 
 // Get Cart
+async function fetchEnrichedCart(userId, { deliverySpeed, couponCode } = {}) {
+    const cart = await Cart.findOne({ userId })
+        .populate({
+            path: 'items',
+            populate: [
+                { path: 'productId', select: 'title coverImage shipping taxCategory isPublished isDeleted', match: { isPublished: true, isDeleted: false } },
+                { path: 'variantId', select: 'attributes sku price salePrice stock color label sizes allowBackorder shipping isPublished isDeleted images', match: { isPublished: true, isDeleted: false } },
+            ],
+        });
+
+    if (!cart) {
+        return {
+            status: 200,
+            message: 'Cart retrieved successfully',
+            cart: null,
+        };
+    }
+
+    const cartBusinessIds = [...new Set(
+        [
+            cart.businessId,
+            ...(Array.isArray(cart.items) ? cart.items.map((item) => item.businessId) : []),
+        ]
+            .filter(Boolean)
+            .map(String)
+    )];
+
+    const businesses = cartBusinessIds.length
+        ? await Business.find({ _id: { $in: cartBusinessIds } })
+            .select('businessName slug shippingSettings taxSettings owner isApproved isActive address')
+            .lean()
+        : [];
+
+    const businessById = new Map(
+        businesses.map((business) => [String(business._id), business])
+    );
+    const businessDoc = cart.businessId
+        ? businessById.get(String(cart.businessId)) || null
+        : null;
+
+    const invalidItems = [];
+    const removedItems = [];
+
+    const cartItems = cart.items.map(cartItem => {
+        const variant = cartItem.variantId;
+        const product = cartItem.productId;
+
+        if (!product || !variant) {
+            invalidItems.push(cartItem._id);
+            removedItems.push({
+                cartItemId: cartItem._id,
+                productId: cartItem.productId?._id || cartItem.productId || null,
+                reason: 'unavailable_listing',
+            });
+            return null;
+        }
+
+        const itemBusiness = businessById.get(String(cartItem.businessId || cart.businessId));
+        if (!isPublicMarketplaceBusiness(itemBusiness)) {
+            invalidItems.push(cartItem._id);
+            removedItems.push({
+                cartItemId: cartItem._id,
+                productId: product._id,
+                businessId: cartItem.businessId,
+                reason: 'ineligible_vendor',
+                message: 'Vendor is not approved and active for the public marketplace.',
+            });
+            return null;
+        }
+
+        const selectedVariant = resolveVariantSelection(variant, cartItem.variant);
+        if (!selectedVariant) {
+            invalidItems.push(cartItem._id);
+            removedItems.push({
+                cartItemId: cartItem._id,
+                productId: product._id,
+                businessId: cartItem.businessId,
+                reason: 'unavailable_variant_selection',
+            });
+            return null;
+        }
+
+        const discountEnd = selectedVariant.discountEndDate ? new Date(selectedVariant.discountEndDate) : null;
+        const useSale = !!selectedVariant.salePrice && (!discountEnd || discountEnd.getTime() > Date.now());
+
+        const priceExclTax = toNum(selectedVariant.price);
+        const salePriceExclTax = toNum(selectedVariant.salePrice);
+        const taxCategory = getResolvedTaxCategory(product);
+        const taxRate = getTaxRateForCategory(businessDoc?.taxSettings, taxCategory);
+        const taxPricing = buildTaxAwareAmounts({
+            priceExclTax,
+            salePriceExclTax,
+            taxRate,
+        });
+        const selectedSizePrice = useSale
+            ? (taxPricing.salePriceInclTax ?? taxPricing.priceInclTax ?? 0)
+            : (taxPricing.priceInclTax ?? 0);
+        const selectedSizePriceExclTax = useSale
+            ? (taxPricing.salePriceExclTax ?? taxPricing.priceExclTax ?? 0)
+            : (taxPricing.priceExclTax ?? 0);
+        const lineAmounts = extractTaxFromInclusiveAmount({
+            inclusiveAmount: selectedSizePrice * Number(cartItem.quantity || 0),
+            taxRate,
+        });
+        const shipping = getEffectiveShipping(product, variant);
+        const vendorState = getBusinessState(itemBusiness);
+        const shippingMethod = ['standard', 'overnight', 'local'].includes(cartItem.shippingMethod)
+            ? cartItem.shippingMethod
+            : 'standard';
+        const shippingCharge = (() => {
+            const stored = cartItem.shippingCharge != null ? Number(cartItem.shippingCharge) : null;
+            if (stored !== null && stored > 0) return stored;
+            return Number(shipping[shippingMethod] || 0);
+        })();
+
+        return {
+            cartItemId: cartItem._id,
+            title: product.title,
+            productId: product._id,
+            variantId: variant._id,
+            businessId: cartItem.businessId,
+            quantity: cartItem.quantity,
+            size: selectedVariant.key,
+            color: variant.color || getVariantAttribute(variant, 'color'),
+            label: variant.label || selectedVariant.key,
+            stock: selectedVariant.stock,
+            sku: selectedVariant.sku,
+            salePrice: taxPricing.salePriceInclTax,
+            discountEndDate: selectedVariant.discountEndDate,
+            price: taxPricing.priceInclTax,
+            priceExclTax: taxPricing.priceExclTax,
+            priceInclTax: taxPricing.priceInclTax,
+            salePriceExclTax: taxPricing.salePriceExclTax,
+            salePriceInclTax: taxPricing.salePriceInclTax,
+            selectedSizePrice,
+            selectedSizePriceExclTax,
+            selectedSizePriceInclTax: selectedSizePrice,
+            taxIncluded: true,
+            taxRate,
+            taxCategory,
+            lineBaseAmount: lineAmounts.amountExclTax,
+            lineTaxAmount: lineAmounts.taxAmount,
+            lineTotalAmount: lineAmounts.amountInclTax,
+            shippingMethod,
+            shippingCharge,
+            shipping,
+            vendorState,
+            state: vendorState,
+            imageUrl: Array.isArray(variant.images) ? variant.images[0] : null,
+            allowBackorder: selectedVariant.allowBackorder,
+        };
+    });
+
+    const items = cartItems.filter(item => item !== null);
+    const totalItems = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+
+    if (invalidItems.length > 0) {
+        await CartItem.deleteMany({ _id: { $in: invalidItems } });
+        await Cart.updateOne(
+            { _id: cart._id },
+            {
+                $pull: { items: { $in: invalidItems } },
+                $set: { totalItems },
+            }
+        );
+    }
+
+    const pricing = await buildCartPricing({
+        cartDoc: cart,
+        items,
+        deliverySpeed,
+        businessDoc,
+        couponCode,
+    });
+
+    if (pricing.error) {
+        return {
+            status: 400,
+            message: pricing.error.message,
+        };
+    }
+
+    const removedForIneligibleVendor = removedItems.some(
+        (item) => item.reason === 'ineligible_vendor'
+    );
+
+    return {
+        status: 200,
+        message: invalidItems.length > 0
+            ? (removedForIneligibleVendor
+                ? 'Some items were removed from the cart because their vendor is no longer approved and active.'
+                : 'Some items were removed from the cart as they were unpublished or deleted.')
+            : 'Cart retrieved successfully',
+        cart: {
+            ...cart.toObject(),
+            items,
+            totalItems,
+            removedItems,
+            pricing,
+        },
+    };
+}
+
 const getCart = async (req, res) => {
     try {
         const deliverySpeed = resolveRequestedDeliverySpeed({
             ...req.query,
             shipping: req.query,
         });
+        const couponCode = req.query.couponCode || null;
 
-        // Fetch the cart for the user and populate CartItems with productId and variantId
-        const cart = await Cart.findOne({ userId: req.user._id })
-            .populate({
-                path: 'items',
-                populate: [
-                    { path: 'productId', select: 'title coverImage shipping taxCategory isPublished isDeleted', match: { isPublished: true, isDeleted: false } },  // Populate product details (name, coverImage) and ensure it's published and not deleted
-                    { path: 'variantId', select: 'attributes sku price salePrice stock color label sizes allowBackorder shipping isPublished isDeleted images', match: { isPublished: true, isDeleted: false } },  // Populate variant details and ensure it's published and not deleted
-                ],
-            });
+        const result = await fetchEnrichedCart(req.user._id, { deliverySpeed, couponCode });
 
-        if (!cart) {
-            return res.status(200).json({
-                message: 'Cart retrieved successfully',
-                cart: null,
-            });
-        }
-
-        const cartBusinessIds = [...new Set(
-            [
-                cart.businessId,
-                ...(Array.isArray(cart.items) ? cart.items.map((item) => item.businessId) : []),
-            ]
-                .filter(Boolean)
-                .map(String)
-        )];
-
-        const businesses = cartBusinessIds.length
-            ? await Business.find({ _id: { $in: cartBusinessIds } })
-                .select('businessName slug shippingSettings taxSettings owner isApproved isActive')
-                .lean()
-            : [];
-
-        const businessById = new Map(
-            businesses.map((business) => [String(business._id), business])
-        );
-        const businessDoc = cart.businessId
-            ? businessById.get(String(cart.businessId)) || null
-            : null;
-
-        const invalidItems = [];
-        const removedItems = [];
-
-        // Map the cart items to include only the necessary data for the frontend
-        const cartItems = cart.items.map(cartItem => {
-            const variant = cartItem.variantId;  // Already populated
-            const product = cartItem.productId;  // Already populated
-
-            // Check if the product and variant are valid (published and not deleted)
-            if (!product || !variant) {
-                // If the product or variant is invalid, remove the cart item
-                invalidItems.push(cartItem._id);  // Track the invalid item
-                removedItems.push({
-                    cartItemId: cartItem._id,
-                    productId: cartItem.productId?._id || cartItem.productId || null,
-                    reason: 'unavailable_listing',
-                });
-                return null; // Return null to exclude this item from the response
-            }
-
-            const itemBusiness = businessById.get(String(cartItem.businessId || cart.businessId));
-            if (!isPublicMarketplaceBusiness(itemBusiness)) {
-                invalidItems.push(cartItem._id);
-                removedItems.push({
-                    cartItemId: cartItem._id,
-                    productId: product._id,
-                    businessId: cartItem.businessId,
-                    reason: 'ineligible_vendor',
-                    message: 'Vendor is not approved and active for the public marketplace.',
-                });
-                return null;
-            }
-
-            const selectedVariant = resolveVariantSelection(variant, cartItem.variant);
-            if (!selectedVariant) {
-                // If size not found in the variant, remove the cart item
-                invalidItems.push(cartItem._id);
-                removedItems.push({
-                    cartItemId: cartItem._id,
-                    productId: product._id,
-                    businessId: cartItem.businessId,
-                    reason: 'unavailable_variant_selection',
-                });
-                return null; // Exclude this item from the response
-            }
-
-            const discountEnd = selectedVariant.discountEndDate ? new Date(selectedVariant.discountEndDate) : null;
-            const useSale = !!selectedVariant.salePrice && (!discountEnd || discountEnd.getTime() > Date.now());
-
-            const priceExclTax = toNum(selectedVariant.price);
-            const salePriceExclTax = toNum(selectedVariant.salePrice);
-            const taxCategory = getResolvedTaxCategory(product);
-            const taxRate = getTaxRateForCategory(businessDoc?.taxSettings, taxCategory);
-            const taxPricing = buildTaxAwareAmounts({
-                priceExclTax,
-                salePriceExclTax,
-                taxRate,
-            });
-            const selectedSizePrice = useSale
-                ? (taxPricing.salePriceInclTax ?? taxPricing.priceInclTax ?? 0)
-                : (taxPricing.priceInclTax ?? 0);
-            const selectedSizePriceExclTax = useSale
-                ? (taxPricing.salePriceExclTax ?? taxPricing.priceExclTax ?? 0)
-                : (taxPricing.priceExclTax ?? 0);
-            const lineAmounts = extractTaxFromInclusiveAmount({
-                inclusiveAmount: selectedSizePrice * Number(cartItem.quantity || 0),
-                taxRate,
-            });
-            const shipping = getEffectiveShipping(product, variant);
-            const shippingMethod = ['standard', 'overnight', 'local'].includes(cartItem.shippingMethod)
-                ? cartItem.shippingMethod
-                : 'standard';
-            const shippingCharge = (() => {
-                const stored = cartItem.shippingCharge != null ? Number(cartItem.shippingCharge) : null;
-                // Only trust a stored value that is genuinely > 0.
-                // A value of 0 usually means the item was synced from a guest cart without a charge.
-                if (stored !== null && stored > 0) return stored;
-                return Number(shipping[shippingMethod] || 0);
-            })();
-
-
-            // Return only necessary details (price is calculated on the frontend)
-            return {
-                title: product.title,
-                productId: product._id,
-                variantId: variant._id,
-                businessId: cartItem.businessId,
-                quantity: cartItem.quantity,
-                size: selectedVariant.key,
-                color: variant.color || getVariantAttribute(variant, 'color'),
-                label: variant.label || selectedVariant.key,
-                stock: selectedVariant.stock,
-                sku: selectedVariant.sku,
-                salePrice: taxPricing.salePriceInclTax,
-                discountEndDate: selectedVariant.discountEndDate,
-                price: taxPricing.priceInclTax,
-                priceExclTax: taxPricing.priceExclTax,
-                priceInclTax: taxPricing.priceInclTax,
-                salePriceExclTax: taxPricing.salePriceExclTax,
-                salePriceInclTax: taxPricing.salePriceInclTax,
-                selectedSizePrice,  // Effective customer-facing tax-inclusive price
-                selectedSizePriceExclTax,
-                selectedSizePriceInclTax: selectedSizePrice,
-                taxIncluded: true,
-                taxRate,
-                taxCategory,
-                lineBaseAmount: lineAmounts.amountExclTax,
-                lineTaxAmount: lineAmounts.taxAmount,
-                lineTotalAmount: lineAmounts.amountInclTax,
-                shippingMethod,
-                shippingCharge,
-                imageUrl: Array.isArray(variant.images) ? variant.images[0] : null,
-                allowBackorder: selectedVariant.allowBackorder,
-            };
-        });
-
-        const items = cartItems.filter(item => item !== null);
-        const totalItems = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
-
-        // Remove invalid items from the cart
-        if (invalidItems.length > 0) {
-            await CartItem.deleteMany({ _id: { $in: invalidItems } });  // Remove invalid items
-            await Cart.updateOne(
-                { _id: cart._id },
-                {
-                    $pull: { items: { $in: invalidItems } },
-                    $set: { totalItems },
-                }
-            );
-        }
-
-        const pricing = await buildCartPricing({
-            cartDoc: cart,
-            items,
-            deliverySpeed,
-            businessDoc,
-        });
-
-        const removedForIneligibleVendor = removedItems.some(
-            (item) => item.reason === 'ineligible_vendor'
-        );
-
-        return res.status(200).json({
-            message: invalidItems.length > 0
-                ? (removedForIneligibleVendor
-                    ? 'Some items were removed from the cart because their vendor is no longer approved and active.'
-                    : 'Some items were removed from the cart as they were unpublished or deleted.')
-                : 'Cart retrieved successfully',
-            cart: {
-                ...cart.toObject(),
-                items,  // Filter out the null values (removed items)
-                totalItems,
-                removedItems,
-                pricing,
-            },
+        return res.status(result.status).json({
+            message: result.message,
+            cart: result.cart,
         });
     } catch (err) {
         return res.status(500).json({ message: 'Error fetching cart', error: err.message });
     }
+};
+
+const buildCartUpdateResponse = async (req, res, successMessage) => {
+    const deliverySpeed = resolveRequestedDeliverySpeed({
+        ...req.query,
+        shipping: req.query,
+    });
+    const couponCode = req.query.couponCode || null;
+    const result = await fetchEnrichedCart(req.user._id, { deliverySpeed, couponCode });
+
+    if (result.status !== 200) {
+        return res.status(result.status).json({ message: result.message });
+    }
+
+    return res.status(200).json({
+        message: successMessage,
+        cart: result.cart,
+    });
 };
 
 
@@ -620,7 +692,7 @@ const updateCartItem = async (req, res) => {
         cart.totalItems = totalQty;
         await cart.save();
 
-        return res.status(200).json({ message: 'Cart item updated successfully', cart });
+        return buildCartUpdateResponse(req, res, 'Cart item updated successfully');
     } catch (err) {
         console.error(err);
         return res.status(500).json({ message: 'Error updating cart item', error: err.message });
@@ -720,7 +792,7 @@ const updateCartItemByComposite = async (req, res) => {
         cart.totalItems = quantities.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
         await cart.save();
 
-        return res.status(200).json({ message: 'Cart item updated successfully', cart });
+        return buildCartUpdateResponse(req, res, 'Cart item updated successfully');
     } catch (err) {
         console.error(err);
         return res.status(500).json({ message: 'Error updating cart item', error: err.message });
