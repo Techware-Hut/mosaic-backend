@@ -412,3 +412,98 @@ test('updateService returns clear validation when publishing without child servi
   assert.equal(res.body.message, 'Add at least one service offering before publishing.');
   assert.equal(res.body.fieldErrors.services, 'Add at least one service offering before publishing.');
 });
+
+test('updateService persists normalized listing features', async () => {
+  const draft = buildServiceDoc({
+    isPublished: false,
+    features: ['Old feature'],
+  });
+  const { controller } = loadServiceController({
+    existingService: draft,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: {
+        features: [' Mobile appointments ', '', 'Consultation included'],
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(draft.features, ['Mobile appointments', 'Consultation included']);
+  assert.deepEqual(res.body.data.service.features, ['Mobile appointments', 'Consultation included']);
+});
+
+test('updateService leaves features unchanged when omitted', async () => {
+  const draft = buildServiceDoc({
+    isPublished: false,
+    features: ['Existing feature'],
+  });
+  const { controller } = loadServiceController({
+    existingService: draft,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: { title: 'Updated title' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(draft.features, ['Existing feature']);
+  assert.deepEqual(res.body.data.service.features, ['Existing feature']);
+});
+
+test('createParentService persists normalized listing features', async () => {
+  const { controller, savedDocs } = loadServiceController({ existingService: null });
+  const res = mockResponse();
+
+  await controller.createParentService(
+    {
+      user: { _id: ownerId },
+      body: {
+        businessId,
+        categoryId: '507f1f77bcf86cd799439014',
+        subcategoryId: '507f1f77bcf86cd799439015',
+        title: 'Draft Service',
+        features: [' Mobile appointments ', '', 'Consultation included'],
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(savedDocs[0].features, ['Mobile appointments', 'Consultation included']);
+  assert.deepEqual(res.body.service.features, ['Mobile appointments', 'Consultation included']);
+});
+
+test('createParentService defaults features to empty array when omitted', async () => {
+  const { controller, savedDocs } = loadServiceController({ existingService: null });
+  const res = mockResponse();
+
+  await controller.createParentService(
+    {
+      user: { _id: ownerId },
+      body: {
+        businessId,
+        categoryId: '507f1f77bcf86cd799439014',
+        subcategoryId: '507f1f77bcf86cd799439015',
+        title: 'Draft Service',
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(savedDocs[0].features, []);
+  assert.deepEqual(res.body.service.features, []);
+});
