@@ -12,8 +12,12 @@ This handoff gives the manual QA team a focused checklist for proving the July 6
 
 | Repo | Branch | SHA |
 | --- | --- | --- |
-| Techware-Hut/mosaic-backend | `staging` | `65b89d5dbe22c10adc48628018b3ee7b9b5a7bee` |
-| Digital-Builders-757/mosaic-biz-frontend-launch | `develop` | `8f000a158cd2ab8ab7674846443fcf937d0dcbfa` |
+| Techware-Hut/mosaic-backend | `main` (production) | `ad9ddd14c85ac851f9001e5f9952c9b594159d9c` |
+| Digital-Builders-757/mosaic-biz-frontend-launch | `main` (production) | `b3a86cb43a8562e30d535ab5f1a58b6b97dca2a7` |
+
+Pre-promotion candidates: backend `b838239b`, frontend `8163a3b3`.
+
+**Environment:** Controlled production UAT — see [JULY_6_CONTROLLED_PRODUCTION_UAT_PLAN.md](../release/JULY_6_CONTROLLED_PRODUCTION_UAT_PLAN.md).
 
 ## What Has Been Technically Fixed
 
@@ -29,7 +33,7 @@ This handoff gives the manual QA team a focused checklist for proving the July 6
 - Cart and checkout totals rely on backend pricing/order initiation.
 - PDF and JPEG upload paths are covered by automated tests.
 - Admin application status filters and explicit finalize decisions are wired.
-- Restaurant/service Connect messaging is optionality-aware while product payout requirements remain protected.
+- Restaurant/service Connect messaging is optionality-aware for **onboarding**; **checkout still requires vendor Connect** for paid orders (item 15 — confirm policy with Bryan).
 - Frontend PR #334 fixes the July 6 cart/checkout focused ESLint regression.
 
 ## What Still Needs Manual Tester Proof
@@ -53,8 +57,8 @@ No checklist item is marked **Passed Smoke** yet. Manual testers must capture sa
 | 11 | Tracking email | Mark an order shipped with carrier/tracking number/tracking URL. | Backend stores tracking data, customer order page shows tracking, provider/log evidence shows sent/skipped/failed tracking email metadata. | Evidence Needed |
 | 12 | PDF upload | Upload safe JPEG vendor document and safe PDF vendor document. | Both succeed, or exact hosted S3/CORS blocker is documented without signed URLs. | Evidence Needed |
 | 13 | Admin filters/profile review | In admin, filter applications by submitted/pending, rejected/disapproved, approved/verified/finalized if test data exists. Open detail. | Status filters work; logo, bio, additional info, documents, and badge-review fields are visible enough for review. | Evidence Needed |
-| 14 | Approve/reject/request-changes/finalize | Submit vendor application, reject/request changes with reason and next action, verify vendor view, resubmit if supported, then approve/finalize. | Admin and vendor both show clear next steps and final state. | Evidence Needed |
-| 15 | Restaurant/service Connect messaging | Test restaurant/food and service vendor final review. | Connect is not presented as compulsory for directory/offline listing unless policy requires it; online-payout messaging remains safe. | Evidence Needed |
+| 14 | Approve/reject/request-changes/finalize | Submit vendor application, reject with reason and required next action (models "request changes"), verify vendor view, resubmit if supported, then approve/finalize. | Admin and vendor both show clear next steps and final state. | Evidence Needed |
+| 15 | Restaurant/service Connect messaging | Test restaurant/food and service vendor final review; attempt paid checkout if applicable. | Onboarding does not force payout setup; **paid checkout may still require Connect** — document behavior. | Evidence Needed |
 
 ## Required Screenshots Or Recordings
 
