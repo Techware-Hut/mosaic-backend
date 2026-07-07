@@ -7,6 +7,19 @@
 - Frontend counterpart: `mosaic-biz-frontend-launch` `main` tip `b3a86cb4` (PR #335, `develop` -> `main`); develop candidate `8163a3b3` is an ancestor of `main`.
 - Scope: documentation-to-implementation conformance for the 15 July 6 QA items. **Docs-only pass. No runtime code changed, no merges, no deploys.**
 
+## Issue control board
+
+Follow-up work from this audit is tracked on the GitHub issue control board — parent epic [#211](https://github.com/Techware-Hut/mosaic-backend/issues/211) (frontend epic: [mosaic-biz-frontend-launch#337](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/337)). Start at [`docs/AGENT_CONTEXT_INDEX.md`](../AGENT_CONTEXT_INDEX.md).
+
+Checklist-item evidence and decision issues:
+
+| Finding | Tracking issue |
+|---|---|
+| Item 11 — hosted shipment tracking email proof | [#216](https://github.com/Techware-Hut/mosaic-backend/issues/216) |
+| Item 12 — hosted PDF/JPEG vendor document upload proof | [#217](https://github.com/Techware-Hut/mosaic-backend/issues/217) |
+| Items 5/15 — service/restaurant Stripe Connect policy wording (Pending Client Input) | [#218](https://github.com/Techware-Hut/mosaic-backend/issues/218) |
+| Item 7 — local delivery eligibility rule (Pending Client Input) | [#219](https://github.com/Techware-Hut/mosaic-backend/issues/219) |
+
 ## Status vocabulary
 
 Only these statuses are used: `Implemented / Ready for QA`, `Evidence Needed`, `Documentation Mismatch`, `Code Mismatch`, `Regression Risk`, `Pending Client Input`, `Deferred / Future Phase`, `Blocked`. Nothing is marked Accepted; no written client/UAT approval exists as of this audit.
@@ -134,17 +147,17 @@ Route invariants (featured products, webhook mount order) are additionally cover
 
 ## Code mismatches found (follow-up work orders — NOT fixed in this pass)
 
-| ID | Repo | Finding | Suggested owner |
-|---|---|---|---|
-| FW-1 | frontend | Legacy product edit route `app/(partner)/partners/[businessid]/inventory/edit/[id]/EditProduct.tsx` manages cover image only while `EditProductModal` handles the full gallery; both are reachable. Likely source of QA item 3. Consolidate or add gallery support. | frontend |
-| FW-2 | backend | Cart contract does not emit `localDeliveryEligible`; either add the computed field to `GET /api/cart` items or keep the doc-corrected `vendorState`-only contract permanently. | backend + business decision |
-| FW-3 | frontend | Buy-now checkout (`checkout/buy-now/page.tsx`) computes subtotal/shipping locally and applies coupons via `POST /api/discounts/apply` instead of the backend-authoritative cart pricing path; order initiate still protects final totals, but displayed totals can drift. | frontend |
-| FW-4 | frontend | `/partners/payout-setup` shows unconditional "Connect your Stripe account to receive payouts." copy when visited directly by service/food vendors, contradicting the optional-Connect policy messaging. | frontend + business decision |
-| FW-5 | frontend | Pre-existing lint errors (6 react-hooks errors) in `app/(home)/product/[id]/page.tsx`; unrelated to July 6 fixes; not a blocker for this docs audit. | frontend |
-| FW-6 | backend | Local delivery same-state rule is enforced client-side only; `PUT /api/cart` / order initiate will price `deliverySpeed=local` for any state if requested directly. Decide whether server-side gating is required. | backend + business decision |
-| FW-7 | backend | `PUT /api/service/:id` assigns `features` raw from the request body without the create-path normalization (`normalizeStringList`); harmless for the FE client but inconsistent. | backend |
-| FW-8 | both | `docs/README.md` (both repos) does not index the July 6 doc set; July 6 docs are orphaned from navigation. | docs |
-| FW-9 | both | Onboarding service-create path drops features: `POST /api/service/parent` hardcodes `features: []` (`serviceController.js` L154) and the frontend onboarding flow (`app/(home)/partners/add-service/hooks/useServiceForm.ts`) never collects/sends features. The inventory create path (`POST /api/service`) and the edit path both persist features correctly. | both |
+| ID | Repo | Finding | Suggested owner | Tracking issue |
+|---|---|---|---|---|
+| FW-1 | frontend | Legacy product edit route `app/(partner)/partners/[businessid]/inventory/edit/[id]/EditProduct.tsx` manages cover image only while `EditProductModal` handles the full gallery; both are reachable. Likely source of QA item 3. Consolidate or add gallery support. | frontend | Frontend epic [#337](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/337) |
+| FW-2 | backend | Cart contract does not emit `localDeliveryEligible`; either add the computed field to `GET /api/cart` items or keep the doc-corrected `vendorState`-only contract permanently. | backend + business decision | [#212](https://github.com/Techware-Hut/mosaic-backend/issues/212) |
+| FW-3 | frontend | Buy-now checkout (`checkout/buy-now/page.tsx`) computes subtotal/shipping locally and applies coupons via `POST /api/discounts/apply` instead of the backend-authoritative cart pricing path; order initiate still protects final totals, but displayed totals can drift. | frontend | Frontend epic [#337](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/337) |
+| FW-4 | frontend | `/partners/payout-setup` shows unconditional "Connect your Stripe account to receive payouts." copy when visited directly by service/food vendors, contradicting the optional-Connect policy messaging. | frontend + business decision | Frontend epic [#337](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/337) |
+| FW-5 | frontend | Pre-existing lint errors (6 react-hooks errors) in `app/(home)/product/[id]/page.tsx`; unrelated to July 6 fixes; not a blocker for this docs audit. | frontend | Frontend epic [#337](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/337) |
+| FW-6 | backend | Local delivery same-state rule is enforced client-side only; `PUT /api/cart` / order initiate will price `deliverySpeed=local` for any state if requested directly. Decide whether server-side gating is required. | backend + business decision | [#213](https://github.com/Techware-Hut/mosaic-backend/issues/213) (rule decision: [#219](https://github.com/Techware-Hut/mosaic-backend/issues/219)) |
+| FW-7 | backend | `PUT /api/service/:id` assigns `features` raw from the request body without the create-path normalization (`normalizeStringList`); harmless for the FE client but inconsistent. | backend | [#214](https://github.com/Techware-Hut/mosaic-backend/issues/214) |
+| FW-8 | both | `docs/README.md` (both repos) does not index the July 6 doc set; July 6 docs are orphaned from navigation. | docs | [#220](https://github.com/Techware-Hut/mosaic-backend/issues/220) |
+| FW-9 | both | Onboarding service-create path drops features: `POST /api/service/parent` hardcodes `features: []` (`serviceController.js` L154) and the frontend onboarding flow (`app/(home)/partners/add-service/hooks/useServiceForm.ts`) never collects/sends features. The inventory create path (`POST /api/service`) and the edit path both persist features correctly. | both | [#215](https://github.com/Techware-Hut/mosaic-backend/issues/215) |
 
 ## Phase 10 — Verification results (backend `main` `ad9ddd1`)
 

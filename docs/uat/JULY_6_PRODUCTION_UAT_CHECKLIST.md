@@ -6,6 +6,8 @@ Audited production SHAs: backend `ad9ddd14`, frontend `b3a86cb4`
 
 **This is not final launch approval.** Do not mark any item Accepted without written client/UAT approval from Bryan.
 
+Issue control board: parent epic [#211](https://github.com/Techware-Hut/mosaic-backend/issues/211) (see [`docs/AGENT_CONTEXT_INDEX.md`](../AGENT_CONTEXT_INDEX.md) for the full issue map).
+
 ---
 
 ## Before You Start
@@ -23,23 +25,23 @@ See also: [`JULY_6_CONTROLLED_PRODUCTION_UAT_PLAN.md`](../release/JULY_6_CONTROL
 
 ## Checklist
 
-| # | Area | Steps | Expected | Status | Screenshot |
-| --- | --- | --- | --- | --- | --- |
-| 1 | Image upload limit | Open vendor upload UI for tier allowing 6 images; attempt max selection | Correct limit message; no stale "3 only" copy | Evidence Needed | Upload UI |
-| 2 | Service offering count | Add/verify 3 offerings; check dashboard + public profile | All offerings/counts visible | Evidence Needed | Dashboard + public |
-| 3 | Edit image gallery | Edit listing with multiple images; save; reopen | All images preserved | Evidence Needed | Before/after edit |
-| 4 | Service features | Create/edit features; save; reopen | Features persist (test both create paths if possible) | Evidence Needed | Feature form + reopen |
-| 5 | Service/food payout messaging | Open final review as service and food vendor | Payout not forced for onboarding; messaging accurate | Evidence Needed | Final review |
-| 6 | Product description | Open product with HTML-like description | No raw tags; no unsafe HTML | Evidence Needed | Product detail |
-| 7 | Local shipping | Same-state and different-state cart if data exists | Local only when eligible | Evidence Needed | Cart shipping chips |
-| 8 | Cart quantity decrease | Increase then decrease qty in cart | Qty and totals update | Evidence Needed | Cart totals |
-| 9 | Coupon minimum | Apply below-minimum coupon; then valid coupon | Backend rejection below min; discount above min | Evidence Needed | Coupon messages |
-| 10 | Cart vs checkout total | Compare cart, checkout, order initiate | Totals match or explained recalculation | Evidence Needed | Cart + checkout |
-| 11 | Tracking email | Ship order with tracking URL; check customer view | Tracking visible; safe provider/log shows sent/skipped | Evidence Needed | Order + log summary |
-| 12 | PDF/JPEG upload | Upload JPEG and PDF vendor documents | Both succeed or document exact blocker (no signed URLs) | Evidence Needed | Upload result |
-| 13 | Admin filters/profile | Filter by status; open detail | Filters work; logo, bio, docs, badge visible | Evidence Needed | Admin list + detail |
-| 14 | Approve/reject/finalize | Reject with reason + next action; vendor view; resubmit; approve | Clear next steps both sides | Evidence Needed | Admin + vendor screens |
-| 15 | Restaurant/service Connect | Final review + attempt paid checkout for service/food if applicable | Messaging not overpromising; note checkout Connect requirement | Evidence Needed | Final review + checkout |
+| # | Area | Steps | Expected | Status | Screenshot | Tracking issue |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | Image upload limit | Open vendor upload UI for tier allowing 6 images; attempt max selection | Correct limit message; no stale "3 only" copy | Evidence Needed | Upload UI | — |
+| 2 | Service offering count | Add/verify 3 offerings; check dashboard + public profile | All offerings/counts visible | Evidence Needed | Dashboard + public | — |
+| 3 | Edit image gallery | Edit listing with multiple images; save; reopen | All images preserved | Evidence Needed | Before/after edit | Frontend epic [#337](https://github.com/Digital-Builders-757/mosaic-biz-frontend-launch/issues/337) (FW-1) |
+| 4 | Service features | Create/edit features; save; reopen | Features persist (test both create paths if possible) | Evidence Needed | Feature form + reopen | [#214](https://github.com/Techware-Hut/mosaic-backend/issues/214), [#215](https://github.com/Techware-Hut/mosaic-backend/issues/215) |
+| 5 | Service/food payout messaging | Open final review as service and food vendor | Payout not forced for onboarding; messaging accurate | Evidence Needed | Final review | [#218](https://github.com/Techware-Hut/mosaic-backend/issues/218) |
+| 6 | Product description | Open product with HTML-like description | No raw tags; no unsafe HTML | Evidence Needed | Product detail | — |
+| 7 | Local shipping | Same-state and different-state cart if data exists | Local only when eligible | Evidence Needed | Cart shipping chips | [#212](https://github.com/Techware-Hut/mosaic-backend/issues/212), [#213](https://github.com/Techware-Hut/mosaic-backend/issues/213), [#219](https://github.com/Techware-Hut/mosaic-backend/issues/219) |
+| 8 | Cart quantity decrease | Increase then decrease qty in cart | Qty and totals update | Evidence Needed | Cart totals | — |
+| 9 | Coupon minimum | Apply below-minimum coupon; then valid coupon | Backend rejection below min; discount above min | Evidence Needed | Coupon messages | — |
+| 10 | Cart vs checkout total | Compare cart, checkout, order initiate | Totals match or explained recalculation | Evidence Needed | Cart + checkout | — |
+| 11 | Tracking email | Ship order with tracking URL; check customer view | Tracking visible; safe provider/log shows sent/skipped | Evidence Needed | Order + log summary | [#216](https://github.com/Techware-Hut/mosaic-backend/issues/216) |
+| 12 | PDF/JPEG upload | Upload JPEG and PDF vendor documents | Both succeed or document exact blocker (no signed URLs) | Evidence Needed | Upload result | [#217](https://github.com/Techware-Hut/mosaic-backend/issues/217) |
+| 13 | Admin filters/profile | Filter by status; open detail | Filters work; logo, bio, docs, badge visible | Evidence Needed | Admin list + detail | — |
+| 14 | Approve/reject/finalize | Reject with reason + next action; vendor view; resubmit; approve | Clear next steps both sides | Evidence Needed | Admin + vendor screens | — |
+| 15 | Restaurant/service Connect | Final review + attempt paid checkout for service/food if applicable | Messaging not overpromising; note checkout Connect requirement | Evidence Needed | Final review + checkout | [#218](https://github.com/Techware-Hut/mosaic-backend/issues/218) |
 
 ---
 
