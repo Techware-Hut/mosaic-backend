@@ -1,5 +1,7 @@
 # Backend Launch Flow Map - July 6 UAT
 
+> **Superseded in part (2026-07-07):** the "missing or risky pieces" listed below were addressed by July 6 PRs #202–#206 and promoted to `main` (`ad9ddd14`). Current status per item: [`docs/audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md`](../audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md).
+
 Date: 2026-07-06
 Repo: Techware-Hut/mosaic-backend
 Branch: docs/july-6-architecture-gap-audit

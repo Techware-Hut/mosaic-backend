@@ -1,5 +1,7 @@
 # July 6 Backend Regression Checklist
 
+> **Conformance audit update (2026-07-07):** test counts below are stale; at production `main` (`ad9ddd14`) the suites pass 529 unit / 74 integration / 20 contract. Current tester steps: [`docs/uat/JULY_6_PRODUCTION_UAT_CHECKLIST.md`](JULY_6_PRODUCTION_UAT_CHECKLIST.md).
+
 Date: 2026-07-06
 Repo: Techware-Hut/mosaic-backend
 Branch: docs/july-6-architecture-gap-audit

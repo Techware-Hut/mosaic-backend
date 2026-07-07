@@ -1,17 +1,21 @@
 # July 6 Release Readiness Summary
 
-Date: July 6, 2026
+Date: July 7, 2026 (conformance audit update)
 
-Recommendation: **Ready for staging UAT, not ready for production until manual UAT evidence is attached.**
+Recommendation: **Controlled production UAT in progress — not final launch approval.**
+
+## Production Promotion Update (2026-07-07)
+
+Backend PR #209 merged `staging` → `main` (`ad9ddd14`) and frontend PR #335 merged `develop` → `main` (`b3a86cb4`) **before** manual UAT evidence and written Bryan approval were attached. Treat all checklist items as **Evidence Needed** until QA proof is recorded.
 
 ## Current Technical State
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Backend base | Fixed / Ready for Review | `staging` at `65b89d5dbe22c10adc48628018b3ee7b9b5a7bee` |
-| Frontend base | Fixed / Ready for Review | `develop` at `8f000a158cd2ab8ab7674846443fcf937d0dcbfa` |
-| Frontend lint regression | Fixed / Ready for Review | Frontend PR #334 fixes the focused cart/checkout ESLint regression. |
-| Integrated manual UAT | Evidence Needed | No safe-account screenshots/recordings attached yet. |
+| Backend production | Implemented / Ready for QA | `main` at `ad9ddd14c85ac851f9001e5f9952c9b594159d9c` |
+| Frontend production | Implemented / Ready for QA | `main` at `b3a86cb43a8562e30d535ab5f1a58b6b97dca2a7` |
+| Frontend lint regression | Implemented / Ready for QA | Focused July 6 ESLint: 0 errors |
+| Integrated manual UAT | Evidence Needed | No safe-account screenshots attached |
 
 ## Automated Tests Passed
 
@@ -32,15 +36,15 @@ Frontend:
 
 | Command | Status | Notes |
 | --- | --- | --- |
-| Focused July 6 ESLint | Fixed / Ready for Review | 0 errors after frontend PR #334. |
+| Focused July 6 ESLint | Implemented / Ready for QA | 0 errors after frontend PR #334. |
 | Repo-wide `npm run lint` | Regression Found | Existing unrelated baseline still fails with 238 errors and 205 warnings. Release owners must decide whether this unrelated debt blocks production. |
 
 ## Open PRs
 
 | PR | Repo | Purpose | Status |
 | --- | --- | --- | --- |
-| #334 | Frontend | Fix July 6 cart/checkout ESLint regression and update UAT docs | Fixed / Ready for Review |
-| #207 | Backend | Add integrated UAT verification docs and align API contract matrix | Fixed / Ready for Review |
+| #334 | Frontend | Fix July 6 cart/checkout ESLint regression and update UAT docs | Implemented / Ready for QA |
+| #207 | Backend | Add integrated UAT verification docs and align API contract matrix | Implemented / Ready for QA |
 
 ## Manual Evidence Still Needed
 
@@ -77,13 +81,12 @@ Frontend:
 
 ## Production Promotion Status
 
-Production promotion is **Blocked** until:
+Production code is **live on `main`** (PR #209 backend, PR #335 frontend) as of 2026-07-07. Launch sign-off remains **Blocked** until:
 
-- Manual UAT evidence is attached for the July 6 checklist.
-- Any **Regression Found** item has a fix PR and passing verification.
-- Tracking email behavior is proven with safe provider/log evidence.
-- PDF/JPEG upload behavior is proven without exposing signed URLs.
-- Lionel gives written technical approval.
-- Bryan gives written business approval.
+- Manual UAT evidence is attached for all 15 checklist items
+- Code mismatches (checkout Connect policy, parent-service features) are resolved or accepted by Bryan
+- Tracking email and PDF/JPEG hosted proof collected
+- Lionel gives written technical approval
+- Bryan gives written business approval
 
-Final recommendation: **Ready for staging UAT, not ready for production until manual UAT evidence is attached.**
+Final recommendation: **Controlled production UAT — not final launch approval.**

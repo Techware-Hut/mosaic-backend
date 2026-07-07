@@ -1,5 +1,7 @@
 # July 6 GitHub Issue Plan - Backend
 
+> **Superseded in part (2026-07-07):** issue templates below describe pre-fix gaps; most were closed by PRs #202–#206 (now on `main` `ad9ddd14`). Remaining open follow-ups are tracked as work orders FW-1..FW-8 in [`docs/audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md`](../audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md).
+
 Date: 2026-07-06
 Repo: Techware-Hut/mosaic-backend
 Branch: docs/july-6-architecture-gap-audit
