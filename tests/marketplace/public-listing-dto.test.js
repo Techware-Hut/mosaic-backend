@@ -153,6 +153,34 @@ test('toPublicListingCard exposes service offering summaries', () => {
   );
 });
 
+test('toPublicListingCard preserves service features on public marketplace payloads', () => {
+  const card = toPublicListingCard(
+    {
+      _id: '507f1f77bcf86cd799439011',
+      title: 'Consulting',
+      features: ['Online Booking', 'Offers Available'],
+      services: [{ _id: 'svc-child-1', name: 'Planning', price: 50, durationMinutes: 30 }],
+    },
+    { listingType: 'service' }
+  );
+
+  assert.deepEqual(card.features, ['Online Booking', 'Offers Available']);
+});
+
+test('toPublicListingDetail preserves service features on detail payloads', () => {
+  const detail = toPublicListingDetail(
+    {
+      _id: '507f1f77bcf86cd799439011',
+      title: 'Consulting',
+      features: ['Mobile appointments'],
+      services: [{ _id: 'svc-child-1', name: 'Planning', price: 50, durationMinutes: 30 }],
+    },
+    { listingType: 'service' }
+  );
+
+  assert.deepEqual(detail.features, ['Mobile appointments']);
+});
+
 test('toPublicBusinessCard normalizes vendor browse card fields', () => {
   const card = toPublicBusinessCard({
     _id: '507f1f77bcf86cd799439011',

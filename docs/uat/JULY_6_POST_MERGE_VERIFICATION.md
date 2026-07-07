@@ -1,15 +1,17 @@
 # July 6 Post-Merge Verification
 
-Date: July 7, 2026
+Date: July 7, 2026 (conformance audit update)
 
-Status: **Ready for staging UAT; not ready for production until manual UAT evidence and Bryan written approval.**
+Status: **Controlled production UAT — not final launch approval.** Production promoted via PR #209 (backend) and PR #335 (frontend) before manual UAT evidence was attached.
 
-## Verified Base SHAs
+## Verified Production SHAs
 
 | Repo | Branch | Verified SHA |
 | --- | --- | --- |
-| Techware-Hut/mosaic-backend | `staging` | `429e4ef4d1212199104811adafd77ac95355dc31` |
-| Digital-Builders-757/mosaic-biz-frontend-launch | `develop` | `2b1b8fac6c4010a917c01b4e01a7cd9f62dee403` |
+| Techware-Hut/mosaic-backend | `main` | `ad9ddd14c85ac851f9001e5f9952c9b594159d9c` |
+| Digital-Builders-757/mosaic-biz-frontend-launch | `main` | `b3a86cb43a8562e30d535ab5f1a58b6b97dca2a7` |
+
+Pre-promotion candidate SHAs: backend `b838239b`, frontend `8163a3b3`.
 
 ## Merged PRs
 
@@ -56,15 +58,17 @@ Guardrails:
 - Manual UAT evidence is still required for the July 6 checklist.
 - Shipment tracking email needs safe provider/log evidence.
 - PDF and JPEG hosted upload behavior needs safe proof without signed upload URLs.
-- Bryan written business approval is required before production promotion.
-- Lionel technical approval is still required before production promotion.
+- Bryan written business approval is required before **launch sign-off** (promotion to `main` already occurred).
+- Lionel technical approval is still required before **launch sign-off**.
 
 ## Manual UAT Checklist
 
-Use [JULY_6_UAT_TESTER_HANDOFF.md](./JULY_6_UAT_TESTER_HANDOFF.md) as the tester checklist and evidence template.
+Use [JULY_6_PRODUCTION_UAT_CHECKLIST.md](./JULY_6_PRODUCTION_UAT_CHECKLIST.md) and [JULY_6_CONTROLLED_PRODUCTION_UAT_PLAN.md](../release/JULY_6_CONTROLLED_PRODUCTION_UAT_PLAN.md).
+
+Conformance audit: [JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md](../audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md)
 
 ## Release Statement
 
-Ready for staging UAT; not ready for production until manual UAT evidence and Bryan written approval.
+Controlled production UAT in progress; not final launch approval.
 
-No deployment was performed.
+No deployment was performed by this audit pass.

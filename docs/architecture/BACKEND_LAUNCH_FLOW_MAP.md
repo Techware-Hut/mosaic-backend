@@ -1,5 +1,7 @@
 # Backend Launch Flow Map - July 6 UAT
 
+> **Superseded in part (2026-07-07):** the "missing or risky pieces" listed below were addressed by July 6 PRs #202–#206 and promoted to `main` (`ad9ddd14`). Current status per item: [`docs/audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md`](../audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md).
+
 Date: 2026-07-06
 Repo: Techware-Hut/mosaic-backend
 Branch: docs/july-6-architecture-gap-audit
@@ -66,8 +68,8 @@ Map the backend responsibilities for the customer, vendor, admin, and integratio
 | Decision | Current code behavior | Risk if unclear | Recommended default | Approver | Blocks launch |
 | --- | --- | --- | --- | --- | --- |
 | Local delivery eligibility | Backend has `local` rates but no zone eligibility contract. | UI can hide or show wrong option. | Vendor-defined zones, with same-state as temporary fallback only if approved. | Bryan/Rakesh/client | Yes if local delivery advertised. |
-| Service vendors and Connect | Checkout requires Connect; dashboard hiding is frontend. | Vendors may be blocked from directory listings. | Connect required only when online payment is enabled. | Rakesh/Bryan | Yes. |
-| Food/restaurant vendors and Connect | Same checkout guard. | Restaurant directory/onboarding blocked incorrectly. | Allow directory/offline listing without Connect unless online ordering is enabled. | Rakesh/Bryan | Yes. |
+| Service vendors and Connect | Publication/onboarding skip Connect for `listingType: service`; product checkout still requires Connect. | Vendors blocked from directory if policy reverted. | Connect required only for online payouts (decided 2026-07-07). | Bryan/Rakesh | No — implemented (#218). |
+| Food/restaurant vendors and Connect | Same as service: directory/offline listing without Connect; checkout guard applies to product orders only. | Restaurant directory blocked incorrectly if policy reverted. | Allow directory/offline listing without Connect unless online ordering with payouts is enabled. | Bryan/Rakesh | No — implemented (#218). |
 | Coupon basis | Backend uses subtotal before shipping. | Client disputes if expected cart total includes shipping/tax. | Keep subtotal-only unless product approves otherwise. | Bryan/client | No if documented. |
 | Finalize meaning | Backend can approve or reject; old UI can call empty finalize. | Admin action may not match business process. | Explicit approve/reject/request changes UI. | Bryan | Yes for admin UAT. |
 | Badge review fields | Data split across onboarding/business profile. | Admin may approve without enough evidence. | Define mandatory logo, bio, docs, review links, notes. | Bryan/client | Yes for badge launch. |

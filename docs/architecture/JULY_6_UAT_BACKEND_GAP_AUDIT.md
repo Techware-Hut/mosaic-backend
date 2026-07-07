@@ -1,5 +1,7 @@
 # July 6 UAT Backend Gap Audit
 
+> **Superseded (2026-07-07):** this is a pre-fix, point-in-time audit. The gaps for items 4, 7, and 13 were addressed by PRs #202–#206 and promoted to `main` (`ad9ddd14`). Current status per item: [`docs/audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md`](../audit/JULY_6_DOCS_TO_CODE_CONFORMANCE_AUDIT.md).
+
 Date: 2026-07-06
 Repo: Techware-Hut/mosaic-backend
 Branch: docs/july-6-architecture-gap-audit

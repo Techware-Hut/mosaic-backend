@@ -189,3 +189,19 @@ test('public business-service lookup still hides unpublished parent service', as
   assert.equal(res.statusCode, 404);
   assert.equal(res.body.message, 'Business service not found.');
 });
+
+test('public business-service lookup returns persisted features for published service', async () => {
+  const controller = loadController({
+    service: buildService({
+      isPublished: true,
+      features: ['Online Booking', 'Offers Available'],
+      services: [{ name: 'Cut', price: 45, durationMinutes: 60 }],
+    }),
+  });
+  const res = mockResponse();
+
+  await controller.getBusinessServiceById({ params: { id: businessId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.service.features, ['Online Booking', 'Offers Available']);
+});

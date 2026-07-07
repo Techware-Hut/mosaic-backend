@@ -7,6 +7,7 @@ const deleteCloudinaryFile = require('../utils/deleteCloudinaryFile');
 const {
   normalizeChildServices,
   normalizeServicePayload,
+  normalizeStringList,
   validateChildServices,
   validatePublishRequest,
   getMinimumChildServicePrice,
@@ -151,7 +152,7 @@ exports.createParentService = async (req, res) => {
       minorityType: business.minorityType,
       isPublished: false, // Keep unpublished until child services are added
       maxBookingsPerSlot: 1,
-      features: [],
+      features: normalizeStringList(req.body.features),
       amenities: [],
       videos: [],
       faq: []
@@ -784,7 +785,7 @@ exports.updateService = async (req, res) => {
     }
 
     const updatableFields = [
-      'title', 'description', 'coverImage', 'images', 'features', 'amenities', 'businessHours',
+      'title', 'description', 'coverImage', 'images', 'amenities', 'businessHours',
       'bookingToolLink', 'maxBookingsPerSlot', 'location', 'contact'
     ];
 
@@ -792,6 +793,10 @@ exports.updateService = async (req, res) => {
       if (req.body[field] !== undefined) {
         service[field] = req.body[field];
       }
+    }
+
+    if (req.body.features !== undefined) {
+      service.features = normalizeStringList(req.body.features);
     }
 
     if (req.body.title !== undefined) {
@@ -1029,6 +1034,7 @@ exports.getBusinessServiceById = async (req, res) => {
       location: service.location || '',
       businessHours: mappedBusinessHours,
       bookingToolLink: service.bookingToolLink || '',
+      features: Array.isArray(service.features) ? service.features : [],
       services: childServices.map((item) => ({
         name: item.name || '',
         price: typeof item.price === 'number' ? item.price : 0,

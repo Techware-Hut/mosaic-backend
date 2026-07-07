@@ -1,5 +1,7 @@
 # Backend Route Contract Audit - July 6 UAT
 
+> **Superseded in part:** July 7, 2026 conformance audit on production `main` (`ad9ddd14`). Local delivery and service feature gaps listed below were addressed in July 6 PRs #202–#206. Authoritative cross-repo matrix: [`docs/audit/JULY_6_CROSS_REPO_ROUTE_CONTRACT_TRACE.md`](../audit/JULY_6_CROSS_REPO_ROUTE_CONTRACT_TRACE.md). Remaining open item: checkout Connect guard vs service/food onboarding optionality.
+
 Date: 2026-07-06
 Repo: Techware-Hut/mosaic-backend
 Branch: docs/july-6-architecture-gap-audit
