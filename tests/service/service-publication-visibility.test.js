@@ -507,3 +507,27 @@ test('createParentService defaults features to empty array when omitted', async 
   assert.deepEqual(savedDocs[0].features, []);
   assert.deepEqual(res.body.service.features, []);
 });
+
+test('updateService normalizes invalid feature values to empty array', async () => {
+  const draft = buildServiceDoc({
+    isPublished: false,
+    features: ['Existing feature'],
+  });
+  const { controller } = loadServiceController({
+    existingService: draft,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: { features: { invalid: true } },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(draft.features, []);
+  assert.deepEqual(res.body.data.service.features, []);
+});
