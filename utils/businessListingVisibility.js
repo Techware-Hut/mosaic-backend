@@ -8,6 +8,8 @@ const {
 } = require('../lib/marketplace/businessEligibility');
 
 const LISTING_TYPES = new Set(['product', 'service', 'food']);
+// Approved 2026-07-07 (#218): Connect/payout setup required only for product vendors
+// receiving online payouts. Service and food/restaurant directory flows do not require Connect.
 const PAYOUT_REQUIRED_LISTING_TYPES = new Set(['product']);
 
 function normalizeListingType(value) {

@@ -47,6 +47,18 @@ test('getBusinessCheckoutBlock requires explicit approval and activation', () =>
   assert.match(block.message, /approved and active/i);
 });
 
+test('getBusinessCheckoutBlock blocks online product checkout when Connect account is missing', () => {
+  const block = getBusinessCheckoutBlock({
+    isApproved: true,
+    isActive: true,
+    listingType: 'product',
+    stripeConnectAccountId: null,
+  });
+
+  assert.equal(block.status, 400);
+  assert.match(block.message, /not connected to Stripe/i);
+});
+
 test('sanitizePaymentIntentForClient strips sensitive Stripe fields', () => {
   const sanitized = sanitizePaymentIntentForClient({
     id: 'pi_test',
