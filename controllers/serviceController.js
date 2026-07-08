@@ -8,6 +8,11 @@ const {
   normalizeChildServices,
   normalizeServicePayload,
   normalizeStringList,
+  normalizeBusinessHoursForStorage,
+  normalizeBusinessHoursForOwnerResponse,
+  normalizeFaqList,
+  normalizeAmenitiesList,
+  resolveTaxonomyIdFromBody,
   validateChildServices,
   validatePublishRequest,
   getMinimumChildServicePrice,
@@ -135,7 +140,7 @@ exports.createParentService = async (req, res) => {
       coverImage: coverImage || '',
       images: Array.isArray(images) ? images.filter(Boolean) : [],
       location: location?.address || '',
-      businessHours: businessHours || [],
+      businessHours: normalizeBusinessHoursForStorage(businessHours || []),
       bookingToolLink: bookingToolLink || '',
 
       // Empty arrays for child services to be added later
@@ -153,9 +158,9 @@ exports.createParentService = async (req, res) => {
       isPublished: false, // Keep unpublished until child services are added
       maxBookingsPerSlot: 1,
       features: normalizeStringList(req.body.features),
-      amenities: [],
+      amenities: normalizeAmenitiesList(req.body.amenities),
       videos: [],
-      faq: []
+      faq: normalizeFaqList(req.body.faq)
     });
 
     await service.save();
@@ -276,7 +281,7 @@ exports.createService = async (req, res) => {
       coverImage: coverImage || '',
       images: images || [],
       isPublished,
-      businessHours: businessHours || [],
+      businessHours: normalizeBusinessHoursForStorage(businessHours || []),
       location: location?.address || '',
 
       contact: {
@@ -290,9 +295,9 @@ exports.createService = async (req, res) => {
       minorityType: business.minorityType,
       maxBookingsPerSlot: 1,
       features,
-      amenities: [],
+      amenities: normalizeAmenitiesList(req.body.amenities),
       videos: [],
-      faq: []
+      faq: normalizeFaqList(req.body.faq)
     });
 
     await service.save();
@@ -785,7 +790,7 @@ exports.updateService = async (req, res) => {
     }
 
     const updatableFields = [
-      'title', 'description', 'coverImage', 'images', 'amenities', 'businessHours',
+      'title', 'description', 'coverImage', 'images',
       'bookingToolLink', 'maxBookingsPerSlot', 'location', 'contact'
     ];
 
@@ -793,6 +798,28 @@ exports.updateService = async (req, res) => {
       if (req.body[field] !== undefined) {
         service[field] = req.body[field];
       }
+    }
+
+    if (req.body.amenities !== undefined) {
+      service.amenities = normalizeAmenitiesList(req.body.amenities);
+    }
+
+    if (req.body.businessHours !== undefined) {
+      service.businessHours = normalizeBusinessHoursForStorage(req.body.businessHours);
+    }
+
+    if (req.body.faq !== undefined) {
+      service.faq = normalizeFaqList(req.body.faq);
+    }
+
+    const nextCategoryId = resolveTaxonomyIdFromBody(req.body, 'categoryId', 'category');
+    if (nextCategoryId) {
+      service.categoryId = nextCategoryId;
+    }
+
+    const nextSubcategoryId = resolveTaxonomyIdFromBody(req.body, 'subcategoryId', 'subcategory');
+    if (nextSubcategoryId) {
+      service.subcategoryId = nextSubcategoryId;
     }
 
     if (req.body.features !== undefined) {
@@ -838,8 +865,12 @@ exports.updateService = async (req, res) => {
 
     await service.save();
 
+    const refreshedService = await Service.findById(service._id)
+      .populate('categoryId', 'name')
+      .populate('subcategoryId', 'name');
+
     return res.status(200).json(
-      formatOwnerServiceResponse(service, business, 'Service updated successfully')
+      formatOwnerServiceResponse(refreshedService, business, 'Service updated successfully')
     );
 
   } catch (error) {
@@ -972,30 +1003,7 @@ exports.getBusinessServiceById = async (req, res) => {
     const childServices = Array.isArray(service.services) ? service.services : [];
     const hasChildServices = childServices.length > 0;
 
-    const mappedBusinessHours = (Array.isArray(service.businessHours) ? service.businessHours : []).map((slot) => {
-      let openTime = slot.openTime || '';
-      let closeTime = slot.closeTime || '';
-      let isOpen = typeof slot.isOpen === 'boolean' ? slot.isOpen : true;
-
-      if ((!openTime || !closeTime) && typeof slot.hours === 'string') {
-        const parts = slot.hours.split('-').map((part) => part.trim());
-        if (parts.length === 2) {
-          openTime = openTime || parts[0];
-          closeTime = closeTime || parts[1];
-        }
-      }
-
-      if (typeof slot.closed === 'boolean') {
-        isOpen = !slot.closed;
-      }
-
-      return {
-        day: slot.day || '',
-        openTime,
-        closeTime,
-        isOpen
-      };
-    });
+    const mappedBusinessHours = normalizeBusinessHoursForOwnerResponse(service.businessHours);
 
     const serviceImages = normalizeImages({
       coverImage: service.coverImage,
@@ -1035,6 +1043,8 @@ exports.getBusinessServiceById = async (req, res) => {
       businessHours: mappedBusinessHours,
       bookingToolLink: service.bookingToolLink || '',
       features: Array.isArray(service.features) ? service.features : [],
+      amenities: Array.isArray(service.amenities) ? service.amenities : [],
+      faq: Array.isArray(service.faq) ? service.faq : [],
       services: childServices.map((item) => ({
         name: item.name || '',
         price: typeof item.price === 'number' ? item.price : 0,
