@@ -139,7 +139,14 @@ function loadServiceController(options = {}) {
         return chain;
       };
       ServiceExport.find = Service.find;
-      ServiceExport.findById = Service.findById;
+      ServiceExport.findById = () => {
+        const refreshed = existingService || buildServiceDoc();
+        return {
+          populate: () => ({
+            populate: async () => refreshed,
+          }),
+        };
+      };
       ServiceExport.findByIdAndUpdate = Service.findByIdAndUpdate;
       return ServiceExport;
     }
@@ -530,4 +537,101 @@ test('updateService normalizes invalid feature values to empty array', async () 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(draft.features, []);
   assert.deepEqual(res.body.data.service.features, []);
+});
+
+test('updateService persists category, faq, amenities, and business hours on draft save', async () => {
+  const draft = buildServiceDoc({
+    isPublished: false,
+    categoryId: '507f1f77bcf86cd799439014',
+    subcategoryId: '507f1f77bcf86cd799439015',
+    faq: [],
+    amenities: [],
+    businessHours: [],
+  });
+  draft.categoryId = { _id: '507f1f77bcf86cd799439014', name: 'Beauty' };
+  draft.subcategoryId = { _id: '507f1f77bcf86cd799439015', name: 'Hair' };
+
+  const { controller } = loadServiceController({
+    existingService: draft,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: {
+        categoryId: '507f1f77bcf86cd799439020',
+        subcategoryId: '507f1f77bcf86cd799439021',
+        faq: [{ question: ' What hours? ', answer: ' 9-5 ' }, { question: '', answer: 'nope' }],
+        amenities: [{ label: ' WiFi ', available: true }, { label: '', available: true }],
+        businessHours: [{ day: 'Monday', openTime: '09:00', closeTime: '17:00', isOpen: true }],
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(String(draft.categoryId), '507f1f77bcf86cd799439020');
+  assert.equal(String(draft.subcategoryId), '507f1f77bcf86cd799439021');
+  assert.deepEqual(draft.faq, [{ question: 'What hours?', answer: '9-5' }]);
+  assert.deepEqual(draft.amenities, [{ label: 'WiFi', available: true }]);
+  assert.deepEqual(draft.businessHours, [{ day: 'Monday', hours: '09:00-17:00', closed: false }]);
+  assert.deepEqual(res.body.data.service.businessHours, [{
+    day: 'Monday',
+    openTime: '09:00',
+    closeTime: '17:00',
+    isOpen: true,
+  }]);
+});
+
+test('updateService leaves faq, amenities, and business hours unchanged when omitted', async () => {
+  const draft = buildServiceDoc({
+    isPublished: false,
+    faq: [{ question: 'Q1', answer: 'A1' }],
+    amenities: [{ label: 'Parking', available: true }],
+    businessHours: [{ day: 'Tuesday', hours: '10:00-18:00', closed: false }],
+  });
+  const { controller } = loadServiceController({ existingService: draft });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: { title: 'Updated title only' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(draft.faq, [{ question: 'Q1', answer: 'A1' }]);
+  assert.deepEqual(draft.amenities, [{ label: 'Parking', available: true }]);
+  assert.deepEqual(draft.businessHours, [{ day: 'Tuesday', hours: '10:00-18:00', closed: false }]);
+});
+
+test('createParentService persists faq, amenities, and normalized business hours', async () => {
+  const { controller, savedDocs } = loadServiceController({ existingService: null });
+  const res = mockResponse();
+
+  await controller.createParentService(
+    {
+      user: { _id: ownerId },
+      body: {
+        businessId,
+        categoryId: '507f1f77bcf86cd799439014',
+        subcategoryId: '507f1f77bcf86cd799439015',
+        title: 'Draft Service',
+        faq: [{ question: 'Q', answer: 'A' }],
+        amenities: [{ label: 'Parking', available: false }],
+        businessHours: [{ day: 'Friday', openTime: '08:00', closeTime: '16:00', isOpen: true }],
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(savedDocs[0].faq, [{ question: 'Q', answer: 'A' }]);
+  assert.deepEqual(savedDocs[0].amenities, [{ label: 'Parking', available: false }]);
+  assert.deepEqual(savedDocs[0].businessHours, [{ day: 'Friday', hours: '08:00-16:00', closed: false }]);
 });

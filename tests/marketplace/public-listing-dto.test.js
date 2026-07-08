@@ -181,6 +181,50 @@ test('toPublicListingDetail preserves service features on detail payloads', () =
   assert.deepEqual(detail.features, ['Mobile appointments']);
 });
 
+test('toPublicListingDetail preserves amenities and faq on service detail payloads', () => {
+  const detail = toPublicListingDetail(
+    {
+      _id: '507f1f77bcf86cd799439011',
+      title: 'Consulting',
+      amenities: [{ label: 'Parking', available: true }],
+      faq: [{ question: 'Hours?', answer: '9-5' }],
+      services: [{ _id: 'svc-child-1', name: 'Planning', price: 50, durationMinutes: 30 }],
+    },
+    { listingType: 'service' }
+  );
+
+  assert.deepEqual(detail.amenities, [{ label: 'Parking', available: true }]);
+  assert.deepEqual(detail.faq, [{ question: 'Hours?', answer: '9-5' }]);
+});
+
+test('toPublicListingCard preserves amenities on service list payloads', () => {
+  const card = toPublicListingCard(
+    {
+      _id: '507f1f77bcf86cd799439011',
+      title: 'Consulting',
+      amenities: [{ label: 'WiFi', available: true }],
+      services: [{ _id: 'svc-child-1', name: 'Planning', price: 50, durationMinutes: 30 }],
+    },
+    { listingType: 'service' }
+  );
+
+  assert.deepEqual(card.amenities, [{ label: 'WiFi', available: true }]);
+});
+
+test('toPublicListingCard omits amenities and faq when absent for backward compatibility', () => {
+  const card = toPublicListingCard(
+    {
+      _id: '507f1f77bcf86cd799439011',
+      title: 'Legacy Service',
+      services: [{ _id: 'svc-child-1', name: 'Planning', price: 50, durationMinutes: 30 }],
+    },
+    { listingType: 'service' }
+  );
+
+  assert.equal(card.amenities, undefined);
+  assert.equal(card.faq, undefined);
+});
+
 test('toPublicBusinessCard normalizes vendor browse card fields', () => {
   const card = toPublicBusinessCard({
     _id: '507f1f77bcf86cd799439011',

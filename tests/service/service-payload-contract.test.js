@@ -2,6 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   normalizeStringList,
+  normalizeBusinessHoursForStorage,
+  normalizeBusinessHoursForOwnerResponse,
+  normalizeFaqList,
+  normalizeAmenitiesList,
+  resolveTaxonomyIdFromBody,
+  formatOwnerServiceForResponse,
   normalizeServicePayload,
   PUBLISH_CHILD_SERVICE_REQUIRED_MESSAGE,
   validateChildServices,
@@ -55,6 +61,79 @@ test('normalizeStringList accepts arrays and single strings', () => {
   );
   assert.deepEqual(normalizeStringList(' One feature '), ['One feature']);
   assert.deepEqual(normalizeStringList({ label: 'nope' }), []);
+});
+
+test('normalizeBusinessHoursForStorage accepts FE open/close shape', () => {
+  assert.deepEqual(
+    normalizeBusinessHoursForStorage([
+      { day: 'Monday', openTime: '09:00', closeTime: '17:00', isOpen: true },
+    ]),
+    [{ day: 'Monday', hours: '09:00-17:00', closed: false }]
+  );
+});
+
+test('normalizeBusinessHoursForOwnerResponse maps stored hours to FE shape', () => {
+  assert.deepEqual(
+    normalizeBusinessHoursForOwnerResponse([
+      { day: 'Tuesday', hours: '10:00-18:00', closed: false },
+    ]),
+    [{ day: 'Tuesday', openTime: '10:00', closeTime: '18:00', isOpen: true }]
+  );
+});
+
+test('normalizeFaqList trims and drops incomplete entries', () => {
+  assert.deepEqual(
+    normalizeFaqList([
+      { question: ' Q ', answer: ' A ' },
+      { question: 'Missing answer', answer: '' },
+    ]),
+    [{ question: 'Q', answer: 'A' }]
+  );
+});
+
+test('normalizeAmenitiesList trims labels and coerces availability', () => {
+  assert.deepEqual(
+    normalizeAmenitiesList([
+      { label: ' WiFi ', available: 'true' },
+      { label: '', available: true },
+    ]),
+    [{ label: 'WiFi', available: true }]
+  );
+});
+
+test('resolveTaxonomyIdFromBody accepts direct ids and nested category aliases', () => {
+  assert.equal(
+    resolveTaxonomyIdFromBody({ categoryId: '507f1f77bcf86cd799439014' }, 'categoryId', 'category'),
+    '507f1f77bcf86cd799439014'
+  );
+  assert.equal(
+    resolveTaxonomyIdFromBody(
+      { category: { _id: '507f1f77bcf86cd799439020' } },
+      'categoryId',
+      'category'
+    ),
+    '507f1f77bcf86cd799439020'
+  );
+});
+
+test('formatOwnerServiceForResponse maps stored business hours for owner reopen', () => {
+  const formatted = formatOwnerServiceForResponse({
+    _id: '507f1f77bcf86cd799439011',
+    categoryId: { _id: '507f1f77bcf86cd799439014', name: 'Beauty' },
+    businessHours: [{ day: 'Wednesday', hours: '08:00-12:00', closed: false }],
+    faq: [{ question: 'Q', answer: 'A' }],
+    amenities: [{ label: 'Parking', available: true }],
+    features: ['Online Booking'],
+  });
+
+  assert.equal(formatted.categoryId.name, 'Beauty');
+  assert.deepEqual(formatted.businessHours, [{
+    day: 'Wednesday',
+    openTime: '08:00',
+    closeTime: '12:00',
+    isOpen: true,
+  }]);
+  assert.deepEqual(formatted.faq, [{ question: 'Q', answer: 'A' }]);
 });
 
 test('normalizeServicePayload backfills single name-only child from top-level price and duration', () => {
