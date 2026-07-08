@@ -262,14 +262,31 @@ exports.createService = async (req, res) => {
       });
     }
 
+    let finalCategoryId = categoryId;
+    let finalSubcategoryId = subcategoryId;
+
+    if (!finalCategoryId && Array.isArray(req.body.categories) && req.body.categories.length > 0) {
+      const firstCat = req.body.categories[0];
+      if (firstCat && firstCat.categoryId) {
+        finalCategoryId = firstCat.categoryId;
+      }
+    }
+
+    if (!finalSubcategoryId && Array.isArray(req.body.categories) && req.body.categories.length > 0) {
+      const firstCat = req.body.categories[0];
+      if (firstCat && Array.isArray(firstCat.subcategoryIds) && firstCat.subcategoryIds.length > 0) {
+        finalSubcategoryId = firstCat.subcategoryIds[0];
+      }
+    }
+
     const service = new Service({
       title,
       description,
       price: parentPrice,
       duration: parentDuration,
 
-      categoryId,
-      subcategoryId,
+      categoryId: finalCategoryId,
+      subcategoryId: finalSubcategoryId,
       businessId,
       bookingToolLink: bookingToolLink || '',
       services: normalizedServices,
@@ -280,19 +297,19 @@ exports.createService = async (req, res) => {
       location: location?.address || '',
 
       contact: {
-        phone: '',
-        email: '',
-        address: location?.address || '',
-        website: ''
+        phone: req.body.contact?.phone || '',
+        email: req.body.contact?.email || '',
+        address: req.body.contact?.address || location?.address || '',
+        website: req.body.contact?.website || ''
       },
 
       ownerId: userId,
       minorityType: business.minorityType,
-      maxBookingsPerSlot: 1,
+      maxBookingsPerSlot: req.body.maxBookingsPerSlot !== undefined ? Number(req.body.maxBookingsPerSlot) : 1,
       features,
-      amenities: [],
-      videos: [],
-      faq: []
+      amenities: req.body.amenities || [],
+      videos: req.body.videos || [],
+      faq: req.body.faq || []
     });
 
     await service.save();
@@ -763,7 +780,7 @@ exports.updateService = async (req, res) => {
         nextServices = [];
         service.services = nextServices;
         service.price = 0;
-        service.duration = '';
+        service.duration = payload.parentDuration;
       } else {
         const childValidation = validateChildServices(payload.normalizedServices);
         if (!childValidation.ok) {
@@ -780,18 +797,36 @@ exports.updateService = async (req, res) => {
         nextServices = payload.normalizedServices;
         service.services = nextServices;
         service.price = getMinimumChildServicePrice(nextServices, service.price);
-        service.duration = '';
+        service.duration = payload.parentDuration;
       }
     }
 
     const updatableFields = [
       'title', 'description', 'coverImage', 'images', 'amenities', 'businessHours',
-      'bookingToolLink', 'maxBookingsPerSlot', 'location', 'contact'
+      'bookingToolLink', 'maxBookingsPerSlot', 'location', 'contact', 'faq', 'videos'
     ];
 
     for (const field of updatableFields) {
       if (req.body[field] !== undefined) {
         service[field] = req.body[field];
+      }
+    }
+
+    if (req.body.categoryId) {
+      service.categoryId = req.body.categoryId;
+    } else if (Array.isArray(req.body.categories) && req.body.categories.length > 0) {
+      const firstCat = req.body.categories[0];
+      if (firstCat && firstCat.categoryId) {
+        service.categoryId = firstCat.categoryId;
+      }
+    }
+
+    if (req.body.subcategoryId) {
+      service.subcategoryId = req.body.subcategoryId;
+    } else if (Array.isArray(req.body.categories) && req.body.categories.length > 0) {
+      const firstCat = req.body.categories[0];
+      if (firstCat && Array.isArray(firstCat.subcategoryIds) && firstCat.subcategoryIds.length > 0) {
+        service.subcategoryId = firstCat.subcategoryIds[0];
       }
     }
 
