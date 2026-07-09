@@ -252,6 +252,9 @@ test('userRoutes applies rate limiting before forgot and reset password handlers
     resendOtp() {},
     forgotPassword() {},
     resetPassword() {},
+    changePassword() {},
+    getNotificationPreferences() {},
+    updateNotificationPreferences() {},
   };
 
   const router = withMocks(userRoutesPath, {
