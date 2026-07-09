@@ -86,6 +86,9 @@ test('GET /auth/check response uses toPublicAuthUser whitelist', async () => {
     resendOtp() {},
     forgotPassword() {},
     resetPassword() {},
+    changePassword() {},
+    getNotificationPreferences() {},
+    updateNotificationPreferences() {},
   };
 
   const router = (() => {

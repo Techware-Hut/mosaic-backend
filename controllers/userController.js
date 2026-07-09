@@ -473,3 +473,93 @@ exports.logout = (req, res) => {
 
     res.status(200).json({ message: 'Logged out successfully' });
 };
+
+// ── Vendor Settings ────────────────────────────────────────────────────────────
+
+exports.changePassword = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    try {
+        const user = await User.findById(req.user._id).select('+passwordHash');
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        if (!user.passwordHash) {
+            return res.status(400).json({ success: false, message: 'Password change is not available for social login accounts' });
+        }
+
+        const { currentPassword, newPassword } = req.body;
+
+        const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+        if (!isMatch) {
+            return res.status(401).json({ success: false, message: 'Current password is incorrect' });
+        }
+
+        if (currentPassword === newPassword) {
+            return res.status(400).json({ success: false, message: 'New password must be different from current password' });
+        }
+
+        user.passwordHash = await bcrypt.hash(newPassword, 12);
+        await user.save();
+
+        return res.status(200).json({ success: true, message: 'Password updated successfully' });
+    } catch (err) {
+        console.error('[changePassword]', err);
+        return res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+exports.getNotificationPreferences = async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id).select('notificationPreferences');
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        const prefs = user.notificationPreferences ?? {};
+        return res.status(200).json({
+            success: true,
+            preferences: {
+                newBookingOrOrder: prefs.newBookingOrOrder ?? true,
+                newReview:         prefs.newReview         ?? true,
+                paymentReceived:   prefs.paymentReceived   ?? true,
+                marketingEmails:   prefs.marketingEmails   ?? false,
+            },
+        });
+    } catch (err) {
+        console.error('[getNotificationPreferences]', err);
+        return res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+exports.updateNotificationPreferences = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    try {
+        const { newBookingOrOrder, newReview, paymentReceived, marketingEmails } = req.body;
+
+        const update = {};
+        if (newBookingOrOrder !== undefined) update['notificationPreferences.newBookingOrOrder'] = newBookingOrOrder;
+        if (newReview         !== undefined) update['notificationPreferences.newReview']         = newReview;
+        if (paymentReceived   !== undefined) update['notificationPreferences.paymentReceived']   = paymentReceived;
+        if (marketingEmails   !== undefined) update['notificationPreferences.marketingEmails']   = marketingEmails;
+
+        if (Object.keys(update).length === 0) {
+            return res.status(400).json({ success: false, message: 'No preferences provided' });
+        }
+
+        await User.findByIdAndUpdate(req.user._id, { $set: update }, { new: true });
+
+        return res.status(200).json({ success: true, message: 'Notification preferences updated' });
+    } catch (err) {
+        console.error('[updateNotificationPreferences]', err);
+        return res.status(500).json({ success: false, message: 'Server error' });
+    }
+};

@@ -215,16 +215,18 @@ exports.getAllFood = async (req, res) => {
 
     // Fetching food items based on filters
     const foodItems = await Food.find(filters)
-      .select('title description price slug coverImage')
+      .select('title description price slug coverImage isPublished')
       .sort(sortOption)
       .skip(skip)
       .limit(parseInt(limit));
 
     const total = await Food.countDocuments(filters);
+    const unpublishedCount = await Food.countDocuments({ ...filters, isPublished: false });
 
     res.json({
       success: true,
       total,
+      unpublishedCount,
       page: parseInt(page),
       totalPages: Math.ceil(total / limit),
       data: foodItems,

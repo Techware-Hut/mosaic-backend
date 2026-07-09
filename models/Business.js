@@ -148,7 +148,7 @@ const businessSchema = new mongoose.Schema(
     },
     isActive: {
       type: Boolean,
-      default: true,
+      default: false, // Stays false until Stage 6 publish-storefront completes.
     },
     approvalDate: Date,
     adminStatusRemark: {
@@ -194,6 +194,13 @@ const businessSchema = new mongoose.Schema(
     
     // ===== TAGS FOR SEARCH =====
     tags: [String],
+
+    // ===== VENDOR PROFILE (synced from onboarding) =====
+    language: {
+      type: String,
+      trim: true,
+    },
+    minorityCategories: [String],
     
     // ===== MINORITY TYPE (REFERENCE) =====
     minorityType: {

@@ -327,6 +327,79 @@ exports.sendVendorApprovedEmail = async ({
   return transporter.sendMail(mailOptions);
 };
 
+const storefrontListingCopy = Object.freeze({
+  product: {
+    label: 'product',
+    summary:
+      'Your product storefront and listings are now live on Mosaic Biz Hub.',
+  },
+  service: {
+    label: 'service',
+    summary:
+      'Your service storefront and listings are now live on Mosaic Biz Hub.',
+  },
+  food: {
+    label: 'food',
+    summary:
+      'Your food storefront and listings are now live on Mosaic Biz Hub.',
+  },
+});
+
+exports.sendVendorStorefrontPublishedEmail = async ({
+  to,
+  vendorName,
+  businessName,
+  listingType = 'product',
+  businessSlug,
+}) => {
+  const normalizedType = String(listingType || 'product').trim().toLowerCase();
+  const copy =
+    storefrontListingCopy[normalizedType] || storefrontListingCopy.product;
+  const displayName = vendorName || businessName || 'there';
+  const displayBusinessName = businessName || 'your business';
+  const dashboardPath = businessSlug ? `/partners/${businessSlug}` : '/partners';
+  const dashboardUrl = buildFrontendUrl(dashboardPath);
+
+  const mailOptions = {
+    from: formatMosaicFromHeader(),
+    to,
+    subject: 'Congratulations — Your Mosaic Biz Hub Storefront Is Live 🎉',
+    html: `
+      <div style="font-family:Arial,sans-serif;background:#f8fafc;padding:28px;">
+        <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;padding:28px;border:1px solid #e2e8f0;">
+          <h2 style="margin:0 0 12px;color:#28a745;">Congratulations, ${escapeHtml(displayName)}!</h2>
+          <p style="color:#475569;line-height:1.6;margin:0 0 16px;">
+            <strong>${escapeHtml(displayBusinessName)}</strong> has completed onboarding and your storefront is live.
+          </p>
+          <p style="color:#475569;line-height:1.6;margin:0 0 16px;">
+            ${escapeHtml(copy.summary)} Customers can now discover your ${escapeHtml(copy.label)} business on the marketplace.
+          </p>
+          <p style="color:#475569;line-height:1.6;margin:0 0 8px;">
+            <strong>What you can do next:</strong>
+          </p>
+          <ul style="margin:8px 0 0 18px;padding:0;color:#475569;line-height:1.6;">
+            <li>Open your vendor dashboard to manage bookings, orders, and inventory</li>
+            <li>Review your public storefront and keep listings up to date</li>
+            <li>Share your business profile with customers</li>
+          </ul>
+          <div style="margin:24px 0;text-align:center;">
+            <a href="${dashboardUrl}" style="background:#c9a227;color:#111827;padding:12px 20px;text-decoration:none;border-radius:6px;font-size:14px;font-weight:bold;">
+              Go to Dashboard
+            </a>
+          </div>
+          <p style="font-size:13px;color:#64748b;line-height:1.5;margin:24px 0 0;">
+            Welcome to the Mosaic Biz Hub community — we're excited to see your business grow.
+          </p>
+          <p style="font-size:13px;color:#64748b;margin:18px 0 0;">
+            Mosaic Biz Hub Team
+          </p>
+        </div>
+      </div>
+    `,
+  };
+
+  return transporter.sendMail(mailOptions);
+};
 
 
 exports.sendVendorRejectionEmail = async ({

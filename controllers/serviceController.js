@@ -147,10 +147,10 @@ exports.createParentService = async (req, res) => {
       services: [],
 
       contact: {
-        phone: '',
-        email: '',
-        address: location?.address || '',
-        website: ''
+        phone: req.body.contact?.phone || '',
+        email: req.body.contact?.email || '',
+        address: req.body.contact?.address || location?.address || '',
+        website: req.body.contact?.website || ''
       },
 
       ownerId: userId,
