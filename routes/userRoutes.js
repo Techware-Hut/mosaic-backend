@@ -122,4 +122,30 @@ router.get('/auth/check', authenticate, (req, res) => {
   res.json({ loggedIn: true, user: toAuthCheckUser(req.user) });
 });
 
+// ── Vendor Settings ────────────────────────────────────────────────────────────
+
+router.post(
+  '/change-password',
+  authenticate,
+  [
+    body('currentPassword').notEmpty().withMessage('Current password is required'),
+    body('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters'),
+  ],
+  userController.changePassword
+);
+
+router.get('/notification-preferences', authenticate, userController.getNotificationPreferences);
+
+router.patch(
+  '/notification-preferences',
+  authenticate,
+  [
+    body('newBookingOrOrder').optional().isBoolean(),
+    body('newReview').optional().isBoolean(),
+    body('paymentReceived').optional().isBoolean(),
+    body('marketingEmails').optional().isBoolean(),
+  ],
+  userController.updateNotificationPreferences
+);
+
 module.exports = router;

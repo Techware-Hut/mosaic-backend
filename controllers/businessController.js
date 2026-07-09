@@ -22,6 +22,13 @@ const {
   enrichBusinessesWithListingSnapshots,
   publishBusinessListings,
 } = require("../utils/businessListingVisibility");
+const {
+  syncBusinessFromOnboarding,
+  needsProfileBackfillFromOnboarding,
+} = require("../utils/syncBusinessFromOnboarding");
+const { sendVendorStorefrontPublishedEmail } = require("../utils/WellcomeMailer");
+const { deliverVendorOnboardingEmail } = require("../utils/vendorOnboardingEmailDelivery");
+const User = require("../models/User");
 
 exports.createBusiness = async (req, res) => {
   try {
@@ -160,7 +167,7 @@ exports.createBusiness = async (req, res) => {
       coverImage: coverUrl,
       owner: user._id,
       isApproved: true,
-      isActive: true,
+      isActive: false, // Stays inactive until Stage 6 publish-storefront completes.
       subscriptionId: subscription._id,
       stripeSubscriptionId,
       minorityType: user.minorityType,
@@ -220,6 +227,8 @@ exports.publishStorefront = async (req, res) => {
       });
     }
 
+    const wasActive = business.isActive === true;
+
     const publication = await publishBusinessListings({
       business,
       userId: req.user._id,
@@ -239,6 +248,26 @@ exports.publishStorefront = async (req, res) => {
       });
     }
 
+    let emailDelivery = null;
+    if (!wasActive) {
+      const user = await User.findById(req.user._id).select("name email").lean();
+      const recipient = String(business.email || user?.email || "").trim();
+
+      if (recipient) {
+        emailDelivery = await deliverVendorOnboardingEmail({
+          label: "vendor_storefront_published",
+          send: () =>
+            sendVendorStorefrontPublishedEmail({
+              to: recipient,
+              vendorName: user?.name || business.businessName,
+              businessName: business.businessName,
+              listingType: business.listingType,
+              businessSlug: business.slug,
+            }),
+        });
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: "Storefront and eligible listings published successfully.",
@@ -248,6 +277,9 @@ exports.publishStorefront = async (req, res) => {
         publication.snapshot,
         publication.onboarding
       ),
+      emailSent: emailDelivery?.sent ?? false,
+      emailSkipped: emailDelivery?.skipped ?? false,
+      emailFailed: emailDelivery ? !emailDelivery.sent && !emailDelivery.skipped : false,
     });
   } catch (error) {
     console.error("Storefront publish error:", {
@@ -797,7 +829,7 @@ exports.retryCreateBusiness = async (req, res) => {
       coverImage: formData.coverImage || "", // Same for coverImage
       minorityType: subscription.userId.minorityType,
       isApproved: true,
-      isActive: true, // Default to active; admin can deactivate later if needed
+      isActive: false, // Stays inactive until Stage 6 publish-storefront completes.
       subscriptionId: subscription._id,
       stripeSubscriptionId: subscription.stripeSubscriptionId,
     });
@@ -907,24 +939,46 @@ exports.getBusinessBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
 
-    const business = await Business.findOne({
-      slug,
-      owner: req.user._id,
-    })
-      .populate({
+    const businessQuery = () =>
+      Business.findOne({
+        slug,
+        owner: req.user._id,
+      }).populate({
         path: "subscriptionId",
         populate: {
           path: "subscriptionPlanId",
           model: "SubscriptionPlan",
         },
-      })
-      .lean();
+      });
+
+    let business = await businessQuery().lean();
 
     if (!business) {
       return res.status(404).json({
         success: false,
         message: "Business not found or you are not authorized",
       });
+    }
+
+    // Backfill address/logo/banner for vendors onboarded before profile sync included address.
+    const onboarding = await VendorOnboardingStage1.findOne({
+      userId: req.user._id,
+    });
+    if (onboarding && needsProfileBackfillFromOnboarding(business, onboarding)) {
+      try {
+        await syncBusinessFromOnboarding({
+          userId: req.user._id,
+          onboarding,
+          Business,
+          Subscription,
+        });
+        business = await businessQuery().lean();
+      } catch (backfillError) {
+        console.error(
+          "[getBusinessBySlug] profile backfill sync failed:",
+          backfillError.message
+        );
+      }
     }
 
     // ✅ Separate subscriptionId & subscriptionPlanId from business
@@ -950,6 +1004,34 @@ exports.getBusinessBySlug = async (req, res) => {
       success: false,
       message: "Server error",
     });
+  }
+};
+
+exports.updateBusinessVisibility = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({ success: false, message: '`isActive` must be a boolean' });
+    }
+
+    const business = await Business.findOne({ _id: id, owner: req.user._id });
+    if (!business) {
+      return res.status(404).json({ success: false, message: 'Business not found or unauthorized' });
+    }
+
+    business.isActive = isActive;
+    await business.save();
+
+    return res.status(200).json({
+      success: true,
+      message: isActive ? 'Your listing is now visible on the marketplace' : 'Your listing has been hidden from the marketplace',
+      isActive,
+    });
+  } catch (err) {
+    console.error('[updateBusinessVisibility]', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
