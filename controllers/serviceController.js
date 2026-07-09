@@ -20,6 +20,7 @@ const {
   formatValidationErrorResponse,
 } = require('../lib/service/serviceContract');
 const { normalizeImages } = require('../lib/listing/publicListingDto');
+const { publicMarketplaceBusinessFilter } = require('../lib/marketplace/businessEligibility');
 const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
@@ -1000,10 +1001,9 @@ exports.getBusinessServiceById = async (req, res) => {
       });
     }
 
-    const visibleBusiness = await Business.findOne({
-      _id: service.businessId?._id,
-      isActive: true,
-    }).select('_id').lean();
+    const visibleBusiness = await Business.findOne(
+      publicMarketplaceBusinessFilter({ _id: service.businessId?._id })
+    ).select('_id').lean();
 
     if (!visibleBusiness) {
       return res.status(404).json({

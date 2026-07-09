@@ -110,8 +110,14 @@ function loadController(options = {}) {
           if (query._id === businessId && query.owner === ownerId && authorized) {
             return makeQuery(business);
           }
-          if (query._id === businessId && query.isActive === true) {
-            return makeQuery(business);
+          if (
+            query._id === businessId &&
+            query.isActive === true &&
+            query.isApproved === true
+          ) {
+            return makeQuery(
+              business.isApproved === true && business.isActive === true ? business : null
+            );
           }
           return makeQuery(null);
         },
@@ -181,6 +187,19 @@ test('private business service lookup rejects unauthorized owner', async () => {
 test('public business-service lookup still hides unpublished parent service', async () => {
   const controller = loadController({
     service: buildService({ isPublished: false }),
+  });
+  const res = mockResponse();
+
+  await controller.getBusinessServiceById({ params: { id: businessId } }, res);
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, 'Business service not found.');
+});
+
+test('public business-service lookup hides published service for ineligible business', async () => {
+  const controller = loadController({
+    service: buildService({ isPublished: true }),
+    business: buildBusiness({ isApproved: false, isActive: true }),
   });
   const res = mockResponse();
 
