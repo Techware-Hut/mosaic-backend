@@ -313,12 +313,9 @@ function buildPublicationBlockers({ business, onboarding, snapshot }) {
     });
   }
 
-  if (business?.isActive !== true) {
-    blockers.push({
-      code: 'BUSINESS_ACTIVE_REQUIRED',
-      message: 'Business must be active before publishing.',
-    });
-  }
+  // isActive is no longer a prerequisite blocker — it is SET by publishBusinessListings
+  // upon successful completion of Stage 6. Checking it here would create a chicken-and-egg
+  // deadlock where a vendor can never launch because they aren't active yet.
 
   if (requiresPayoutSetupForBusiness(business) && !isPayoutCompleteForBusiness(business)) {
     blockers.push({
@@ -397,6 +394,14 @@ async function publishBusinessListings({ business, userId }) {
         blockers,
       },
     };
+  }
+
+  // Stage 6 is the single launch moment. Flip the business live now that all
+  // blockers have passed. This is the ONLY place isActive is set to true for
+  // a vendor going through the normal onboarding funnel.
+  if (!business.isActive) {
+    business.isActive = true;
+    await business.save();
   }
 
   const eligible = eligibleBeforePublication;

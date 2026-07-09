@@ -44,6 +44,17 @@ function buildOnboarding(overrides = {}) {
     featureBanner: { url: 'https://example.com/banner.png' },
     businessEmail: 'shop@example.com',
     businessPhone: '5551234567',
+    address: {
+      street: '100 Main St',
+      city: 'Norfolk',
+      state: 'Virginia',
+      country: 'United States',
+      zipCode: '23510',
+    },
+    website: 'https://example.com',
+    facebook: 'https://facebook.com/example',
+    language: 'English',
+    minorityCategories: ['Woman', 'Asian'],
     save: async () => {},
     ...overrides,
   };
@@ -99,6 +110,11 @@ test('syncBusinessFromOnboarding creates Business when none exists', async () =>
   assert.equal(created.owner, userId);
   assert.equal(created.subscriptionId, subscriptionId);
   assert.equal(created.isApproved, true);
+  assert.equal(created.address.city, 'Norfolk');
+  assert.equal(created.address.zipCode, '23510');
+  assert.equal(created.socialLinks.website, 'https://example.com');
+  assert.equal(created.language, 'English');
+  assert.deepEqual(created.minorityCategories, ['Woman', 'Asian']);
   assert.equal(onboarding.businessId, business._id);
 });
 
@@ -147,7 +163,81 @@ test('syncBusinessFromOnboarding updates existing Business', async () => {
 
   assert.equal(existingBusiness.businessName, 'Synced Business');
   assert.equal(existingBusiness.description, 'Bio text');
+  assert.equal(existingBusiness.address.state, 'Virginia');
+  assert.equal(existingBusiness.socialLinks.facebook, 'https://facebook.com/example');
+  assert.equal(existingBusiness.language, 'English');
+  assert.deepEqual(existingBusiness.minorityCategories, ['Woman', 'Asian']);
   assert.equal(onboarding.businessId, existingBusiness._id);
+});
+
+test('needsProfileBackfillFromOnboarding detects missing address on Business', () => {
+  const {
+    needsProfileBackfillFromOnboarding,
+  } = require(syncUtilPath);
+
+  const onboarding = buildOnboarding();
+  const businessWithAddress = {
+    address: { city: 'Norfolk' },
+    logo: 'https://example.com/logo.png',
+    coverImage: 'https://example.com/banner.png',
+    language: 'English',
+    minorityCategories: ['Woman'],
+  };
+  const businessWithoutAddress = {
+    address: {},
+    logo: '',
+    coverImage: '',
+    language: '',
+    minorityCategories: [],
+  };
+
+  assert.equal(
+    needsProfileBackfillFromOnboarding(businessWithAddress, onboarding),
+    false
+  );
+  assert.equal(
+    needsProfileBackfillFromOnboarding(businessWithoutAddress, onboarding),
+    true
+  );
+});
+
+test('needsProfileBackfillFromOnboarding detects missing language and minority categories', () => {
+  const { needsProfileBackfillFromOnboarding } = require(syncUtilPath);
+  const onboarding = buildOnboarding({
+    address: {},
+    businessProfileImage: { url: '' },
+    featureBanner: { url: '' },
+    language: 'Spanish',
+    minorityCategories: ['LatinX'],
+  });
+
+  assert.equal(
+    needsProfileBackfillFromOnboarding(
+      {
+        address: {},
+        logo: '',
+        coverImage: '',
+        language: '',
+        minorityCategories: [],
+      },
+      onboarding
+    ),
+    true
+  );
+
+  assert.equal(
+    needsProfileBackfillFromOnboarding(
+      {
+        address: {},
+        logo: '',
+        coverImage: '',
+        language: 'Spanish',
+        minorityCategories: ['LatinX'],
+      },
+      onboarding
+    ),
+    false
+  );
 });
 
 test('syncBusinessFromOnboarding propagates Business save failures', async () => {

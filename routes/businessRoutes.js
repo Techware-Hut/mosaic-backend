@@ -118,6 +118,9 @@ router.delete(
 
 router.post('/draft', authenticate, isBusinessOwner, businessController.createBusinessDraft);
 
+// Vendor-controlled listing visibility toggle
+router.patch('/:id/visibility', authenticate, isBusinessOwner, businessController.updateBusinessVisibility);
+
 
 
 

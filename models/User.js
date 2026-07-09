@@ -97,7 +97,13 @@ verificationStatus: {
     // }
     minorityType: {
       type: String,
-    }
+    },
+    notificationPreferences: {
+      newBookingOrOrder: { type: Boolean, default: true  },
+      newReview:         { type: Boolean, default: true  },
+      paymentReceived:   { type: Boolean, default: true  },
+      marketingEmails:   { type: Boolean, default: false },
+    },
   },
   { timestamps: true }
 );

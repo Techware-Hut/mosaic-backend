@@ -164,7 +164,7 @@ exports.handleStripeWebhook = async (req, res) => {
         coverImage: draft.formData.coverImage || "",
         minorityType: draft.minorityType, // Use minorityType from the draft
         isApproved: true,
-        isActive: true, // Default to active; admin can deactivate later if needed
+        isActive: false, // Stays inactive until Stage 6 publish-storefront completes.
         subscriptionId: newSubscription._id,
         stripeSubscriptionId,
         stripeCustomerId: stripeCustomerId ? String(stripeCustomerId) : undefined,
