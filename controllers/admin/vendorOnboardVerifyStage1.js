@@ -186,6 +186,10 @@ const syncBusinessPoints = async (application, badge, options = {}) => {
     update.isApproved = options.isApproved;
   }
 
+  if (options.isActive !== undefined) {
+    update.isActive = options.isActive;
+  }
+
   await Business.findOneAndUpdate(
     { owner: ownerId },
     { $set: update }
@@ -1077,6 +1081,7 @@ exports.finalizeVerification = async (req, res) => {
     // ✅ Sync business
     await syncBusinessPoints(application, badge, {
       isApproved: application.status === 'verified',
+      ...(application.status === 'verified' ? {} : { isActive: false }),
     });
 
     const vendorEmail = application.userId?.email;
