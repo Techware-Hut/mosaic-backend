@@ -205,3 +205,49 @@ test('public business-service lookup returns persisted features for published se
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body.service.features, ['Online Booking', 'Offers Available']);
 });
+
+test('private business service lookup returns owner-shaped business hours and persisted faq', async () => {
+  const controller = loadController({
+    service: buildService({
+      isPublished: false,
+      services: [],
+      businessHours: [{ day: 'Monday', hours: '09:00-17:00', closed: false }],
+      faq: [{ question: 'Hours?', answer: '9 to 5' }],
+      amenities: [{ label: 'WiFi', available: true }],
+    }),
+  });
+  const res = mockResponse();
+
+  await controller.getPrivateBusinessServiceByBusinessId(
+    { user: { _id: ownerId }, params: { businessId } },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.service.businessHours, [{
+    day: 'Monday',
+    openTime: '09:00',
+    closeTime: '17:00',
+    isOpen: true,
+  }]);
+  assert.deepEqual(res.body.service.faq, [{ question: 'Hours?', answer: '9 to 5' }]);
+  assert.equal(res.body.service.categoryId.name, 'Beauty');
+});
+
+test('public business-service lookup returns amenities and faq for published service', async () => {
+  const controller = loadController({
+    service: buildService({
+      isPublished: true,
+      amenities: [{ label: 'Parking', available: true }],
+      faq: [{ question: 'Refund policy?', answer: '48 hours' }],
+      services: [{ name: 'Cut', price: 45, durationMinutes: 60 }],
+    }),
+  });
+  const res = mockResponse();
+
+  await controller.getBusinessServiceById({ params: { id: businessId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.service.amenities, [{ label: 'Parking', available: true }]);
+  assert.deepEqual(res.body.service.faq, [{ question: 'Refund policy?', answer: '48 hours' }]);
+});

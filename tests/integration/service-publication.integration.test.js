@@ -262,3 +262,86 @@ test('createService rejects missing child price and duration with field errors',
   assert.ok(res.body.fieldErrors['services[0].price']);
   assert.ok(res.body.fieldErrors['services[0].durationMinutes']);
 });
+
+test('service edit persistence: saving draft preserves categories, duration, and faq', async () => {
+  const agent = createAgent(getApp());
+  const vendor = await registerAndVerify(agent, { role: 'business_owner' });
+  const user = await User.findOne({ email: vendor.email });
+  const business = await seedServiceBusiness(user);
+  const { category, subcategory } = await seedServiceCategories();
+
+  await login(agent, vendor.email, vendor.password);
+
+  // 1. Create a service with duration, category, faq, etc.
+  const createRes = await agent.post('/api/service/').send({
+    title: 'Persistence Test Service',
+    description: 'Initial description',
+    price: 50,
+    duration: '2 hours',
+    businessId: business._id,
+    categories: [
+      {
+        categoryId: category._id.toString(),
+        subcategoryIds: [subcategory._id.toString()],
+      }
+    ],
+    services: [
+      {
+        name: 'Initial Sub Service',
+        price: 50,
+        durationMinutes: 120,
+      }
+    ],
+    faq: [
+      { question: 'Q1', answer: 'A1' }
+    ]
+  });
+
+  assert.equal(createRes.status, 201);
+  const serviceId = createRes.body.data.service._id;
+
+  // 2. Retrieve service to check initial values
+  const getRes1 = await agent.get(`/api/service/${serviceId}`);
+  assert.equal(getRes1.status, 200);
+  assert.equal(getRes1.body.data.service.duration, '2 hours');
+  assert.equal(getRes1.body.data.service.faq.length, 1);
+  assert.equal(getRes1.body.data.service.faq[0].question, 'Q1');
+  assert.equal(getRes1.body.data.service.categoryId._id.toString(), category._id.toString());
+  assert.equal(getRes1.body.data.service.subcategoryId._id.toString(), subcategory._id.toString());
+
+  // 3. Update the service to new values (simulating the save draft/edit cycle)
+  const updateRes = await agent.put(`/api/service/${serviceId}`).send({
+    title: 'Updated Test Service',
+    description: 'Updated description',
+    price: 60,
+    duration: '3 hours',
+    categories: [
+      {
+        categoryId: category._id.toString(),
+        subcategoryIds: [subcategory._id.toString()],
+      }
+    ],
+    services: [
+      {
+        name: 'Updated Sub Service',
+        price: 60,
+        durationMinutes: 180,
+      }
+    ],
+    faq: [
+      { question: 'Q2', answer: 'A2' }
+    ]
+  });
+
+  assert.equal(updateRes.status, 200);
+
+  // 4. Retrieve service again and verify fields are NOT cleared and have correct updated values
+  const getRes2 = await agent.get(`/api/service/${serviceId}`);
+  assert.equal(getRes2.status, 200);
+  assert.equal(getRes2.body.data.service.duration, '3 hours');
+  assert.equal(getRes2.body.data.service.faq.length, 1);
+  assert.equal(getRes2.body.data.service.faq[0].question, 'Q2');
+  assert.equal(getRes2.body.data.service.faq[0].answer, 'A2');
+  assert.equal(getRes2.body.data.service.categoryId._id.toString(), category._id.toString());
+  assert.equal(getRes2.body.data.service.subcategoryId._id.toString(), subcategory._id.toString());
+});
