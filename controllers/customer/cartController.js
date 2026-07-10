@@ -4,7 +4,7 @@ const Product = require('../../models/Product');
 const ProductVariant = require('../../models/ProductVariant');
 const Business = require('../../models/Business');
 const {
-    calculateShippingForVendor,
+    resolveShippingForCheckout,
     normalizeDeliverySpeed,
 } = require('../../utils/vendorShipping');
 const {
@@ -145,14 +145,15 @@ const buildCartPricing = async ({ cartDoc, items, deliverySpeed, businessDoc, co
     let shipping = null;
     let shippingError = null;
 
-    if (business?.shippingSettings?.method && totalQuantity > 0) {
+    if (totalQuantity > 0) {
         try {
-            const shippingResult = calculateShippingForVendor(
-                business.shippingSettings,
+            const shippingResult = resolveShippingForCheckout(
+                business?.shippingSettings,
                 {
                     deliverySpeed,
                     subtotal: discountedSubtotal,
                     totalQuantity,
+                    legacyItems: items,
                 }
             );
 
@@ -167,8 +168,6 @@ const buildCartPricing = async ({ cartDoc, items, deliverySpeed, businessDoc, co
         } catch (error) {
             shippingError = error.message;
         }
-    } else if (totalQuantity > 0) {
-        shippingError = 'Vendor shipping settings are not configured';
     }
 
     const shippingAmount = Number(shipping?.amount || 0);

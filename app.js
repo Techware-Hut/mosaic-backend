@@ -218,6 +218,8 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/bookings', bookingRoutes)
+const vendorAlertsRoutes = require('./routes/vendorAlertsRoutes');
+app.use('/api/vendor/alerts', vendorAlertsRoutes);
 app.use('/api/connect', connectRoutes);
 
 

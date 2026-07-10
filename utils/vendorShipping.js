@@ -226,10 +226,71 @@ const calculateShippingForVendor = (settings, options = {}) => {
   };
 };
 
+const readLegacyShippingAmount = (shippingObj, deliverySpeed) => {
+  if (!shippingObj || typeof shippingObj !== "object" || Array.isArray(shippingObj)) {
+    return 0;
+  }
+
+  const speed = normalizeDeliverySpeed(deliverySpeed);
+  if (speed === "express") {
+    const expressAmount = toNumber(shippingObj.express ?? shippingObj.overnight);
+    return Number.isFinite(expressAmount) && expressAmount >= 0 ? expressAmount : 0;
+  }
+
+  const amount = toNumber(shippingObj[speed]);
+  return Number.isFinite(amount) && amount >= 0 ? amount : 0;
+};
+
+const calculateLegacyShippingTotal = (items = [], deliverySpeed = "standard") => {
+  if (!Array.isArray(items) || items.length === 0) return 0;
+
+  const requestedSpeed = normalizeDeliverySpeed(deliverySpeed);
+
+  return items.reduce((sum, item) => {
+    const quantity = Number(item?.quantity || 1);
+    const itemSpeed = normalizeDeliverySpeed(item?.shippingMethod || item?.shippingType || "standard");
+    const storedCharge = toNumber(item?.shippingCharge ?? item?.shippingCost);
+
+    if (Number.isFinite(storedCharge) && storedCharge >= 0 && itemSpeed === requestedSpeed) {
+      return sum + storedCharge * quantity;
+    }
+
+    const legacyAmount = readLegacyShippingAmount(item?.shipping, deliverySpeed);
+    return sum + legacyAmount * quantity;
+  }, 0);
+};
+
+const resolveShippingForCheckout = (settings, options = {}) => {
+  if (settings?.method) {
+    return calculateShippingForVendor(settings, options);
+  }
+
+  const deliverySpeed = normalizeDeliverySpeed(options.deliverySpeed);
+  if (!DELIVERY_SPEEDS.includes(deliverySpeed)) {
+    throw new Error("Invalid delivery speed selected");
+  }
+
+  const legacyShippingAmount = Number.isFinite(toNumber(options.legacyShippingAmount))
+    ? Math.max(0, toNumber(options.legacyShippingAmount))
+    : calculateLegacyShippingTotal(options.legacyItems || [], deliverySpeed);
+
+  return {
+    deliverySpeed,
+    amount: legacyShippingAmount,
+    method: "legacy_product_shipping",
+    freeShippingApplied: false,
+    freeShippingThreshold: null,
+    matchedTier: null,
+  };
+};
+
 module.exports = {
   SHIPPING_METHODS,
   DELIVERY_SPEEDS,
   normalizeDeliverySpeed,
   normalizeShippingSettingsInput,
   calculateShippingForVendor,
+  readLegacyShippingAmount,
+  calculateLegacyShippingTotal,
+  resolveShippingForCheckout,
 };
