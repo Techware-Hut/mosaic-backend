@@ -68,6 +68,12 @@ function loadOrderMailerWithMocks({ createdConfigs, sentMessages }) {
     if (request === '../services/invoiceService') {
       return invoiceServiceMock;
     }
+    if (request === './notificationPreferenceGate') {
+      return {
+        filterOrderPaidVendorEmails: async (_order, vendorEmails = []) =>
+          [...new Set((vendorEmails || []).map((e) => String(e || '').trim()).filter(Boolean))],
+      };
+    }
     return originalLoad.call(this, request, parent, isMain);
   };
 
@@ -100,7 +106,7 @@ test('sendOrderPaidEmails uses provider-neutral SMTP config and MAIL_FROM', asyn
     _id: '507f1f77bcf86cd799439020',
     groupOrderId: 'MBH-ORDER-001',
     userId: { name: 'Customer User', email: 'customer@example.com' },
-    vendorId: { name: 'Vendor User', email: 'vendor@example.com' },
+    vendorId: '507f1f77bcf86cd799439021',
     businessId: {
       businessName: 'Vendor Shop',
       slug: 'vendor-shop',

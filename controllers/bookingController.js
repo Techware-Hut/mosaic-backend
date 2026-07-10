@@ -5,10 +5,14 @@ const Business = require('../models/Business');
 const User = require('../models/User');
 const {
   sendVendorNewServiceBookingEmail,
+  sendVendorNewFoodBookingEmail,
   sendCustomerNewServiceBookingConfirmationEmail,
   sendCustomerServicePaymentRequestEmail,
   sendCustomerServiceBookingDecisionEmail,
 } = require('../utils/bookingMailer');
+const {
+  resolveVendorNotificationRecipients,
+} = require('../utils/notificationPreferenceGate');
 
 const ALLOWED_SEAT_OPTIONS = ['upto 2', 'upto 4', 'upto 8', 'more than 10'];
 
@@ -46,8 +50,12 @@ const formatBookingDate = (value) => {
   });
 };
 
-const getVendorRecipients = (business, owner) => {
-  return [...new Set([business?.email, owner?.email].filter(Boolean))];
+const getVendorRecipients = async (business, owner) => {
+  return resolveVendorNotificationRecipients({
+    business,
+    owner,
+    preference: 'newBookingOrOrder',
+  });
 };
 
 const loadBookingForVendorAction = async (bookingId, vendorId) => {
@@ -96,7 +104,7 @@ exports.createServiceBooking = async (req, res) => {
     }
 
     const [business, owner] = await Promise.all([
-      Business.findById(service.businessId).select('businessName email'),
+      Business.findById(service.businessId).select('businessName email slug'),
       User.findById(service.ownerId).select('name email'),
     ]);
 
@@ -118,8 +126,9 @@ exports.createServiceBooking = async (req, res) => {
     });
 
     try {
+      const vendorRecipients = await getVendorRecipients(business, owner);
       await sendVendorNewServiceBookingEmail({
-        to: getVendorRecipients(business, owner),
+        to: vendorRecipients,
         vendorName: owner?.name || business?.businessName || 'Vendor',
         serviceTitle: service.title,
         customerName: name,
@@ -129,6 +138,7 @@ exports.createServiceBooking = async (req, res) => {
         date: formatBookingDate(date),
         slot,
         bookingId: newBooking._id.toString(),
+        businessSlug: business?.slug,
       });
     } catch (mailError) {
       console.error('Failed to send new service booking email to vendor:', mailError);
@@ -193,6 +203,11 @@ exports.createFoodBooking = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Food listing not found' });
     }
 
+    const [business, owner] = await Promise.all([
+      Business.findById(food.businessId).select('businessName email slug'),
+      User.findById(food.ownerId).select('name email'),
+    ]);
+
     const newBooking = await Booking.create({
       bookingType: 'food',
       foodId: food._id,
@@ -209,6 +224,25 @@ exports.createFoodBooking = async (req, res) => {
       customerId: getAuthenticatedUserId(req),
       customerInfo: { name, email, phone },
     });
+
+    try {
+      const vendorRecipients = await getVendorRecipients(business, owner);
+      await sendVendorNewFoodBookingEmail({
+        to: vendorRecipients,
+        vendorName: owner?.name || business?.businessName || 'Vendor',
+        foodTitle: food.title,
+        customerName: name,
+        customerEmail: email,
+        customerPhone: phone,
+        date: formatBookingDate(date),
+        slot,
+        seats: normalizedSeats,
+        bookingId: newBooking._id.toString(),
+        businessSlug: business?.slug,
+      });
+    } catch (mailError) {
+      console.error('Failed to send new food booking email to vendor:', mailError);
+    }
 
     res.status(201).json({ success: true, booking: newBooking });
   } catch (error) {

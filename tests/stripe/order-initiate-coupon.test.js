@@ -189,6 +189,7 @@ function loadInitiateOrder({
     }
     if (request.endsWith('utils/vendorShipping')) {
       return {
+        resolveShippingForCheckout: () => shippingResult,
         calculateShippingForVendor: () => shippingResult,
         normalizeDeliverySpeed: (value) => value || 'standard',
       };

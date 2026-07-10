@@ -152,7 +152,7 @@ const orderSchema = new Schema(
       },
       method: {
         type: String,
-        enum: ["flat_rate", "quantity_based", "free_shipping"],
+        enum: ["flat_rate", "quantity_based", "free_shipping", "legacy_product_shipping"],
       },
       amount: {
         type: Number,

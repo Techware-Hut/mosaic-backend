@@ -105,7 +105,7 @@ const {
 } = require("../utils/orderPhase");
 const { sendCustomerOrderLifecycleEmail } = require("../utils/orderLifecycleEmailDelivery");
 const {
-  calculateShippingForVendor,
+  resolveShippingForCheckout,
   normalizeDeliverySpeed,
 } = require("../utils/vendorShipping");
 const {
@@ -685,6 +685,11 @@ exports.initiateOrder = async (req, res) => {
           variant.color ||
           getVariantAttribute(variant, "color") ||
           "default",
+        shippingMethod: deliverySpeed,
+        shipping:
+          variant.shipping ||
+          variant.productId?.shipping ||
+          null,
       });
     }
 
@@ -838,12 +843,13 @@ exports.initiateOrder = async (req, res) => {
 
     let shippingCalculation;
     try {
-      shippingCalculation = calculateShippingForVendor(
+      shippingCalculation = resolveShippingForCheckout(
         business.shippingSettings,
         {
           deliverySpeed,
           subtotal: discountedSubtotal,
           totalQuantity,
+          legacyItems: rawVendorItems,
         }
       );
     } catch (shippingError) {

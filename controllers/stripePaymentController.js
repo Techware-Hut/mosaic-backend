@@ -159,7 +159,7 @@ exports.retrieveIntent = async (req, res) => {
       .select('userId groupOrderId status paymentStatus totalAmount currency items')
       .populate({
         path: "items.productId",
-        select: "title",
+        select: "title coverImage",
       });
 
     if (!orders || orders.length === 0) {
