@@ -44,12 +44,17 @@ function sanitizeOrderForPaymentPoll(order) {
     items: Array.isArray(plain.items)
       ? plain.items.map((item) => ({
           productId: item.productId?._id?.toString?.() || item.productId,
+          variantId: item.variantId?._id?.toString?.() || item.variantId,
           title: item.productId?.title || item.title || null,
+          coverImage: item.productId?.coverImage || null,
           quantity: item.quantity,
           price: item.price,
           size: item.size,
+          color: item.color || null,
         }))
       : [],
+    couponCode: plain.couponCode || null,
+    discountAmount: plain.discountAmount ?? 0,
   };
 }
 

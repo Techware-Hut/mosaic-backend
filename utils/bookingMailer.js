@@ -12,6 +12,13 @@ const safe = (value, fallback = 'N/A') => {
   return normalized || fallback;
 };
 
+const buildPartnerBookingsUrl = (businessSlug) => {
+  if (businessSlug) {
+    return buildFrontendUrl(`/partners/${encodeURIComponent(businessSlug)}/bookings`);
+  }
+  return buildFrontendUrl('/partners/dashboard');
+};
+
 exports.sendVendorNewServiceBookingEmail = async ({
   to,
   vendorName,
@@ -23,10 +30,11 @@ exports.sendVendorNewServiceBookingEmail = async ({
   date,
   slot,
   bookingId,
+  businessSlug,
 }) => {
   if (!to || to.length === 0) return;
 
-  const dashboardLink = buildFrontendUrl('/partners/dashboard');
+  const dashboardLink = buildPartnerBookingsUrl(businessSlug);
 
   const selectedServices = Array.isArray(services) && services.length > 0
     ? services.map((item) => `<li>${safe(item)}</li>`).join('')
@@ -49,7 +57,49 @@ exports.sendVendorNewServiceBookingEmail = async ({
         <p>Please review the request and either request payment, approve it, or reject it from your dashboard.</p>
         <p>
           <a href="${dashboardLink}" style="display:inline-block;padding:10px 18px;background:#0d6efd;color:#fff;text-decoration:none;border-radius:4px;">
-            Open Vendor Dashboard
+            Review booking requests
+          </a>
+        </p>
+      </div>
+    `,
+  });
+};
+
+exports.sendVendorNewFoodBookingEmail = async ({
+  to,
+  vendorName,
+  foodTitle,
+  customerName,
+  customerEmail,
+  customerPhone,
+  date,
+  slot,
+  seats,
+  bookingId,
+  businessSlug,
+}) => {
+  if (!to || to.length === 0) return;
+
+  const dashboardLink = buildPartnerBookingsUrl(businessSlug);
+
+  await transporter.sendMail({
+    from: formatMosaicFromHeader(),
+    to,
+    subject: 'New food reservation request received',
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <h2>Hi ${safe(vendorName, 'Vendor')},</h2>
+        <p>You have received a new food reservation request.</p>
+        <p><strong>Booking ID:</strong> ${safe(bookingId)}</p>
+        <p><strong>Food item:</strong> ${safe(foodTitle)}</p>
+        <p><strong>Date:</strong> ${safe(date)}</p>
+        <p><strong>Slot:</strong> ${safe(slot)}</p>
+        <p><strong>Party size:</strong> ${safe(seats)}</p>
+        <p><strong>Customer:</strong> ${safe(customerName)} (${safe(customerEmail)}, ${safe(customerPhone)})</p>
+        <p>Please review the reservation from your dashboard.</p>
+        <p>
+          <a href="${dashboardLink}" style="display:inline-block;padding:10px 18px;background:#0d6efd;color:#fff;text-decoration:none;border-radius:4px;">
+            Review reservations
           </a>
         </p>
       </div>
