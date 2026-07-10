@@ -235,7 +235,11 @@ exports.getAllServices = async (req, res) => {
     const { page: pageN, limit: limitN, skip } = clipListPagination(page, limit);
 
     let services = await Service.find(filters)
-      .select('title services averageRating totalReviews slug description contact.address coverImage location price businessId')
+      .select(
+        'title services averageRating totalReviews slug description contact.address coverImage location price businessId categoryId subcategoryId features amenities'
+      )
+      .populate('categoryId', 'name slug')
+      .populate('subcategoryId', 'name slug')
       .sort(sortOption)
       .skip(skip)
       .limit(limitN)
@@ -250,7 +254,7 @@ exports.getAllServices = async (req, res) => {
     const serviceBusinesses = await Business.find(
       publicMarketplaceBusinessFilter({ _id: { $in: serviceBusinessIds } })
     )
-      .select('_id businessName description logo email phone address socialLinks badge')
+      .select('_id businessName description logo email phone address socialLinks badge tags')
       .lean();
 
     const vendorDetails = await VendorOnboardingStage1.find({ businessId: { $in: serviceBusinessIds } })
@@ -273,6 +277,7 @@ exports.getAllServices = async (req, res) => {
       return toPublicListingCard(
         {
           ...service,
+          tags: Array.isArray(businessInfo?.tags) ? businessInfo.tags : [],
           businessDetails: {
             businessName: businessInfo?.businessName || null,
             description: businessInfo?.description || null,
@@ -293,6 +298,7 @@ exports.getAllServices = async (req, res) => {
               designation: vendorInfo?.primaryContactDesignation || null,
             },
             badge: businessInfo?.badge || null,
+            tags: Array.isArray(businessInfo?.tags) ? businessInfo.tags : [],
           },
         },
         { listingType: 'service' }
@@ -365,8 +371,8 @@ exports.getServiceById = async (req, res) => {
     const { id } = req.params;
 
     const service = await Service.findById(id)
-      .populate('categoryId', 'name')
-      .populate('subcategoryId', 'name')
+      .populate('categoryId', 'name slug')
+      .populate('subcategoryId', 'name slug')
       .populate({
         path: 'businessId',
         select: `
@@ -381,6 +387,7 @@ exports.getServiceById = async (req, res) => {
           address
           socialLinks
           badge
+          tags
         `,
       });
 
@@ -436,6 +443,9 @@ exports.getServiceById = async (req, res) => {
     }
 
     const serviceData = service.toObject();
+    if (Array.isArray(business?.tags) && business.tags.length) {
+      serviceData.tags = business.tags;
+    }
     delete serviceData.businessId;
 
     res.status(200).json({
