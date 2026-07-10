@@ -6,6 +6,11 @@ const VendorOnboardingStage1 = require('../models/VendorOnboardingStage1');
 const {
   isPublicMarketplaceBusiness,
 } = require('../lib/marketplace/businessEligibility');
+const {
+  filterPublishableListings,
+  LISTING_PRICE_REQUIRED_CODE,
+  LISTING_PRICE_REQUIRED_MESSAGE,
+} = require('../lib/marketplace/listingPricePolicy');
 
 const LISTING_TYPES = new Set(['product', 'service', 'food']);
 // Approved 2026-07-07 (#218): Connect/payout setup required only for product vendors
@@ -127,12 +132,15 @@ function summarizeCounts(snapshot) {
 
 function getEligibleListingsForBusiness(business, snapshot) {
   const listingType = String(business?.listingType || '').trim().toLowerCase();
+  let candidateListings = [];
 
   if (listingType === 'product') {
+    candidateListings = snapshot.products || [];
     return {
       type: listingType,
-      listings: snapshot.products || [],
-      variantIds: (snapshot.products || [])
+      listings: filterPublishableListings(listingType, candidateListings),
+      allListings: candidateListings,
+      variantIds: candidateListings
         .flatMap((product) => product.variants || [])
         .map((variant) => variant._id)
         .filter(Boolean),
@@ -140,22 +148,26 @@ function getEligibleListingsForBusiness(business, snapshot) {
   }
 
   if (listingType === 'service') {
+    candidateListings = (snapshot.services || []).filter((service) => (
+      Array.isArray(service.services) && service.services.length > 0
+    ));
     return {
       type: listingType,
-      listings: (snapshot.services || []).filter((service) => (
-        Array.isArray(service.services) && service.services.length > 0
-      )),
+      listings: filterPublishableListings(listingType, candidateListings),
+      allListings: candidateListings,
     };
   }
 
   if (listingType === 'food') {
+    candidateListings = snapshot.foods || [];
     return {
       type: listingType,
-      listings: snapshot.foods || [],
+      listings: filterPublishableListings(listingType, candidateListings),
+      allListings: candidateListings,
     };
   }
 
-  return { type: listingType, listings: [] };
+  return { type: listingType, listings: [], allListings: [] };
 }
 
 function countRequiredListings(eligible) {
@@ -206,16 +218,16 @@ async function loadListingSnapshotsByBusinessIds(businessIds = []) {
 
   const [products, services, foods, variants] = await Promise.all([
     Product.find({ businessId: { $in: ids }, isDeleted: false })
-      .select('_id title slug businessId ownerId coverImage isPublished isDeleted createdAt updatedAt')
+      .select('_id title slug businessId ownerId coverImage price isPublished isDeleted createdAt updatedAt')
       .lean(),
     Service.find({ businessId: { $in: ids } })
-      .select('_id title slug businessId ownerId coverImage isPublished services createdAt updatedAt')
+      .select('_id title slug businessId ownerId coverImage price isPublished services createdAt updatedAt')
       .lean(),
     Food.find({ businessId: { $in: ids } })
-      .select('_id title slug businessId ownerId coverImage isPublished createdAt updatedAt')
+      .select('_id title slug businessId ownerId coverImage price isPublished createdAt updatedAt')
       .lean(),
     ProductVariant.find({ businessId: { $in: ids }, isDeleted: false })
-      .select('_id productId businessId ownerId sku stock isPublished isDeleted createdAt updatedAt')
+      .select('_id productId businessId ownerId sku stock price salePrice isPublished isDeleted createdAt updatedAt')
       .lean(),
   ]);
 
@@ -328,6 +340,11 @@ function buildPublicationBlockers({ business, onboarding, snapshot }) {
     blockers.push({
       code: 'LISTING_TYPE_REQUIRED',
       message: 'Choose a valid business listing type before publishing.',
+    });
+  } else if (eligible.allListings?.length > 0 && eligible.listings.length === 0) {
+    blockers.push({
+      code: LISTING_PRICE_REQUIRED_CODE,
+      message: LISTING_PRICE_REQUIRED_MESSAGE,
     });
   } else if (eligible.listings.length === 0) {
     blockers.push({

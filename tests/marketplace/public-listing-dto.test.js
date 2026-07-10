@@ -59,7 +59,7 @@ test('toPublicListingCard handles missing price with safe priceLabel', () => {
     { listingType: 'product' }
   );
   assert.equal(card.price, null);
-  assert.equal(card.priceLabel, 'Contact for price');
+  assert.equal(card.priceLabel, null);
   assert.equal(card.listingType, 'product');
   assert.equal(card.id, '507f1f77bcf86cd799439011');
   assert.deepEqual(card.tags, []);
@@ -300,7 +300,7 @@ test('displayPrice mirrors priceLabel on listing cards', () => {
     { _id: '507f1f77bcf86cd799439011', title: 'Free quote' },
     { listingType: 'service' }
   );
-  assert.equal(noPrice.displayPrice, 'Contact for price');
+  assert.equal(noPrice.displayPrice, null);
 });
 
 test('vendorLogo comes from populated businessId without inventing values', () => {

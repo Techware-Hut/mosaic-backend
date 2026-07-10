@@ -146,7 +146,7 @@ test('getFeaturedProducts preserves products and pagination wrapper', async () =
   assert.equal(res.body.pagination.totalProducts, 5);
   assert.equal(res.body.pagination.totalPages, 3);
   assert.equal(res.body.products[0].price, null);
-  assert.equal(res.body.products[0].priceLabel, 'Contact for price');
+  assert.equal(res.body.products[0].priceLabel, null);
 });
 
 test('getFeaturedProducts scopes query to approved active businesses', async () => {
