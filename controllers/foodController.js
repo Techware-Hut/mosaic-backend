@@ -21,6 +21,7 @@ const {
   logUploadConfigFailure,
   logUploadFailure,
 } = require('../utils/uploadDiagnostics');
+const { publicMarketplaceBusinessFilter } = require('../lib/marketplace/businessEligibility');
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -203,10 +204,9 @@ exports.getBusinessFoodById = async (req, res) => {
       return res.status(404).json({ message: 'Business food not found.' });
     }
 
-    const visibleBusiness = await Business.findOne({
-      _id: food.businessId?._id,
-      isActive: true,
-    }).select('_id').lean();
+    const visibleBusiness = await Business.findOne(
+      publicMarketplaceBusinessFilter({ _id: food.businessId?._id })
+    ).select('_id').lean();
 
     if (!visibleBusiness) {
       return res.status(404).json({ message: 'Business food not found.' });

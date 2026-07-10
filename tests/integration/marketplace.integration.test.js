@@ -13,12 +13,18 @@ const {
   createAdminDirect,
   seedApprovedBusiness,
   seedPublishedProduct,
+  seedServiceBusiness,
+  seedServiceCategories,
 } = require('./helpers/factories');
 const User = require('../../models/User');
 const Business = require('../../models/Business');
 const ProductVariant = require('../../models/ProductVariant');
 const Cart = require('../../models/Cart');
 const CartItem = require('../../models/CartItem');
+const Service = require('../../models/Service');
+const Food = require('../../models/Food');
+const FoodCategory = require('../../models/FoodCategory');
+const FoodSubcategory = require('../../models/FoodSubcategory');
 
 test.before(async () => {
   await startHarness();
@@ -219,4 +225,118 @@ test('admin activation does not approve, while admin approve sets public eligibi
   reloaded = await Business.findById(business._id).lean();
   assert.equal(reloaded.isApproved, true);
   assert.equal(reloaded.isActive, true);
+});
+
+test('legacy business-service endpoint hides rejected-live vendor', async () => {
+  const agent = createAgent(getApp());
+  const vendor = await registerAndVerify(agent, { role: 'business_owner' });
+  const user = await User.findOne({ email: vendor.email });
+  const business = await seedServiceBusiness(user, {
+    isApproved: false,
+    isActive: true,
+    businessName: 'Rejected Live Service Vendor',
+  });
+  const { category, subcategory } = await seedServiceCategories();
+
+  const loginRes = await login(agent, vendor.email, vendor.password);
+  assert.equal(loginRes.status, 200);
+
+  const createRes = await agent.post('/api/service/').send({
+    title: 'Rejected Live Service',
+    description: 'Should stay hidden from legacy public lookup',
+    price: 45,
+    duration: '60',
+    services: [{ name: 'Basic Cut' }],
+    businessId: business._id,
+    categoryId: category._id,
+    subcategoryId: subcategory._id,
+    isPublished: true,
+  });
+  assert.equal(createRes.status, 201);
+
+  const serviceId = String(createRes.body?.data?.service?._id);
+  assert.ok(serviceId);
+
+  const legacyDetail = await agent.get(`/api/service/business-service/${serviceId}`);
+  assert.equal(legacyDetail.status, 404);
+
+  const publicDetail = await agent.get(`/api/public/services/${serviceId}`);
+  assert.equal(publicDetail.status, 404);
+});
+
+test('legacy business-food endpoint hides rejected-live vendor', async () => {
+  const agent = createAgent(getApp());
+  const vendor = await registerAndVerify(agent, { role: 'business_owner' });
+  const user = await User.findOne({ email: vendor.email });
+  const business = await seedApprovedBusiness(user, {
+    listingType: 'food',
+    isApproved: false,
+    isActive: true,
+    businessName: 'Rejected Live Food Vendor',
+  });
+
+  const category = await FoodCategory.create({
+    name: `Rejected Food Category ${Date.now()}`,
+  });
+  const subcategory = await FoodSubcategory.create({
+    name: `Rejected Food Subcategory ${Date.now()}`,
+    category: category._id,
+  });
+
+  const food = await Food.create({
+    title: 'Rejected Live Supper Club',
+    description: 'Should stay hidden from legacy public lookup',
+    price: 35,
+    categoryId: category._id,
+    subcategoryId: subcategory._id,
+    businessId: business._id,
+    ownerId: user._id,
+    isPublished: true,
+  });
+
+  const legacyDetail = await agent.get(`/api/food/business-food/${food._id}`);
+  assert.equal(legacyDetail.status, 404);
+
+  const publicDetail = await agent.get(`/api/public/foods/${food._id}`);
+  assert.equal(publicDetail.status, 404);
+});
+
+test('GET /api/business returns all approved marketplace listing types', async () => {
+  const agent = createAgent(getApp());
+  const res = await agent.get('/api/business').query({ limit: 50 });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.success, true);
+  assert.ok(res.body.total >= 0);
+
+  const listingTypes = new Set(
+    (res.body.data || []).map((row) => row.listingType).filter(Boolean)
+  );
+  if (res.body.total > 0) {
+    assert.ok([...listingTypes].every((type) => ['product', 'service', 'food'].includes(type)));
+  }
+});
+
+test('GET /api/business listingType filter scopes results', async () => {
+  const agent = createAgent(getApp());
+  const allRes = await agent.get('/api/business').query({ limit: 50 });
+  const serviceRes = await agent.get('/api/business').query({ listingType: 'service', limit: 50 });
+
+  assert.equal(allRes.status, 200);
+  assert.equal(serviceRes.status, 200);
+  assert.ok(serviceRes.body.total <= allRes.body.total);
+  assert.ok(
+    (serviceRes.body.data || []).every((row) => row.listingType === 'service')
+  );
+});
+
+test('GET /api/business ignores invalid productCategory labels without 500', async () => {
+  const agent = createAgent(getApp());
+  const res = await agent.get('/api/business').query({
+    productCategory: 'Fashion',
+    limit: 10,
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.success, true);
+  assert.ok(Array.isArray(res.body.data));
 });

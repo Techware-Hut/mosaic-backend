@@ -178,6 +178,7 @@ test('finalizeVerification rejects when required docs missing', async () => {
   assert.deepEqual(application.verificationNotificationLog[0].messageIds, ['vendor-rejection-message']);
   assert.deepEqual(application.verificationNotificationLog[0].documentsNeeded, ['EIN document']);
   assert.equal(businessUpdates.at(-1).update.$set.isApproved, false);
+  assert.equal(businessUpdates.at(-1).update.$set.isActive, false);
 });
 
 test('finalizeVerification explicit approve persists reviewer identity and timestamps', async () => {
@@ -272,6 +273,7 @@ test('finalizeVerification explicit reject stores reason, notes, next action, an
   assert.equal(res.body.data.requiredNextAction, 'Upload a current business license and resubmit.');
   assert.equal(mailerCalls.rejection.rejectionReason, 'Business license appears expired');
   assert.equal(businessUpdates.at(-1).update.$set.isApproved, false);
+  assert.equal(businessUpdates.at(-1).update.$set.isActive, false);
 });
 
 test('finalizeVerification auto reject persists default review metadata', async () => {
