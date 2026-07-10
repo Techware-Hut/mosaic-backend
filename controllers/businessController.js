@@ -1,4 +1,6 @@
 const Business = require("../models/Business");
+const Service = require("../models/Service");
+const Food = require("../models/Food");
 const Subscription = require("../models/Subscription");
 const { uploadFile } = require("../utils/uploadFile");
 const cleanupUploads = require("../utils/cleanupUploads");
@@ -17,6 +19,12 @@ const { toPublicBusinessCard } = require("../lib/listing/publicListingDto");
 const {
   publicMarketplaceBusinessFilter,
 } = require("../lib/marketplace/businessEligibility");
+const {
+  resolveListingTypeFilter,
+  applyListingTypeCategoryFilter,
+  buildStorefrontPath,
+  mapFirstListingIdByBusiness,
+} = require("../lib/marketplace/vendorDirectoryQuery");
 const {
   attachListingSnapshotToBusiness,
   enrichBusinessesWithListingSnapshots,
@@ -863,7 +871,7 @@ exports.getProductBusinesses = async (req, res) => {
       city,
       state,
       country,
-      productCategory,
+      listingType,
       tag,
       tags,
       zip,
@@ -871,18 +879,21 @@ exports.getProductBusinesses = async (req, res) => {
       limit = 10,
     } = req.query;
 
+    const listingTypeFilter = resolveListingTypeFilter(listingType);
     const filters = publicMarketplaceBusinessFilter({
-      listingType: "product",
+      listingType: listingTypeFilter,
     });
 
     if (search) filters.businessName = { $regex: search, $options: "i" };
     if (city) filters["address.city"] = city;
     if (state) filters["address.state"] = state;
     if (country) filters["address.country"] = country;
-    if (productCategory) {
-      const categoryIds = productCategory.split(",");
-      filters.productCategories = { $in: categoryIds };
-    }
+
+    applyListingTypeCategoryFilter(
+      filters,
+      typeof listingTypeFilter === "string" ? listingTypeFilter : null,
+      req.query
+    );
 
     const tagList = String(tags || tag || "")
       .split(",")
@@ -910,24 +921,73 @@ exports.getProductBusinesses = async (req, res) => {
       );
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, Math.min(50, parseInt(limit, 10) || 10));
+    const skip = (pageNum - 1) * limitNum;
 
     const businesses = await Business.find(filters)
-      .select("businessName slug logo") // ✅ Only these fields
+      .select("businessName slug logo listingType")
       .skip(skip)
-      .limit(parseInt(limit))
-      .sort({ createdAt: -1 });
+      .limit(limitNum)
+      .sort({ createdAt: -1 })
+      .lean();
 
     const total = await Business.countDocuments(filters);
+
+    const serviceBusinessIds = businesses
+      .filter((business) => business.listingType === "service")
+      .map((business) => business._id);
+    const foodBusinessIds = businesses
+      .filter((business) => business.listingType === "food")
+      .map((business) => business._id);
+
+    const [serviceRows, foodRows] = await Promise.all([
+      serviceBusinessIds.length
+        ? Service.find({
+            businessId: { $in: serviceBusinessIds },
+            isPublished: true,
+          })
+            .select("_id businessId")
+            .sort({ createdAt: -1 })
+            .lean()
+        : [],
+      foodBusinessIds.length
+        ? Food.find({
+            businessId: { $in: foodBusinessIds },
+            isPublished: true,
+          })
+            .select("_id businessId")
+            .sort({ createdAt: -1 })
+            .lean()
+        : [],
+    ]);
+
+    const serviceListingByBusiness = mapFirstListingIdByBusiness(serviceRows);
+    const foodListingByBusiness = mapFirstListingIdByBusiness(foodRows);
 
     res.json({
       success: true,
       total,
-      page: parseInt(page),
-      totalPages: Math.ceil(total / limit),
-      data: businesses.map((business) =>
-        toPublicBusinessCard(business.toObject ? business.toObject() : business)
-      ),
+      page: pageNum,
+      totalPages: Math.ceil(total / limitNum) || 0,
+      data: businesses.map((business) => {
+        const businessId = String(business._id);
+        const listingId =
+          business.listingType === "service"
+            ? serviceListingByBusiness.get(businessId)
+            : business.listingType === "food"
+              ? foodListingByBusiness.get(businessId)
+              : businessId;
+        const card = toPublicBusinessCard(business);
+        const storefrontPath = buildStorefrontPath(
+          business.listingType,
+          businessId,
+          listingId
+        );
+        return storefrontPath
+          ? { ...card, storefrontPath }
+          : card;
+      }),
     });
   } catch (err) {
     console.error("Error fetching businesses:", err);
