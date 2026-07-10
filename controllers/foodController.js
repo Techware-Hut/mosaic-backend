@@ -22,6 +22,9 @@ const {
   logUploadFailure,
 } = require('../utils/uploadDiagnostics');
 const { publicMarketplaceBusinessFilter } = require('../lib/marketplace/businessEligibility');
+const {
+  validateFoodPublishState,
+} = require('../lib/marketplace/listingPricePolicy');
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -108,10 +111,23 @@ exports.createFood = async (req, res) => {
       });
     }
 
+    const nextPublished = Boolean(isPublished);
+    const numericPrice = Number.isFinite(Number(price)) ? Number(price) : null;
+    const publishCheck = validateFoodPublishState({
+      food: { price: numericPrice },
+      isPublished: nextPublished,
+    });
+    if (!publishCheck.ok) {
+      return res.status(400).json({
+        error: publishCheck.message,
+        code: publishCheck.code,
+      });
+    }
+
     const food = new Food({
       title: title || 'Food',
       description: description || '',
-      price: Number.isFinite(Number(price)) ? Number(price) : 0,
+      price: numericPrice ?? 0,
       categoryId,
       subcategoryId,
       businessId,
@@ -131,7 +147,7 @@ exports.createFood = async (req, res) => {
       address: location.address || '',
     }
   : undefined,
-      isPublished: Boolean(isPublished),
+      isPublished: nextPublished,
       foodType: foodType || '',
       brand: brand || '',
     });
@@ -337,6 +353,17 @@ exports.updateFood = async (req, res) => {
 
     if (Array.isArray(food.images)) {
       food.images = food.images.filter(Boolean);
+    }
+
+    const publishCheck = validateFoodPublishState({
+      food: food.toObject(),
+      isPublished: food.isPublished,
+    });
+    if (!publishCheck.ok) {
+      return res.status(400).json({
+        message: publishCheck.message,
+        code: publishCheck.code,
+      });
     }
 
     await food.save();

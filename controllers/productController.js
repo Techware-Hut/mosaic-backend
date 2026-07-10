@@ -30,6 +30,7 @@ const {
   logUploadConfigFailure,
   logUploadFailure,
 } = require('../utils/uploadDiagnostics');
+const { validateProductPublishState } = require('../lib/marketplace/listingPricePolicy');
 const { Decimal128 } = mongoose.Types;
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -352,6 +353,8 @@ exports.createProductWithVariants = async (req, res) => {
       });
     }
 
+    const willPublish = Boolean(isPublished);
+
     // Create Product
     const product = new Product({
       title,
@@ -367,7 +370,7 @@ exports.createProductWithVariants = async (req, res) => {
       galleryImages: galleryImages || [],
       metaFields: metaFields || [],
       discount: discount || null,
-      isPublished: isPublished || false,
+      isPublished: false,
     });
 
     await product.save();
@@ -420,9 +423,24 @@ for (const variant of variants) {
     stock: normalizedVariant.stock,
     shipping: normalizeVariantShipping(variant.shipping),
     images: variant.images || [],
-    isPublished: isPublished || false,
+    isPublished: willPublish,
   });
 }
+
+    if (willPublish) {
+      const publishCheck = validateProductPublishState({
+        product: {},
+        variants: variantDocs,
+        isPublished: true,
+      });
+      if (!publishCheck.ok) {
+        await Product.findByIdAndDelete(product._id);
+        return res.status(400).json({
+          error: publishCheck.message,
+          code: publishCheck.code,
+        });
+      }
+    }
 
 // const variantDocs = [];
 // const usedSkus = new Set();
@@ -493,6 +511,7 @@ const maxPrice = Math.max(...prices);
       await Product.findByIdAndUpdate(product._id, {
         price: Decimal128.fromString(minPrice.toString()),
         maxPrice: Decimal128.fromString(maxPrice.toString()),
+        isPublished: willPublish,
       });
 
     } catch (variantErr) {
@@ -862,7 +881,7 @@ exports.updateProduct = async (req, res) => {
     }
     product.metaFields = metaFields || product.metaFields;
     product.discount = discount || product.discount;
-    product.isPublished =
+    const nextPublished =
       isPublished !== undefined ? isPublished : product.isPublished;
 
     await product.save();
@@ -969,6 +988,22 @@ exports.updateProduct = async (req, res) => {
     // Recalculate product price based on min salePrice
     // -----------------------------
     const allVariants = await ProductVariant.find({ productId });
+
+    if (nextPublished) {
+      const publishCheck = validateProductPublishState({
+        product,
+        variants: allVariants,
+        isPublished: true,
+      });
+      if (!publishCheck.ok) {
+        return res.status(400).json({
+          error: publishCheck.message,
+          code: publishCheck.code,
+        });
+      }
+    }
+
+    product.isPublished = nextPublished;
 
     if (allVariants.length > 0) {
       const prices = allVariants.map(v => {
@@ -1353,12 +1388,54 @@ exports.updateVariant = async (req, res) => {
       variant.shipping = normalizeVariantShipping(shipping, variant.shipping);
     }
     if (images) variant.images = images;
+
+    const nextVariantPublished =
+      isPublished !== undefined ? isPublished : variant.isPublished;
+
+    if (nextVariantPublished) {
+      const candidateVariant = {
+        ...variant.toObject(),
+        price: normalizedVariant.hasPrice
+          ? toDecimal128(normalizedVariant.price)
+          : variant.price,
+        salePrice: normalizedVariant.hasSalePrice
+          ? (normalizedVariant.hasSalePrice ? toDecimal128(normalizedVariant.salePrice) : null)
+          : variant.salePrice,
+        isPublished: true,
+      };
+      const publishCheck = validateProductPublishState({
+        product,
+        variants: [candidateVariant],
+        isPublished: true,
+      });
+      if (!publishCheck.ok) {
+        return res.status(400).json({
+          error: publishCheck.message,
+          code: publishCheck.code,
+        });
+      }
+    }
+
     if (isPublished !== undefined) variant.isPublished = isPublished;
 
     await variant.save();
 
     // Auto-publish/unpublish product based on variants
     if (isPublished === true && !product.isPublished) {
+      const allVariants = await ProductVariant.find({ productId, isDeleted: false });
+      const publishCheck = validateProductPublishState({
+        product,
+        variants: allVariants,
+        isPublished: true,
+      });
+      if (!publishCheck.ok) {
+        variant.isPublished = false;
+        await variant.save();
+        return res.status(400).json({
+          error: publishCheck.message,
+          code: publishCheck.code,
+        });
+      }
       product.isPublished = true;
       await product.save();
     } else if (isPublished === false) {

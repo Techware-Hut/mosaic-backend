@@ -25,7 +25,11 @@ function activeApprovedBusiness(overrides = {}) {
 function listingSnapshotForType(listingType) {
   if (listingType === 'product') {
     return {
-      products: [{ _id: 'prod-1', isPublished: false, variants: [] }],
+      products: [{
+        _id: 'prod-1',
+        isPublished: false,
+        variants: [{ price: 25, isPublished: false }],
+      }],
       services: [],
       foods: [],
     };
@@ -44,7 +48,7 @@ function listingSnapshotForType(listingType) {
   return {
     products: [],
     services: [],
-    foods: [{ _id: 'food-1', isPublished: false }],
+    foods: [{ _id: 'food-1', isPublished: false, price: 12 }],
   };
 }
 
@@ -93,4 +97,18 @@ test('food vendor can publish without Connect or payout flags', () => {
   });
 
   assert.equal(blockers.length, 0);
+});
+
+test('buildPublicationBlockers surfaces LISTING_PRICE_REQUIRED when listings exist without price', () => {
+  const blockers = buildPublicationBlockers({
+    business: activeApprovedBusiness({ listingType: 'food' }),
+    onboarding: verifiedOnboarding(),
+    snapshot: {
+      products: [],
+      services: [],
+      foods: [{ _id: 'food-1', isPublished: false, price: 0 }],
+    },
+  });
+
+  assert.ok(blockers.some((blocker) => blocker.code === 'LISTING_PRICE_REQUIRED'));
 });
