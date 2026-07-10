@@ -300,3 +300,43 @@ test('legacy business-food endpoint hides rejected-live vendor', async () => {
   const publicDetail = await agent.get(`/api/public/foods/${food._id}`);
   assert.equal(publicDetail.status, 404);
 });
+
+test('GET /api/business returns all approved marketplace listing types', async () => {
+  const agent = createAgent(getApp());
+  const res = await agent.get('/api/business').query({ limit: 50 });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.success, true);
+  assert.ok(res.body.total >= 0);
+
+  const listingTypes = new Set(
+    (res.body.data || []).map((row) => row.listingType).filter(Boolean)
+  );
+  if (res.body.total > 0) {
+    assert.ok([...listingTypes].every((type) => ['product', 'service', 'food'].includes(type)));
+  }
+});
+
+test('GET /api/business listingType filter scopes results', async () => {
+  const agent = createAgent(getApp());
+  const allRes = await agent.get('/api/business').query({ limit: 50 });
+  const serviceRes = await agent.get('/api/business').query({ listingType: 'service', limit: 50 });
+
+  assert.equal(allRes.status, 200);
+  assert.equal(serviceRes.status, 200);
+  assert.ok(serviceRes.body.total <= allRes.body.total);
+  assert.ok(
+    (serviceRes.body.data || []).every((row) => row.listingType === 'service')
+  );
+});
+
+test('GET /api/business ignores invalid productCategory labels without 500', async () => {
+  const agent = createAgent(getApp());
+  const res = await agent.get('/api/business').query({
+    productCategory: 'Fashion',
+    limit: 10,
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.success, true);
+  assert.ok(Array.isArray(res.body.data));
+});
