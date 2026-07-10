@@ -16,6 +16,15 @@ const {
   formatOwnerServiceResponse,
 } = require('../../lib/service/serviceContract');
 
+test('validateChildServices rejects zero child price with field key', () => {
+  const result = validateChildServices([
+    { name: 'Basic Cut', price: 0, durationMinutes: 60 },
+  ]);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.fieldErrors['services[0].price']);
+});
+
 test('validateChildServices rejects missing child price with field key', () => {
   const result = validateChildServices([
     { name: 'Basic Cut', durationMinutes: 60 },
