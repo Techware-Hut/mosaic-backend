@@ -289,6 +289,85 @@ exports.sendVendorSubmissionConfirmationEmail = async ({
   return transporter.sendMail(mailOptions);
 };
 
+const onboardingPaymentReminderCopy = Object.freeze({
+  payment_pending: {
+    headline: 'Your verification payment is still pending',
+    detail:
+      'We noticed you started your Mosaic Biz Hub vendor application but have not completed the one-time verification fee yet.',
+    ctaPath: '/partners/business/payment',
+  },
+  paid_draft_unsubmitted: {
+    headline: 'Your application is ready to submit',
+    detail:
+      'Your verification payment is complete. Finish your application details and submit for admin review to keep onboarding moving.',
+    ctaPath: '/partners/business/payment',
+  },
+});
+
+exports.sendPaymentReminderEmail = async (vendorData = {}) => {
+  const {
+    to,
+    vendorName,
+    businessName,
+    applicationId,
+    reminderKind = 'payment_pending',
+    supportEmail,
+  } = vendorData;
+
+  const copy = onboardingPaymentReminderCopy[reminderKind]
+    || onboardingPaymentReminderCopy.payment_pending;
+  const displayName = vendorName || 'there';
+  const displayBusinessName = businessName || 'your business';
+  const contactEmail = supportEmail || process.env.SUPPORT_EMAIL || 'info@mosaicbizhub.com';
+  const actionUrl = buildFrontendUrl(copy.ctaPath);
+
+  const mailOptions = {
+    from: formatMosaicFromHeader(),
+    to,
+    subject: 'Action Required: Complete Your Vendor Onboarding',
+    html: `
+      <div style="font-family:Arial,sans-serif;background:#f8fafc;padding:28px;">
+        <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;padding:28px;border:1px solid #e2e8f0;">
+          <p style="margin:0 0 8px;font-size:12px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;color:#b45309;">
+            Onboarding Alert
+          </p>
+          <h2 style="margin:0 0 12px;color:#0f172a;">Hello ${escapeHtml(displayName)},</h2>
+          <p style="color:#475569;line-height:1.6;margin:0 0 16px;">
+            ${escapeHtml(copy.detail)} for <strong>${escapeHtml(displayBusinessName)}</strong>.
+          </p>
+
+          <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:16px;margin:18px 0;">
+            <p style="margin:0 0 8px;color:#9a3412;font-weight:bold;">${escapeHtml(copy.headline)}</p>
+            <p style="margin:0;color:#7c2d12;line-height:1.6;">
+              Pick up where you left off to unlock vendor verification, storefront setup, and marketplace listings.
+            </p>
+          </div>
+
+          <div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:14px;margin:18px 0;">
+            <p style="margin:0;color:#334155;"><strong>Application ID:</strong> ${escapeHtml(applicationId || 'N/A')}</p>
+          </div>
+
+          <div style="margin:24px 0;text-align:center;">
+            <a href="${actionUrl}" style="background:#1d4ed8;color:#fff;padding:14px 22px;text-decoration:none;border-radius:6px;font-size:15px;font-weight:bold;display:inline-block;">
+              Complete Your Payment &amp; Onboarding Setup
+            </a>
+          </div>
+
+          <p style="font-size:13px;color:#64748b;line-height:1.5;margin:24px 0 0;">
+            Need help? Contact <a href="mailto:${escapeHtml(contactEmail)}">${escapeHtml(contactEmail)}</a>.
+          </p>
+
+          <p style="font-size:13px;color:#64748b;margin:18px 0 0;">
+            Mosaic Biz Hub Team
+          </p>
+        </div>
+      </div>
+    `,
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
 
 exports.sendVendorApprovedEmail = async ({
   to,
@@ -408,21 +487,83 @@ exports.sendVendorRejectionEmail = async ({
   applicationId,
   rejectionReason,
   businessName,
-  currentStatus = 'rejected',
+  requiredNextAction,
   documentsNeeded,
   responseWindowDays,
 }) => {
-  return exports.sendVendorVerificationGuidanceEmail({
+  const safeRejectionReason = String(rejectionReason ?? '').trim()
+    || 'Your application did not meet the current verification requirements.';
+  const safeNextAction = String(requiredNextAction ?? '').trim()
+    || 'Update your application and resubmit for review.';
+  const documents = normalizeMailerList(documentsNeeded);
+  const displayName = vendorName || 'there';
+  const displayBusinessName = businessName || 'your business';
+  const correctionUrl = buildFrontendUrl('/partners/business/new');
+  const contactEmail = process.env.SUPPORT_EMAIL || 'info@mosaicbizhub.com';
+
+  const responseDays = Number(responseWindowDays);
+  const responseWindowText = Number.isFinite(responseDays) && responseDays > 0
+    ? `Please complete the next steps within ${Math.round(responseDays)} business day${Math.round(responseDays) === 1 ? '' : 's'}.`
+    : 'Please complete the next steps as soon as you can so our team can continue review.';
+
+  const mailOptions = {
+    from: formatMosaicFromHeader(),
     to,
-    vendorName,
-    businessName,
-    applicationId,
-    currentStatus,
-    outcome: 'missing_documents',
-    reason: rejectionReason,
-    documentsNeeded,
-    responseWindowDays,
-  });
+    subject: 'Action Required: Vendor Application Changes Requested',
+    html: `
+      <div style="font-family:Arial,sans-serif;background:#f8fafc;padding:28px;">
+        <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;padding:28px;border:1px solid #e2e8f0;">
+          <h2 style="margin:0 0 12px;color:#0f172a;">Hello ${escapeHtml(displayName)},</h2>
+          <p style="color:#475569;line-height:1.6;margin:0 0 16px;">
+            Thank you for applying to <strong>Mosaic Biz Hub</strong>. After reviewing your application for
+            <strong>${escapeHtml(displayBusinessName)}</strong>, our team needs a few updates before we can approve your vendor profile.
+          </p>
+
+          <div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:14px;margin:18px 0;">
+            <p style="margin:0;color:#334155;"><strong>Application ID:</strong> ${escapeHtml(applicationId || 'N/A')}</p>
+            <p style="margin:6px 0 0;color:#334155;"><strong>Current status:</strong> Changes requested</p>
+          </div>
+
+          <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:16px;margin:18px 0;">
+            <p style="margin:0 0 8px;color:#9a3412;font-weight:bold;">Reason for this decision</p>
+            <p style="margin:0;color:#7c2d12;line-height:1.6;">${escapeHtml(safeRejectionReason)}</p>
+          </div>
+
+          <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:6px;padding:16px;margin:18px 0;">
+            <p style="margin:0 0 8px;color:#1e3a8a;font-weight:bold;">What you need to do next</p>
+            <p style="margin:0;color:#1e40af;line-height:1.6;">${escapeHtml(safeNextAction)}</p>
+          </div>
+
+          ${documents.length ? `
+            <p style="color:#475569;line-height:1.6;margin:18px 0 8px;">
+              <strong>Documents still needed:</strong>
+            </p>
+            ${buildListHtml(documents)}
+          ` : ''}
+
+          <p style="color:#475569;line-height:1.6;margin:18px 0 0;">
+            ${escapeHtml(responseWindowText)}
+          </p>
+
+          <div style="margin:24px 0;text-align:center;">
+            <a href="${correctionUrl}" style="background:#1d4ed8;color:#fff;padding:12px 18px;text-decoration:none;border-radius:6px;font-size:14px;font-weight:bold;">
+              Open Vendor Dashboard
+            </a>
+          </div>
+
+          <p style="font-size:13px;color:#64748b;line-height:1.5;margin:24px 0 0;">
+            Need help? Contact <a href="mailto:${escapeHtml(contactEmail)}">${escapeHtml(contactEmail)}</a>.
+          </p>
+
+          <p style="font-size:13px;color:#64748b;margin:18px 0 0;">
+            Mosaic Biz Hub Team
+          </p>
+        </div>
+      </div>
+    `,
+  };
+
+  return transporter.sendMail(mailOptions);
 };
 
 // exports.sendVendorRejectionEmail = async ({

@@ -20,6 +20,7 @@ const {
   formatValidationErrorResponse,
 } = require('../lib/service/serviceContract');
 const { normalizeImages } = require('../lib/listing/publicListingDto');
+const { applyLeadConfigToDocument } = require('../utils/serviceLeadConfig');
 const { publicMarketplaceBusinessFilter } = require('../lib/marketplace/businessEligibility');
 const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
 const { S3Client } = require('@aws-sdk/client-s3');
@@ -143,6 +144,8 @@ exports.createParentService = async (req, res) => {
       location: location?.address || '',
       businessHours: normalizeBusinessHoursForStorage(businessHours || []),
       bookingToolLink: bookingToolLink || '',
+      externalLink: req.body.externalLink || bookingToolLink || '',
+      rfqEnabled: req.body.rfqEnabled === true || req.body.rfqEnabled === 'true',
 
       // Empty arrays for child services to be added later
       services: [],
@@ -295,6 +298,8 @@ exports.createService = async (req, res) => {
       subcategoryId: finalSubcategoryId,
       businessId,
       bookingToolLink: bookingToolLink || '',
+      externalLink: req.body.externalLink || bookingToolLink || '',
+      rfqEnabled: req.body.rfqEnabled === true || req.body.rfqEnabled === 'true',
       services: normalizedServices,
       coverImage: coverImage || '',
       images: images || [],
@@ -809,13 +814,22 @@ exports.updateService = async (req, res) => {
 
     const updatableFields = [
       'title', 'description', 'coverImage', 'images',
-      'bookingToolLink', 'maxBookingsPerSlot', 'location', 'contact', 'videos'
+      'bookingToolLink', 'externalLink', 'rfqEnabled', 'maxBookingsPerSlot', 'location', 'contact', 'videos'
     ];
 
     for (const field of updatableFields) {
       if (req.body[field] !== undefined) {
         service[field] = req.body[field];
       }
+    }
+
+    try {
+      applyLeadConfigToDocument(service, req.body);
+    } catch (leadConfigError) {
+      return res.status(leadConfigError.statusCode || 400).json({
+        success: false,
+        message: leadConfigError.message || 'Invalid service lead configuration',
+      });
     }
 
     if (req.body.amenities !== undefined) {
@@ -1059,6 +1073,8 @@ exports.getBusinessServiceById = async (req, res) => {
       location: service.location || '',
       businessHours: mappedBusinessHours,
       bookingToolLink: service.bookingToolLink || '',
+      externalLink: service.externalLink || service.bookingToolLink || '',
+      rfqEnabled: Boolean(service.rfqEnabled),
       features: Array.isArray(service.features) ? service.features : [],
       amenities: Array.isArray(service.amenities) ? service.amenities : [],
       faq: Array.isArray(service.faq) ? service.faq : [],

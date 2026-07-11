@@ -119,6 +119,7 @@ exports.getServiceBySlug = async (req, res) => {
     const reviews = await Review.find({
       listingId: service._id,
       listingType: 'service',
+      isHidden: { $ne: true },
     })
       .populate('userId', 'name profileImage'); // Adjust fields as needed
 

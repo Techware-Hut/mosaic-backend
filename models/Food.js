@@ -129,6 +129,21 @@ location: {
       type: Boolean,
       default: false,
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    adminRemark: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    adminModeratedAt: Date,
+    adminModeratedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
     totalReviews: {
       type: Number,
       default: 0,

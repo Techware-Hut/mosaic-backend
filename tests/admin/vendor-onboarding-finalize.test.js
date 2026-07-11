@@ -272,6 +272,12 @@ test('finalizeVerification explicit reject stores reason, notes, next action, an
   assert.equal(res.body.data.rejectionReason, 'Business license appears expired');
   assert.equal(res.body.data.requiredNextAction, 'Upload a current business license and resubmit.');
   assert.equal(mailerCalls.rejection.rejectionReason, 'Business license appears expired');
+  assert.equal(
+    mailerCalls.rejection.requiredNextAction,
+    'Upload a current business license and resubmit.'
+  );
+  assert.equal(application.verificationNotificationLog.length, 1);
+  assert.equal(application.verificationNotificationLog[0].event, 'changes_requested');
   assert.equal(businessUpdates.at(-1).update.$set.isApproved, false);
   assert.equal(businessUpdates.at(-1).update.$set.isActive, false);
 });

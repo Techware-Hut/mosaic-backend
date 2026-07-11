@@ -34,6 +34,7 @@ const VENDOR_PROTECTED_ONBOARDING_FIELDS = [
   'businessId',
   'submittedAt',
   'profileCompletionNotifiedAt',
+  'onboardingReminderLog',
   'verificationNotificationLog',
   'userId',
   'trustScore',

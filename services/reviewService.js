@@ -23,6 +23,7 @@ const getReviewSummary = async (listingId, listingType) => {
       $match: {
         listingId: normalizedListingId,
         listingType,
+        isHidden: { $ne: true },
       },
     },
     {

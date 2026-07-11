@@ -89,6 +89,21 @@ const serviceSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  isActive: {
+    type: Boolean,
+    default: true,
+    index: true,
+  },
+  adminRemark: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  adminModeratedAt: Date,
+  adminModeratedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
   coverImage: {
     type: String,
   },
@@ -110,6 +125,22 @@ const serviceSchema = new mongoose.Schema({
       },
       message: 'Please enter a valid URL (must start with http or https).'
     }
+  },
+  externalLink: {
+    type: String,
+    trim: true,
+    default: '',
+    validate: {
+      validator: function (v) {
+        if (!v) return true;
+        return /^https?:\/\/.+\..+/.test(v);
+      },
+      message: 'Please enter a valid external link (must start with http or https).'
+    }
+  },
+  rfqEnabled: {
+    type: Boolean,
+    default: false,
   },
   videos: {
     type: [String],

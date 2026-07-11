@@ -875,6 +875,7 @@ exports.getProductBusinesses = async (req, res) => {
       tag,
       tags,
       zip,
+      featured,
       page = 1,
       limit = 10,
     } = req.query;
@@ -883,6 +884,10 @@ exports.getProductBusinesses = async (req, res) => {
     const filters = publicMarketplaceBusinessFilter({
       listingType: listingTypeFilter,
     });
+
+    if (String(featured || "").trim().toLowerCase() === "true") {
+      filters.isFeatured = true;
+    }
 
     if (search) filters.businessName = { $regex: search, $options: "i" };
     if (city) filters["address.city"] = city;
@@ -926,10 +931,10 @@ exports.getProductBusinesses = async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     const businesses = await Business.find(filters)
-      .select("businessName slug logo listingType")
+      .select("businessName slug logo listingType description tags isFeatured")
       .skip(skip)
       .limit(limitNum)
-      .sort({ createdAt: -1 })
+      .sort({ isFeatured: -1, updatedAt: -1, createdAt: -1 })
       .lean();
 
     const total = await Business.countDocuments(filters);

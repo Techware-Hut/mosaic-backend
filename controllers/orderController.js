@@ -199,6 +199,8 @@ const summarizeBuckets = (buckets, rows) => {
 
 const currencyExpression = { $ifNull: ["$currency", "USD"] };
 const amountExpression = (field, fallback = 0) => ({ $ifNull: [field, fallback] });
+const ADMIN_PLATFORM_COMMISSION_RATE = 0.1;
+const ADMIN_PLATFORM_COMMISSION_PERCENT = 10;
 
 const toCurrencySummary = (row) => ({
   currency: row._id || "USD",
@@ -213,9 +215,28 @@ const toCurrencySummary = (row) => ({
 
 const toVendorSalesSummary = (row) => ({
   vendorId: row.vendorId ? String(row.vendorId) : null,
+  businessId: row.businessId ? String(row.businessId) : null,
+  vendorName: row.vendorName || null,
+  businessName: row.businessName || null,
   currency: row.currency || "USD",
   orderCount: row.orderCount || 0,
   totalSalesAmount: row.totalSalesAmount || 0,
+});
+
+const toPlatformRevenueByCurrency = (row) => ({
+  currency: row.currency || row._id || "USD",
+  paidOrderCount: row.paidOrderCount || 0,
+  paidSalesBase: row.paidSalesBase || 0,
+  commissionAmount: row.commissionAmount || 0,
+});
+
+const buildPlatformRevenueSummary = (rows) => ({
+  supported: true,
+  feePercent: ADMIN_PLATFORM_COMMISSION_PERCENT,
+  feeRate: ADMIN_PLATFORM_COMMISSION_RATE,
+  basis: "paid_order_total_amount",
+  description: `${ADMIN_PLATFORM_COMMISSION_PERCENT}% platform commission on paid order totals`,
+  byCurrency: rows.map(toPlatformRevenueByCurrency),
 });
 
 const getVariantAttribute = (variantDoc, key) => {
@@ -1505,6 +1526,7 @@ exports.getAdminSalesSummary = async (req, res) => {
             $group: {
               _id: {
                 vendorId: "$vendorId",
+                businessId: "$businessId",
                 currency: currencyExpression,
               },
               orderCount: { $sum: 1 },
@@ -1515,17 +1537,86 @@ exports.getAdminSalesSummary = async (req, res) => {
             $project: {
               _id: 0,
               vendorId: "$_id.vendorId",
+              businessId: "$_id.businessId",
               currency: "$_id.currency",
               orderCount: 1,
               totalSalesAmount: 1,
+            },
+          },
+          {
+            $lookup: {
+              from: "users",
+              localField: "vendorId",
+              foreignField: "_id",
+              as: "vendorDoc",
+              pipeline: [{ $project: { name: 1 } }],
+            },
+          },
+          {
+            $lookup: {
+              from: "businesses",
+              localField: "businessId",
+              foreignField: "_id",
+              as: "businessDoc",
+              pipeline: [{ $project: { businessName: 1 } }],
+            },
+          },
+          {
+            $addFields: {
+              vendorName: {
+                $ifNull: [{ $arrayElemAt: ["$vendorDoc.name", 0] }, null],
+              },
+              businessName: {
+                $ifNull: [
+                  { $arrayElemAt: ["$businessDoc.businessName", 0] },
+                  null,
+                ],
+              },
+            },
+          },
+          {
+            $project: {
+              vendorDoc: 0,
+              businessDoc: 0,
             },
           },
           { $sort: { totalSalesAmount: -1 } },
           { $limit: 10 },
         ]
       : null;
+    const platformRevenuePipeline = paidVendorMatch
+      ? [
+          { $match: paidVendorMatch },
+          {
+            $group: {
+              _id: currencyExpression,
+              paidOrderCount: { $sum: 1 },
+              paidSalesBase: { $sum: amountExpression("$totalAmount") },
+              commissionAmount: {
+                $sum: {
+                  $multiply: [
+                    amountExpression("$totalAmount"),
+                    ADMIN_PLATFORM_COMMISSION_RATE,
+                  ],
+                },
+              },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              currency: "$_id",
+              paidOrderCount: 1,
+              paidSalesBase: 1,
+              commissionAmount: 1,
+            },
+          },
+          { $sort: { currency: 1 } },
+        ]
+      : null;
 
-    const [salesByCurrency, vendorSales, paymentAgg, statusAgg] = await Promise.all([
+    const [salesByCurrency, vendorSales, platformRevenueRows, paymentAgg, statusAgg] =
+      await Promise.all([
       Order.aggregate([
         { $match: match },
         {
@@ -1561,6 +1652,9 @@ exports.getAdminSalesSummary = async (req, res) => {
       vendorSalesPipeline
         ? Order.aggregate(vendorSalesPipeline)
         : Promise.resolve([]),
+      platformRevenuePipeline
+        ? Order.aggregate(platformRevenuePipeline)
+        : Promise.resolve([]),
       Order.aggregate([
         { $match: match },
         { $group: { _id: "$paymentStatus", count: { $sum: 1 } } },
@@ -1577,11 +1671,7 @@ exports.getAdminSalesSummary = async (req, res) => {
       data: {
         salesByCurrency: salesByCurrency.map(toCurrencySummary),
         topVendors: vendorSales.map(toVendorSalesSummary),
-        platformRevenue: {
-          supported: false,
-          amount: null,
-          reason: "Order records do not persist platform fee amounts yet.",
-        },
+        platformRevenue: buildPlatformRevenueSummary(platformRevenueRows),
         summary: {
           payment: summarizeBuckets(ADMIN_PAYMENT_BUCKETS, paymentAgg),
           status: summarizeBuckets(ADMIN_STATUS_BUCKETS, statusAgg),

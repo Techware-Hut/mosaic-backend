@@ -136,8 +136,25 @@ const productSchema = new mongoose.Schema({
   isPublished: { type: Boolean, default: false },
   isFeatured: { type: Boolean, default: false },
   isDeleted: { type: Boolean, default: false },
+  isActive: {
+    type: Boolean,
+    default: true,
+    index: true,
+  },
+  adminRemark: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  adminModeratedAt: Date,
+  adminModeratedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
 
 }, { timestamps: true });
+
+productSchema.index({ isActive: 1, isPublished: 1, isDeleted: 1, createdAt: -1 });
 
 productSchema.index({ isFeatured: 1, isPublished: 1, isDeleted: 1, createdAt: -1 });
 productSchema.index({ businessId: 1, isPublished: 1, isDeleted: 1 });
