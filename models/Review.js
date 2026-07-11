@@ -28,6 +28,13 @@ const reviewSchema = new mongoose.Schema({
   image: {
     type: String,  // Optional image URL if the user provides a review image
   },
+  isHidden: {
+    type: Boolean,
+    default: false,
+  },
+  moderatedAt: {
+    type: Date,
+  },
 }, { timestamps: true });
 
 reviewSchema.index(

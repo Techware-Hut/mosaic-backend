@@ -1296,10 +1296,28 @@ exports.getStatusByApplicationId = async (req, res) => {
 
     // Stage 1 - Onboarding Status
     switch (onboarding.status) {
-      case 'draft':
-        status = 'Stage 1 - Draft (Not Submitted)';
-        nextAction = 'Submit application for review';
+      case 'draft': {
+        const paymentStatus = onboarding.verificationPayment?.status || 'not_started';
+        if (paymentStatus === 'paid') {
+          status = 'Stage 1 - Payment Complete (Not Submitted)';
+          nextAction = 'Submit your application for admin review';
+        } else {
+          status = 'Stage 1 - Draft (Not Submitted)';
+          nextAction = 'Complete your application and pay the verification fee';
+        }
         break;
+      }
+
+      case 'payment_pending': {
+        const paymentStatus = onboarding.verificationPayment?.status || 'pending';
+        status = 'Stage 1 - Payment Pending';
+        if (paymentStatus === 'failed') {
+          nextAction = 'Retry your verification payment to continue onboarding';
+        } else {
+          nextAction = 'Complete your verification payment to continue onboarding';
+        }
+        break;
+      }
 
       case 'submitted':
         status = 'Stage 1 - Under Admin Review';

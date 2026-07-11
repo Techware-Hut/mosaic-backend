@@ -23,4 +23,25 @@ router.patch(
   businessController.patchBusinessActivationStatus
 );
 
+router.put(
+  "/:id/tags",
+  authenticate,
+  isAdmin,
+  businessController.updateBusinessTags
+);
+
+router.patch(
+  "/:id/featured",
+  authenticate,
+  isAdmin,
+  businessController.updateBusinessFeatured
+);
+
+router.put(
+  "/:id",
+  authenticate,
+  isAdmin,
+  businessController.updateBusinessProfile
+);
+
 module.exports = router;

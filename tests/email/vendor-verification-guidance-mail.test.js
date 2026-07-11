@@ -81,7 +81,7 @@ test('vendor verification guidance email escapes vendor-visible admin notes', as
   assert.ok(message.html.includes('https://mosaicbizhub.com/partners/business/new'));
 });
 
-test('vendor rejection email uses missing-document guidance copy', async () => {
+test('vendor rejection email sends dedicated changes-requested template', async () => {
   const originalMailUser = process.env.MAIL_USER;
   process.env.MAIL_USER = 'mail@example.com';
 
@@ -93,7 +93,8 @@ test('vendor rejection email uses missing-document guidance copy', async () => {
     vendorName: 'Vendor User',
     businessName: 'Missing Docs LLC',
     applicationId: 'MBH-APP-MISSING-001',
-    rejectionReason: 'EIN document',
+    rejectionReason: 'EIN document is unreadable',
+    requiredNextAction: 'Upload a clearer EIN document and resubmit.',
     documentsNeeded: ['EIN document'],
   });
 
@@ -102,9 +103,12 @@ test('vendor rejection email uses missing-document guidance copy', async () => {
   assert.equal(sendMailCalls.length, 1);
   assert.equal(info.messageId, 'message-1');
   const message = sendMailCalls[0];
-  assert.equal(message.subject, 'Action Required: Vendor Application Documents Needed');
+  assert.equal(message.subject, 'Action Required: Vendor Application Changes Requested');
   assert.ok(message.html.includes('Missing Docs LLC'));
-  assert.ok(message.html.includes('Current status:</strong> rejected'));
+  assert.ok(message.html.includes('Current status:</strong> Changes requested'));
+  assert.ok(message.html.includes('EIN document is unreadable'));
+  assert.ok(message.html.includes('Upload a clearer EIN document and resubmit.'));
+  assert.ok(message.html.includes('Documents still needed:'));
   assert.ok(message.html.includes('EIN document'));
   assert.ok(message.html.includes('Open Vendor Dashboard'));
 });
