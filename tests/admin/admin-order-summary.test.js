@@ -44,8 +44,9 @@ function makeRes() {
   };
 }
 
-test('getAdminSalesSummary returns sales and vendor totals without platform fee invention', async () => {
+test('getAdminSalesSummary returns sales, vendor totals, and platform commission', async () => {
   const vendorId = '507f1f77bcf86cd799439011';
+  const businessId = '507f1f77bcf86cd799439012';
   const { controller, pipelines } = loadOrderController({
     aggregateResponses: [
       [
@@ -60,7 +61,25 @@ test('getAdminSalesSummary returns sales and vendor totals without platform fee 
           shippingAmount: 1300,
         },
       ],
-      [{ vendorId, currency: 'USD', orderCount: 2, totalSalesAmount: 9000 }],
+      [
+        {
+          vendorId,
+          businessId,
+          vendorName: 'Vendor User',
+          businessName: 'Test Vendor LLC',
+          currency: 'USD',
+          orderCount: 2,
+          totalSalesAmount: 9000,
+        },
+      ],
+      [
+        {
+          currency: 'USD',
+          paidOrderCount: 2,
+          paidSalesBase: 9000,
+          commissionAmount: 900,
+        },
+      ],
       [{ _id: 'paid', count: 2 }],
       [{ _id: 'ordered', count: 2 }],
     ],
@@ -94,21 +113,47 @@ test('getAdminSalesSummary returns sales and vendor totals without platform fee 
   assert.deepEqual(res.body.data.topVendors, [
     {
       vendorId,
+      businessId,
+      vendorName: 'Vendor User',
+      businessName: 'Test Vendor LLC',
       currency: 'USD',
       orderCount: 2,
       totalSalesAmount: 9000,
     },
   ]);
   assert.deepEqual(res.body.data.platformRevenue, {
-    supported: false,
-    amount: null,
-    reason: 'Order records do not persist platform fee amounts yet.',
+    supported: true,
+    feePercent: 10,
+    feeRate: 0.1,
+    basis: 'paid_order_total_amount',
+    description: '10% platform commission on paid order totals',
+    byCurrency: [
+      {
+        currency: 'USD',
+        paidOrderCount: 2,
+        paidSalesBase: 9000,
+        commissionAmount: 900,
+      },
+    ],
   });
   assert.equal(res.body.data.summary.payment.paid, 2);
   assert.equal(res.body.data.summary.payment.pending, 0);
   assert.equal(res.body.data.summary.status.ordered, 2);
   assert.equal(pipelines[0][0].$match.paymentStatus, 'paid');
   assert.ok(pipelines[0][0].$match.createdAt.$gte instanceof Date);
+
+  const vendorPipeline = pipelines[1];
+  assert.equal(vendorPipeline[1].$group._id.vendorId, '$vendorId');
+  assert.equal(vendorPipeline[1].$group._id.businessId, '$businessId');
+  assert.equal(vendorPipeline[3].$lookup.from, 'users');
+  assert.equal(vendorPipeline[4].$lookup.from, 'businesses');
+
+  const platformPipeline = pipelines[2];
+  assert.equal(platformPipeline[0].$match.paymentStatus, 'paid');
+  assert.equal(
+    platformPipeline[1].$group.commissionAmount.$sum.$multiply[1],
+    0.1
+  );
 });
 
 test('getAdminSalesSummary omits paid top vendors for non-paid payment filters', async () => {
@@ -128,6 +173,14 @@ test('getAdminSalesSummary omits paid top vendors for non-paid payment filters',
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body.data.topVendors, []);
+  assert.deepEqual(res.body.data.platformRevenue, {
+    supported: true,
+    feePercent: 10,
+    feeRate: 0.1,
+    basis: 'paid_order_total_amount',
+    description: '10% platform commission on paid order totals',
+    byCurrency: [],
+  });
   assert.equal(pipelines.length, 3);
   assert.equal(pipelines[0][0].$match.paymentStatus, 'refunded');
 });

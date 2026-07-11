@@ -45,6 +45,7 @@ const getVisibleBusinessIds = async () => {
 };
 
 const PUBLIC_LIST_MAX_LIMIT = 50;
+const PUBLIC_ACTIVE_LISTING_FILTER = Object.freeze({ isActive: { $ne: false } });
 
 function clipListPagination(page, limit, defaultLimit = 10) {
   const pageN = Math.max(1, parseInt(page, 10) || 1);
@@ -145,7 +146,7 @@ exports.getAllServices = async (req, res) => {
       verified,
     } = req.query;
 
-    const filters = { isPublished: true };
+    const filters = { isPublished: true, ...PUBLIC_ACTIVE_LISTING_FILTER };
 
     // Search
     if (search) {
@@ -327,7 +328,7 @@ exports.getServiceBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
 
-    const service = await Service.findOne({ slug, isPublished: true })
+    const service = await Service.findOne({ slug, isPublished: true, ...PUBLIC_ACTIVE_LISTING_FILTER })
       .populate('categoryId', 'name')
       .populate('subcategoryId', 'name')
       .populate('ownerId', 'name');
@@ -347,6 +348,7 @@ exports.getServiceBySlug = async (req, res) => {
     const reviews = await Review.find({
       listingId: service._id,
       listingType: 'service',
+      isHidden: { $ne: true },
     })
       .populate('userId', 'name profileImage');
 
@@ -533,7 +535,7 @@ exports.getAllFood = async (req, res) => {
       verified,
     } = req.query;
 
-    const filters = { isPublished: true };
+    const filters = { isPublished: true, ...PUBLIC_ACTIVE_LISTING_FILTER };
 
     // Search filter
     if (search) {
@@ -544,9 +546,6 @@ exports.getAllFood = async (req, res) => {
     }
 
     if (minorityType) filters.minorityType = minorityType;
-    if (city) filters['address.city'] = { $regex: city, $options: 'i' };
-    if (state) filters['address.state'] = { $regex: state, $options: 'i' };
-    if (country) filters['address.country'] = { $regex: country, $options: 'i' };
 
     const visibleBusinessIds = await getVisibleBusinessIds();
     if (!visibleBusinessIds.length) {
@@ -567,7 +566,7 @@ exports.getAllFood = async (req, res) => {
       visibleBusinessIds,
       req.query,
       businessId,
-      { includeLocation: false }
+      { includeLocation: true }
     );
     if (scoped.empty) {
       return res.json(emptyListResponse(page));
@@ -633,7 +632,7 @@ exports.getAllFood = async (req, res) => {
 
     // Fetch foods with business info
 const foodItems = await Food.find(filters)
-  .select('title description price slug coverImage businessId')
+  .select('title description price slug coverImage businessId averageRating totalReviews')
   .populate({
     path: 'businessId',
     select: 'businessName phone email description badge logo', // <- include badge here
@@ -998,7 +997,7 @@ exports.getAllProducts = async (req, res) => {
       verified,
     } = req.query;
 
-    const filters = { isDeleted: false, isPublished: true };
+    const filters = { isDeleted: false, isPublished: true, ...PUBLIC_ACTIVE_LISTING_FILTER };
 
     if (search) {
       filters.$or = [
@@ -1008,9 +1007,6 @@ exports.getAllProducts = async (req, res) => {
     }
 
     if (minorityType) filters.minorityType = minorityType;
-    if (city) filters['address.city'] = { $regex: city, $options: 'i' };
-    if (state) filters['address.state'] = { $regex: state, $options: 'i' };
-    if (country) filters['address.country'] = { $regex: country, $options: 'i' };
 
     const visibleBusinessIds = await getVisibleBusinessIds();
     if (!visibleBusinessIds.length) {
@@ -1030,7 +1026,7 @@ exports.getAllProducts = async (req, res) => {
       visibleBusinessIds,
       req.query,
       businessId,
-      { includeLocation: false }
+      { includeLocation: true }
     );
     if (scoped.empty) {
       return res.json(emptyListResponse(page));
@@ -1136,7 +1132,7 @@ exports.getProductsByFilters = async (req, res) => {
       verified,
     } = req.query;
 
-    const filters = { isDeleted: false, isPublished: true };
+    const filters = { isDeleted: false, isPublished: true, ...PUBLIC_ACTIVE_LISTING_FILTER };
 
     // Category filtering - accept both slug and ID
     if (categoryId || categorySlug) {
@@ -1165,9 +1161,6 @@ exports.getProductsByFilters = async (req, res) => {
     }
 
     if (minorityType) filters.minorityType = minorityType;
-    if (city) filters['address.city'] = { $regex: city, $options: 'i' };
-    if (state) filters['address.state'] = { $regex: state, $options: 'i' };
-    if (country) filters['address.country'] = { $regex: country, $options: 'i' };
 
     const visibleBusinessIds = await getVisibleBusinessIds();
     if (!visibleBusinessIds.length) {
@@ -1290,6 +1283,7 @@ exports.getProductById = async (req, res) => {
       _id: productId,
       isPublished: true,
       isDeleted: false,
+      ...PUBLIC_ACTIVE_LISTING_FILTER,
     })
       .populate({
         path: "businessId",
@@ -1536,7 +1530,8 @@ exports.getProductsByBusinessId = async (req, res) => {
     const filters = { 
       businessId, 
       isDeleted: false, 
-      isPublished: true 
+      isPublished: true,
+      ...PUBLIC_ACTIVE_LISTING_FILTER,
     };
 
     let sortOption = { createdAt: -1 };
@@ -1650,14 +1645,17 @@ exports.searchPublicListings = async (req, res) => {
     const productFilter = {
       isDeleted: false,
       isPublished: true,
+      ...PUBLIC_ACTIVE_LISTING_FILTER,
       ...baseBusinessFilter,
     };
     const serviceFilter = {
       isPublished: true,
+      ...PUBLIC_ACTIVE_LISTING_FILTER,
       ...baseBusinessFilter,
     };
     const foodFilter = {
       isPublished: true,
+      ...PUBLIC_ACTIVE_LISTING_FILTER,
       ...baseBusinessFilter,
     };
 
@@ -1763,7 +1761,7 @@ exports.searchPublicListings = async (req, res) => {
     if (shouldIncludeListingType(parsed.listingType, 'food')) {
       queryJobs.push(
         Food.find(foodFilter)
-          .select('title description coverImage slug price businessId foodType brand categoryId')
+          .select('title description coverImage slug price businessId foodType brand categoryId averageRating totalReviews')
           .populate(businessPopulate)
           .sort({ createdAt: -1 })
           .skip(skip)

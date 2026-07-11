@@ -178,3 +178,42 @@ test('non-rejected application does not expose rejection metadata', async () => 
   assert.equal(res.body.data.details.stage1.rejectionReason, null);
   assert.equal(res.body.data.details.stage1.requiredNextAction, null);
 });
+
+test('payment_pending application returns explicit payment next action', async () => {
+  const onboarding = buildOnboarding({
+    status: 'payment_pending',
+    verificationPayment: { status: 'pending' },
+  });
+  const controller = loadController(onboarding);
+  const res = mockResponse();
+
+  await controller.getStatusByApplicationId(
+    { params: { applicationId: onboarding.applicationId } },
+    res
+  );
+
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.data.status, 'Stage 1 - Payment Pending');
+  assert.equal(
+    res.body.data.nextAction,
+    'Complete your verification payment to continue onboarding'
+  );
+});
+
+test('paid draft application returns submit next action', async () => {
+  const onboarding = buildOnboarding({
+    status: 'draft',
+    verificationPayment: { status: 'paid' },
+  });
+  const controller = loadController(onboarding);
+  const res = mockResponse();
+
+  await controller.getStatusByApplicationId(
+    { params: { applicationId: onboarding.applicationId } },
+    res
+  );
+
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.data.status, 'Stage 1 - Payment Complete (Not Submitted)');
+  assert.equal(res.body.data.nextAction, 'Submit your application for admin review');
+});

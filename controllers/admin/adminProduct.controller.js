@@ -79,7 +79,7 @@ exports.getAllProducts = async (req, res) => {
       .populate('categoryId', 'name')
       .populate('subcategoryId', 'name')
       .populate('businessId', 'businessName')
-      .select('title coverImage isFeatured isPublished createdAt')
+      .select('title coverImage isFeatured isPublished isActive description price createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));

@@ -17,9 +17,19 @@ const ADMIN_AUDIT_ACTIONS = Object.freeze({
   BUSINESS_DISAPPROVE: 'business.disapprove',
   BUSINESS_ACTIVATE: 'business.activate',
   BUSINESS_DEACTIVATE: 'business.deactivate',
+  BUSINESS_TAGS_UPDATE: 'business.tags_update',
+  BUSINESS_FEATURE: 'business.feature',
+  BUSINESS_UNFEATURE: 'business.unfeature',
 
   PRODUCT_FEATURE: 'product.feature',
   PRODUCT_UNFEATURE: 'product.unfeature',
+
+  CATALOG_UPDATE: 'catalog.update',
+  CATALOG_DEACTIVATE: 'catalog.deactivate',
+  CATALOG_ACTIVATE: 'catalog.activate',
+  CATALOG_DELETE: 'catalog.delete',
+
+  BUSINESS_PROFILE_UPDATE: 'business.profile_update',
 
   CATEGORY_CREATE: 'category.create',
   CATEGORY_UPDATE: 'category.update',
@@ -37,6 +47,7 @@ const ADMIN_AUDIT_TARGET_TYPES = Object.freeze({
   USER: 'user',
   BUSINESS: 'business',
   PRODUCT: 'product',
+  CATALOG_LISTING: 'catalog_listing',
   CATEGORY: 'category',
   CATEGORY_REQUEST: 'category_request',
   SUBSCRIPTION_PLAN: 'subscription_plan',

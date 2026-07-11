@@ -40,6 +40,10 @@ exports.PENDING_REVIEW_STATUSES = PENDING_REVIEW_STATUSES;
 exports.APPLICATION_STATUS_FILTERS = APPLICATION_STATUS_FILTERS;
 
 const VERIFICATION_GUIDANCE_OUTCOMES = Object.freeze({
+  changes_requested: {
+    label: 'vendor_changes_requested',
+    defaultReason: 'Application updates are required before approval can continue.',
+  },
   missing_documents: {
     label: 'vendor_missing_documents',
     defaultReason: 'Required documents are missing or not verified.',
@@ -1146,36 +1150,58 @@ exports.finalizeVerification = async (req, res) => {
     // ❌ REJECTED
     if (application.status === 'rejected') {
       const rejectionReason = application.rejectionReason;
+      const requiredNextAction = application.requiredNextAction;
+      const rejectionOutcome = explicitDecision === 'reject' && hasRequiredDocsVerified
+        ? 'changes_requested'
+        : 'missing_documents';
 
-      const emailDelivery = await deliverVendorOnboardingEmails([
-        {
-          label: 'vendor_rejection',
-          send: () => sendVendorRejectionEmail({
-            to: vendorEmail,
-            vendorName,
-            businessName: application.businessName,
-            applicationId: application.applicationId,
-            currentStatus: application.status,
-            rejectionReason,
-            documentsNeeded: missingRequiredDocuments,
-          }),
-        },
-      ]);
+      let emailDelivery;
+      if (!vendorEmail) {
+        console.warn(
+          `Vendor rejection email skipped (vendor_rejection): missing vendor email for application ${application.applicationId}`
+        );
+        emailDelivery = {
+          results: [{
+            label: 'vendor_rejection',
+            sent: false,
+            skipped: false,
+            error: 'vendor_email_missing',
+          }],
+          emailSent: false,
+          emailSkipped: false,
+          emailFailed: true,
+        };
+      } else {
+        emailDelivery = await deliverVendorOnboardingEmails([
+          {
+            label: 'vendor_rejection',
+            send: () => sendVendorRejectionEmail({
+              to: vendorEmail,
+              vendorName,
+              businessName: application.businessName,
+              applicationId: application.applicationId,
+              rejectionReason,
+              requiredNextAction,
+              documentsNeeded: missingRequiredDocuments,
+            }),
+          },
+        ]);
+      }
 
       const rejectionFingerprint = buildGuidanceFingerprint({
-        outcome: 'missing_documents',
+        outcome: rejectionOutcome,
         applicationStatus: application.status,
         reasons: [rejectionReason],
         documentsNeeded: missingRequiredDocuments,
-        fieldsNeeded: [],
+        fieldsNeeded: [requiredNextAction],
       });
 
       const notificationLog = await appendVerificationNotificationLog(application, {
-        outcome: 'missing_documents',
+        outcome: rejectionOutcome,
         fingerprint: rejectionFingerprint,
         reasons: [rejectionReason],
         documentsNeeded: missingRequiredDocuments,
-        fieldsNeeded: [],
+        fieldsNeeded: [requiredNextAction],
         emailDelivery,
         triggeredBy: reviewerId,
       });
@@ -1189,7 +1215,7 @@ exports.finalizeVerification = async (req, res) => {
           { status: application.status, badge },
           ['status', 'badge']
         ),
-        note: `${rejectionReason} ${explicitDecision ? '(explicit admin decision)' : '(auto decision)'} ${buildGuidanceAuditNote('missing_documents', emailDelivery, notificationLog)}`,
+        note: `${rejectionReason} ${explicitDecision ? '(explicit admin decision)' : '(auto decision)'} ${buildGuidanceAuditNote(rejectionOutcome, emailDelivery, notificationLog)}`,
       });
 
       return res.status(200).json({

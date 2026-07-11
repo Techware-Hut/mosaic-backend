@@ -13,6 +13,7 @@ const {
 const {
   isPublicMarketplaceBusiness,
 } = require("../../lib/marketplace/businessEligibility");
+const { normalizeBusinessTags } = require("../../lib/admin/businessTags");
 
 const parseBoolean = (value) => {
   if (value === true || value === "true" || value === 1 || value === "1") return true;
@@ -183,6 +184,222 @@ exports.toggleBusinessStatus = async (req, res) => {
       message: `Business has been ${statusText} successfully.`,
       data: business,
       publicMarketplaceEligible: isPublicMarketplaceBusiness(business),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
+  }
+};
+
+exports.updateBusinessProfile = async (req, res) => {
+  try {
+    const body = req.body || {};
+    const hasBusinessName = Object.prototype.hasOwnProperty.call(body, "businessName");
+    const hasDescription = Object.prototype.hasOwnProperty.call(body, "description");
+    const hasTags = Object.prototype.hasOwnProperty.call(body, "tags");
+
+    if (!hasBusinessName && !hasDescription && !hasTags) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide at least one of businessName, description, or tags.",
+      });
+    }
+
+    if (hasTags && !Array.isArray(body.tags)) {
+      return res.status(400).json({
+        success: false,
+        message: "tags must be an array of strings.",
+      });
+    }
+
+    const business = await Business.findById(req.params.id).select(
+      "businessName description tags"
+    );
+
+    if (!business) {
+      return res.status(404).json({
+        success: false,
+        message: "Business not found.",
+      });
+    }
+
+    const before = {
+      businessName: business.businessName,
+      description: business.description || "",
+      tags: Array.isArray(business.tags) ? [...business.tags] : [],
+    };
+
+    if (hasBusinessName) {
+      const nextName = String(body.businessName || "").trim();
+      if (!nextName) {
+        return res.status(400).json({
+          success: false,
+          message: "businessName cannot be empty.",
+        });
+      }
+      business.businessName = nextName;
+    }
+
+    if (hasDescription) {
+      business.description = String(body.description || "").trim();
+    }
+
+    if (hasTags) {
+      business.tags = normalizeBusinessTags(body.tags);
+    }
+
+    await business.save();
+
+    const after = {
+      businessName: business.businessName,
+      description: business.description || "",
+      tags: Array.isArray(business.tags) ? [...business.tags] : [],
+    };
+
+    const changedFields = ["businessName", "description", "tags"].filter((field) => {
+      if (field === "tags") {
+        return JSON.stringify(before.tags) !== JSON.stringify(after.tags);
+      }
+      return before[field] !== after[field];
+    });
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.BUSINESS_PROFILE_UPDATE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.BUSINESS,
+      targetId: business._id,
+      changeSummary: buildFieldChangeSummary(before, after, changedFields),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Business profile updated successfully.",
+      data: {
+        _id: business._id,
+        businessName: business.businessName,
+        description: business.description || "",
+        tags: business.tags || [],
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
+  }
+};
+
+exports.updateBusinessTags = async (req, res) => {
+  try {
+    if (!req.body || !Object.prototype.hasOwnProperty.call(req.body, "tags")) {
+      return res.status(400).json({
+        success: false,
+        message: "tags is required and must be an array of strings.",
+      });
+    }
+
+    if (!Array.isArray(req.body.tags)) {
+      return res.status(400).json({
+        success: false,
+        message: "tags must be an array of strings.",
+      });
+    }
+
+    const business = await Business.findById(req.params.id).select(
+      "businessName tags"
+    );
+
+    if (!business) {
+      return res.status(404).json({
+        success: false,
+        message: "Business not found.",
+      });
+    }
+
+    const previousTags = Array.isArray(business.tags) ? [...business.tags] : [];
+    const nextTags = normalizeBusinessTags(req.body.tags);
+
+    business.tags = nextTags;
+    await business.save();
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: ADMIN_AUDIT_ACTIONS.BUSINESS_TAGS_UPDATE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.BUSINESS,
+      targetId: business._id,
+      changeSummary: buildFieldChangeSummary(
+        { tags: previousTags },
+        { tags: nextTags },
+        ["tags"]
+      ),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Business tags updated successfully.",
+      data: {
+        _id: business._id,
+        businessName: business.businessName,
+        tags: nextTags,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
+  }
+};
+
+exports.updateBusinessFeatured = async (req, res) => {
+  try {
+    const nextFeatured = parseBoolean(req.body?.isFeatured);
+    if (nextFeatured === null) {
+      return res.status(400).json({
+        success: false,
+        message: "isFeatured is required and must be true or false.",
+      });
+    }
+
+    const business = await Business.findById(req.params.id).select(
+      "businessName isFeatured"
+    );
+
+    if (!business) {
+      return res.status(404).json({
+        success: false,
+        message: "Business not found.",
+      });
+    }
+
+    const previousFeatured = Boolean(business.isFeatured);
+    business.isFeatured = nextFeatured;
+    await business.save();
+
+    await recordAdminAuditSuccess(req, {
+      actionCode: nextFeatured
+        ? ADMIN_AUDIT_ACTIONS.BUSINESS_FEATURE
+        : ADMIN_AUDIT_ACTIONS.BUSINESS_UNFEATURE,
+      targetType: ADMIN_AUDIT_TARGET_TYPES.BUSINESS,
+      targetId: business._id,
+      changeSummary: buildFieldChangeSummary(
+        { isFeatured: previousFeatured },
+        { isFeatured: business.isFeatured },
+        ["isFeatured"]
+      ),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Business ${nextFeatured ? "featured" : "unfeatured"} successfully.`,
+      data: {
+        _id: business._id,
+        businessName: business.businessName,
+        isFeatured: business.isFeatured,
+      },
     });
   } catch (error) {
     console.error(error);

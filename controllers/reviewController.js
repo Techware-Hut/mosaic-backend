@@ -92,14 +92,16 @@ exports.listReviews = (listingType) => async (req, res) => {
     const { page, limit } = parsePagination(req.query);
     const skip = (page - 1) * limit;
 
+    const visibleReviewFilter = { listingId, listingType, isHidden: { $ne: true } };
+
     const [reviews, total, summary] = await Promise.all([
-      Review.find({ listingId, listingType })
+      Review.find(visibleReviewFilter)
         .populate('userId', 'name profileImage')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      Review.countDocuments({ listingId, listingType }),
+      Review.countDocuments(visibleReviewFilter),
       getReviewSummary(listingId, listingType),
     ]);
 

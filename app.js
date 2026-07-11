@@ -39,8 +39,10 @@ const foodCategoryRoutes = require('./routes/admin/foodCategoryRoutes')
 const foodSubcategoryRoutes = require('./routes/admin/foodSubcategoryRoutes');
 const adminBusinessRoutes = require('./routes/admin/businessRoutes')
 const adminProductRoutes = require('./routes/admin/adminProductRoutes')
+const adminCatalogRoutes = require('./routes/admin/adminCatalogRoutes')
 const adminOrderRoutes = require('./routes/admin/adminOrderRoutes')
 const adminAuditRoutes = require('./routes/admin/adminAuditRoutes')
+const adminReviewRoutes = require('./routes/admin/adminReviewRoutes')
 const vendorOnboardVerifyStage1Routes= require("./routes/vendorOnboarding.routes")
 
 
@@ -187,8 +189,10 @@ app.use('/admin/api/blogs', blogRoutes);
 app.use('/admin/api/business', adminBusinessRoutes);
 app.use('/api/admin/business', adminBusinessRoutes);
 app.use('/admin/api/products', adminProductRoutes);
+app.use('/api/admin/catalog', adminCatalogRoutes);
 app.use('/admin/api/orders', adminOrderRoutes);
 app.use('/admin/api/audit-events', adminAuditRoutes);
+app.use('/api/admin/reviews', adminReviewRoutes);
 app.use('/api/business-profile', businessProfileRoutes);
 app.use('/api/admin/category/product', productCategoryRoutes);
 app.use('/api/admin/category/product-subcategory', productSubcategoryRoutes);

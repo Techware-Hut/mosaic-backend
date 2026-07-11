@@ -190,6 +190,25 @@ const VendorOnboardingStage1Schema = new mongoose.Schema(
 
     profileCompletionNotifiedAt: Date,
 
+    onboardingReminderLog: [
+      {
+        kind: {
+          type: String,
+          enum: ['payment_pending', 'paid_draft_unsubmitted'],
+        },
+        sentAt: {
+          type: Date,
+          default: Date.now,
+        },
+        deliveryStatus: {
+          type: String,
+          enum: ['sent', 'skipped', 'failed'],
+        },
+        messageId: String,
+        error: String,
+      },
+    ],
+
     verificationNotificationLog: [
       {
         event: String,

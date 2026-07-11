@@ -12,6 +12,7 @@ require('./instrument');
 const app = require('./app');
 const connectDB = require('./config/Db');
 const { logReleaseIdentityAtStartup } = require('./utils/releaseIdentity');
+const { startOnboardingReminderScheduler } = require('./jobs/onboardingReminders');
 
 const PORT = process.env.PORT || 3001;
 
@@ -19,6 +20,7 @@ const startServer = async () => {
   try {
     await connectDB();
     logReleaseIdentityAtStartup();
+    startOnboardingReminderScheduler();
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);
     });
