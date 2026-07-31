@@ -122,10 +122,9 @@ test('parsePublicSearchQuery normalizes search alias and clamps limit', () => {
   assert.equal(parsed.listingType, 'all');
 });
 
-test('detectUnsupportedGeoParams flags geolocation params', () => {
-  const unsupported = detectUnsupportedGeoParams({ lat: '40.7', radius: '10' });
-  assert.ok(unsupported.some((item) => item.param === 'lat'));
-  assert.ok(unsupported.some((item) => item.param === 'radius'));
+test('detectUnsupportedGeoParams flags unsupported nearMe params', () => {
+  const unsupported = detectUnsupportedGeoParams({ nearMe: 'true' });
+  assert.ok(unsupported.some((item) => item.param === 'nearMe'));
   assert.equal(unsupported[0].reason, 'geolocation not implemented');
 });
 
@@ -353,7 +352,7 @@ test('searchPublicListings returns safe empty arrays when tag filter matches not
   assert.equal(res.body.totals.all, 0);
 });
 
-test('searchPublicListings reports unsupported geolocation params', async () => {
+test('searchPublicListings reports nearMe as unsupported but accepts lat/lng/radius as geo params', async () => {
   const controller = loadSearchController({
     Business: { find: async () => [] },
     VendorOnboardingStage1: { find: async () => [] },
@@ -364,10 +363,34 @@ test('searchPublicListings reports unsupported geolocation params', async () => 
   });
 
   const res = mockResponse();
-  await controller.searchPublicListings({ query: { nearMe: 'true', lat: '1', lng: '2' } }, res);
+  // nearMe is still unsupported; lat/lng are now implemented
+  await controller.searchPublicListings({ query: { nearMe: 'true', lat: '40.7128', lng: '-74.0060' } }, res);
 
   assert.ok(Array.isArray(res.body.filters.unsupported));
-  assert.ok(res.body.filters.unsupported.length >= 3);
+  // Only nearMe should be in unsupported — lat/lng are now supported
+  const unsupportedParams = res.body.filters.unsupported.map((u) => u.param);
+  assert.ok(unsupportedParams.includes('nearMe'), 'nearMe should remain unsupported');
+  assert.ok(!unsupportedParams.includes('lat'), 'lat should now be a supported geo param');
+  assert.ok(!unsupportedParams.includes('lng'), 'lng should now be a supported geo param');
+});
+
+test('searchPublicListings parses lat/lng/radius and exposes them in response filters', async () => {
+  const controller = loadSearchController({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+    ProductCategory: { findOne: async () => null },
+    ServiceCategory: { findOne: async () => null },
+    FoodCategory: { findOne: async () => null },
+  });
+
+  const res = mockResponse();
+  await controller.searchPublicListings({ query: { lat: '40.7128', lng: '-74.0060', radius: '15' } }, res);
+
+  assert.ok(res.body.filters, 'response should have filters');
+  assert.strictEqual(res.body.filters.lat, 40.7128, 'lat should be parsed as float');
+  assert.strictEqual(res.body.filters.lng, -74.006, 'lng should be parsed as float');
+  assert.strictEqual(res.body.filters.radius, 15, 'radius should be parsed as km');
 });
 
 test('searchPublicListings listingType product skips service and food queries', async () => {

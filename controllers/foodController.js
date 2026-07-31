@@ -25,6 +25,7 @@ const { publicMarketplaceBusinessFilter } = require('../lib/marketplace/business
 const {
   validateFoodPublishState,
 } = require('../lib/marketplace/listingPricePolicy');
+const { safeGeocodeAddress } = require('../utils/geocode');
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -151,6 +152,23 @@ exports.createFood = async (req, res) => {
       foodType: foodType || '',
       brand: brand || '',
     });
+
+    // Auto-geocode from address if coordinates not provided by frontend (best-effort)
+    if (food.location && !food.location.coordinates?.length && food.location.address) {
+      const geo = await safeGeocodeAddress(food.location.address);
+      if (geo) {
+        food.location.coordinates = geo.coordinates;
+        food.location.address = geo.address;
+        food.location.type = 'Point';
+      }
+    }
+    // Also geocode if address string passed without a location object
+    if (!food.location && typeof location === 'string' && location.trim()) {
+      const geo = await safeGeocodeAddress(location.trim());
+      if (geo) {
+        food.location = { type: 'Point', coordinates: geo.coordinates, address: geo.address };
+      }
+    }
 
     await food.save();
 

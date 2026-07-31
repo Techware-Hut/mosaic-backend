@@ -163,10 +163,13 @@ const serviceSchema = new mongoose.Schema({
       closed: { type: Boolean, default: false },
     },
   ],
-  // Simplified location - just a string for map link
+  // GeoJSON Point — populated automatically from contact.address via geocoding on save.
+  // location.address stores the human-readable address for map link display.
+  // location.coordinates: [lng, lat] powers $nearSphere queries.
   location: {
-    type: String,
-    default: '',
+    type: { type: String, enum: ['Point'] },
+    coordinates: { type: [Number] }, // [lng, lat]
+    address: { type: String, default: '' }, // map link / display address (replaces old string field)
   },
   // Make contact fields optional
   contact: {
@@ -243,5 +246,6 @@ serviceSchema.post('save', async function (doc, next) {
 // Indexes for faster queries
 serviceSchema.index({ ownerId: 1 });
 serviceSchema.index({ categoryId: 1 });
+serviceSchema.index({ location: '2dsphere' }); // enables $nearSphere geo queries
 
 module.exports = mongoose.model('Service', serviceSchema);

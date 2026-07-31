@@ -23,6 +23,7 @@ const { normalizeImages } = require('../lib/listing/publicListingDto');
 const { applyLeadConfigToDocument } = require('../utils/serviceLeadConfig');
 const { publicMarketplaceBusinessFilter } = require('../lib/marketplace/businessEligibility');
 const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
+const { safeGeocodeAddress } = require('../utils/geocode');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -141,7 +142,12 @@ exports.createParentService = async (req, res) => {
       businessId,
       coverImage: coverImage || '',
       images: Array.isArray(images) ? images.filter(Boolean) : [],
-      location: location?.address || '',
+      location: location?.address
+        ? {
+            type: 'Point',
+            coordinates: [], // populated below after geocoding
+          }
+        : undefined,
       businessHours: normalizeBusinessHoursForStorage(businessHours || []),
       bookingToolLink: bookingToolLink || '',
       externalLink: req.body.externalLink || bookingToolLink || '',
@@ -166,6 +172,15 @@ exports.createParentService = async (req, res) => {
       videos: [],
       faq: normalizeFaqList(req.body.faq)
     });
+
+    // Auto-geocode the location address (best-effort, never blocks save)
+    if (location?.address && service.location) {
+      const geo = await safeGeocodeAddress(location.address);
+      if (geo) {
+        service.location.coordinates = geo.coordinates;
+        service.location.address = geo.address;
+      }
+    }
 
     await service.save();
 
@@ -305,7 +320,13 @@ exports.createService = async (req, res) => {
       images: images || [],
       isPublished,
       businessHours: normalizeBusinessHoursForStorage(businessHours || []),
-      location: location?.address || '',
+      location: location?.address
+        ? {
+            type: 'Point',
+            coordinates: [], // populated below after geocoding
+            address: location.address,
+          }
+        : undefined,
 
       contact: {
         phone: req.body.contact?.phone || '',
@@ -322,6 +343,15 @@ exports.createService = async (req, res) => {
       videos: req.body.videos || [],
       faq: normalizeFaqList(req.body.faq)
     });
+
+    // Auto-geocode the location address (best-effort, never blocks save)
+    if (location?.address && service.location) {
+      const geo = await safeGeocodeAddress(location.address);
+      if (geo) {
+        service.location.coordinates = geo.coordinates;
+        service.location.address = geo.address;
+      }
+    }
 
     await service.save();
 
