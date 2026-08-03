@@ -25,6 +25,7 @@ const { publicMarketplaceBusinessFilter } = require('../lib/marketplace/business
 const {
   validateFoodPublishState,
 } = require('../lib/marketplace/listingPricePolicy');
+const { safeGeocodeAddress } = require('../utils/geocode');
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -140,17 +141,36 @@ exports.createFood = async (req, res) => {
       businessHours: Array.isArray(businessHours) ? businessHours : [],
       bookingToolLink: bookingToolLink || '',
       metaFields: normalizeMetaFields(metaFields),
-      location: location?.coordinates
-  ? {
-      type: 'Point',
-      coordinates: location.coordinates,
-      address: location.address || '',
-    }
-  : undefined,
+      location: location?.coordinates ? {
+        type: 'Point',
+        coordinates: location.coordinates,
+        address: location.address || '',
+      } : (location?.address ? { address: location.address } : undefined),
       isPublished: nextPublished,
       foodType: foodType || '',
       brand: brand || '',
     });
+
+    // Auto-geocode from address if coordinates not provided by frontend (best-effort)
+    if (food.location && !food.location.coordinates?.length && food.location.address) {
+      const geo = await safeGeocodeAddress(food.location.address);
+      if (geo) {
+        food.location = {
+          type: 'Point',
+          coordinates: geo.coordinates,
+          address: geo.address,
+        };
+      }
+    }
+    // Fallback: if location field was passed as a simple string instead of an object
+    if (typeof location === 'string' && location.trim() !== '') {
+      const geo = await safeGeocodeAddress(location.trim());
+      if (geo) {
+        food.location = { type: 'Point', coordinates: geo.coordinates, address: geo.address };
+      } else {
+        food.location = { address: location.trim() };
+      }
+    }
 
     await food.save();
 
@@ -329,7 +349,6 @@ exports.updateFood = async (req, res) => {
       'menuImage',
       'businessHours',
       'bookingToolLink',
-      'location',
       'isPublished',
       'foodType',
       'brand',
@@ -347,8 +366,31 @@ exports.updateFood = async (req, res) => {
       food.metaFields = normalizeMetaFields(req.body.metaFields);
     }
 
-    if (req.body.location?.address) {
-      food.location = req.body.location.address;
+    // Re-geocode when location address is updated
+    if (req.body.location?.address !== undefined) {
+      const newAddress = String(req.body.location.address).trim();
+      const existingAddress = food.location?.address || '';
+      const addressChanged = newAddress !== existingAddress;
+
+      if (addressChanged) {
+        const geo = await safeGeocodeAddress(newAddress);
+        if (geo) {
+          food.location = {
+            type: 'Point',
+            coordinates: geo.coordinates,
+            address: geo.address,
+          };
+        } else {
+          food.location = { address: newAddress };
+        }
+      } else if (newAddress) {
+        food.location = {
+          ...(food.location?.coordinates?.length ? { type: 'Point', coordinates: food.location.coordinates } : {}),
+          address: newAddress
+        };
+      } else {
+        food.location = undefined;
+      }
     }
 
     if (Array.isArray(food.images)) {

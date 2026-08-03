@@ -23,6 +23,7 @@ const { normalizeImages } = require('../lib/listing/publicListingDto');
 const { applyLeadConfigToDocument } = require('../utils/serviceLeadConfig');
 const { publicMarketplaceBusinessFilter } = require('../lib/marketplace/businessEligibility');
 const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
+const { safeGeocodeAddress } = require('../utils/geocode');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -141,7 +142,7 @@ exports.createParentService = async (req, res) => {
       businessId,
       coverImage: coverImage || '',
       images: Array.isArray(images) ? images.filter(Boolean) : [],
-      location: location?.address || '',
+      location: location?.address ? { address: location.address } : undefined,
       businessHours: normalizeBusinessHoursForStorage(businessHours || []),
       bookingToolLink: bookingToolLink || '',
       externalLink: req.body.externalLink || bookingToolLink || '',
@@ -166,6 +167,19 @@ exports.createParentService = async (req, res) => {
       videos: [],
       faq: normalizeFaqList(req.body.faq)
     });
+
+    // Auto-geocode the location address (best-effort, never blocks save)
+    // location.address is always preserved from input even if geocoding fails
+    if (location?.address) {
+      const geo = await safeGeocodeAddress(location.address);
+      if (geo) {
+        service.location = {
+          type: 'Point',
+          coordinates: geo.coordinates,
+          address: geo.address, // use Google-normalised address
+        };
+      }
+    }
 
     await service.save();
 
@@ -305,7 +319,7 @@ exports.createService = async (req, res) => {
       images: images || [],
       isPublished,
       businessHours: normalizeBusinessHoursForStorage(businessHours || []),
-      location: location?.address || '',
+      location: location?.address ? { address: location.address } : undefined,
 
       contact: {
         phone: req.body.contact?.phone || '',
@@ -322,6 +336,19 @@ exports.createService = async (req, res) => {
       videos: req.body.videos || [],
       faq: normalizeFaqList(req.body.faq)
     });
+
+    // Auto-geocode the location address (best-effort, never blocks save)
+    // location.address is always preserved from input even if geocoding fails
+    if (location?.address) {
+      const geo = await safeGeocodeAddress(location.address);
+      if (geo) {
+        service.location = {
+          type: 'Point',
+          coordinates: geo.coordinates,
+          address: geo.address, // use Google-normalised address
+        };
+      }
+    }
 
     await service.save();
 
@@ -888,10 +915,40 @@ exports.updateService = async (req, res) => {
       });
     }
 
-    if (req.body.location?.address) {
-      service.location = req.body.location.address;
+    // Re-geocode when location address is updated
+    // Always rebuild a clean GeoJSON object — never assign a plain string
+    if (req.body.location?.address !== undefined) {
+      const newAddress = String(req.body.location.address).trim();
+      // Preserve existing coords if address is unchanged
+      const existingAddress = service.location?.address || '';
+      const addressChanged = newAddress !== existingAddress;
+
+      if (addressChanged) {
+        const geo = await safeGeocodeAddress(newAddress);
+        if (geo) {
+          service.location = {
+            type: 'Point',
+            coordinates: geo.coordinates,
+            address: geo.address, // use Google-normalised form
+          };
+        } else {
+          // If geocoding fails, save only the address without type/coordinates
+          service.location = { address: newAddress };
+        }
+      } else if (newAddress) {
+        // Address unchanged, keep existing coordinates if any
+        service.location = {
+          ...(service.location?.coordinates?.length ? { type: 'Point', coordinates: service.location.coordinates } : {}),
+          address: newAddress
+        };
+      } else {
+        // Empty address -> clear location
+        service.location = undefined;
+      }
+
+      // Sync contact.address to match the display address
       if (service.contact) {
-        service.contact.address = req.body.location.address;
+        service.contact.address = service.location.address;
       }
     }
 
