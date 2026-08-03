@@ -50,7 +50,7 @@ const businessSchema = new mongoose.Schema(
     
     // ===== LOCATION FOR GEO SEARCH =====
     location: {
-      type: { type: String, enum: ['Point'], default: 'Point' },
+      type: { type: String, enum: ['Point'] },
       coordinates: { type: [Number] }, // [lng, lat] — populated automatically from address on save
       address: { type: String, default: '' }, // geocoded formatted address
     },
