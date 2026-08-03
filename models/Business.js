@@ -265,7 +265,10 @@ const businessSchema = new mongoose.Schema(
 );
 
 // ===== INDEXES FOR PERFORMANCE =====
-businessSchema.index({ location: '2dsphere' });
+businessSchema.index(
+  { location: '2dsphere' },
+  { partialFilterExpression: { 'location.type': 'Point', 'location.coordinates': { $exists: true } } }
+);
 businessSchema.index({ tags: 1 });
 businessSchema.index({ isActive: 1, isApproved: 1 });
 businessSchema.index({ 'usage.totalProducts': 1 });

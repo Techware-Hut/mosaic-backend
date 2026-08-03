@@ -179,6 +179,9 @@ foodSchema.pre('save', async function (next) {
 });
 
 // Enables $nearSphere geo queries for nearby food listings
-foodSchema.index({ location: '2dsphere' });
+foodSchema.index(
+  { location: '2dsphere' },
+  { partialFilterExpression: { 'location.type': 'Point', 'location.coordinates': { $exists: true } } }
+);
 
 module.exports = mongoose.model('Food', foodSchema);
