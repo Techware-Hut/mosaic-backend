@@ -365,8 +365,43 @@ exports.updateFood = async (req, res) => {
       food.metaFields = normalizeMetaFields(req.body.metaFields);
     }
 
+    // Re-geocode when location address is updated.
+    // Always rebuild a clean GeoJSON object — never assign a plain string.
     if (req.body.location?.address) {
-      food.location = req.body.location.address;
+      const newAddress = String(req.body.location.address).trim();
+      const existingAddress = food.location?.address || '';
+      const addressChanged = newAddress !== existingAddress;
+
+      food.location = {
+        type: 'Point',
+        coordinates: addressChanged ? [] : (food.location?.coordinates || []),
+        address: newAddress, // always preserve address even if geocoding fails
+      };
+
+      if (addressChanged) {
+        const geo = await safeGeocodeAddress(newAddress);
+        if (geo) {
+          food.location.coordinates = geo.coordinates;
+          food.location.address = geo.address; // use Google-normalised form
+        }
+      }
+    } else if (typeof req.body.location === 'string' && req.body.location.trim()) {
+      // Handle plain string address sent as location (legacy clients)
+      const newAddress = req.body.location.trim();
+      const existingAddress = food.location?.address || '';
+      const addressChanged = newAddress !== existingAddress;
+      food.location = {
+        type: 'Point',
+        coordinates: addressChanged ? [] : (food.location?.coordinates || []),
+        address: newAddress,
+      };
+      if (addressChanged) {
+        const geo = await safeGeocodeAddress(newAddress);
+        if (geo) {
+          food.location.coordinates = geo.coordinates;
+          food.location.address = geo.address;
+        }
+      }
     }
 
     if (Array.isArray(food.images)) {

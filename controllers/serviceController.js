@@ -174,11 +174,14 @@ exports.createParentService = async (req, res) => {
     });
 
     // Auto-geocode the location address (best-effort, never blocks save)
+    // location.address is always preserved from input even if geocoding fails
     if (location?.address && service.location) {
       const geo = await safeGeocodeAddress(location.address);
       if (geo) {
         service.location.coordinates = geo.coordinates;
-        service.location.address = geo.address;
+        service.location.address = geo.address; // use Google-normalised address
+      } else {
+        service.location.address = location.address; // fallback: keep raw address
       }
     }
 
@@ -345,11 +348,14 @@ exports.createService = async (req, res) => {
     });
 
     // Auto-geocode the location address (best-effort, never blocks save)
+    // location.address is always preserved from input even if geocoding fails
     if (location?.address && service.location) {
       const geo = await safeGeocodeAddress(location.address);
       if (geo) {
         service.location.coordinates = geo.coordinates;
-        service.location.address = geo.address;
+        service.location.address = geo.address; // use Google-normalised address
+      } else {
+        service.location.address = location.address; // fallback: keep raw address
       }
     }
 
@@ -918,10 +924,33 @@ exports.updateService = async (req, res) => {
       });
     }
 
+    // Re-geocode when location address is updated
+    // Always rebuild a clean GeoJSON object — never assign a plain string
     if (req.body.location?.address) {
-      service.location = req.body.location.address;
+      const newAddress = String(req.body.location.address).trim();
+      // Preserve existing coords if address is unchanged
+      const existingAddress = service.location?.address || '';
+      const addressChanged = newAddress !== existingAddress;
+
+      service.location = {
+        type: 'Point',
+        // Keep old coordinates until geocoding succeeds, so stale coords are
+        // not silently attached to a brand-new address
+        coordinates: addressChanged ? [] : (service.location?.coordinates || []),
+        address: newAddress, // always save address even if geocoding fails
+      };
+
+      if (addressChanged) {
+        const geo = await safeGeocodeAddress(newAddress);
+        if (geo) {
+          service.location.coordinates = geo.coordinates;
+          service.location.address = geo.address; // use Google-normalised form
+        }
+      }
+
+      // Sync contact.address to match the display address
       if (service.contact) {
-        service.contact.address = req.body.location.address;
+        service.contact.address = service.location.address;
       }
     }
 
