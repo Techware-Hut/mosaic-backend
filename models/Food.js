@@ -178,4 +178,7 @@ foodSchema.pre('save', async function (next) {
   next();
 });
 
+// Enables $nearSphere geo queries for nearby food listings
+foodSchema.index({ location: '2dsphere' });
+
 module.exports = mongoose.model('Food', foodSchema);

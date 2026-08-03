@@ -1571,6 +1571,25 @@ exports.searchPublicListings = async (req, res) => {
   try {
     const parsed = parsePublicSearchQuery(req.query);
     const unsupported = detectUnsupportedGeoParams(req.query);
+
+    // Reject partial geo params: lat without lng (or vice-versa) is a client error
+    const hasLat = req.query.lat != null && String(req.query.lat).trim() !== '';
+    const hasLng = req.query.lng != null && String(req.query.lng).trim() !== '';
+    if (hasLat !== hasLng) {
+      return res.status(400).json({
+        success: false,
+        message: 'Geo search requires both lat and lng. Please supply both parameters together.',
+        code: 'GEO_PARAMS_INCOMPLETE',
+      });
+    }
+    // Reject if lat/lng were supplied but are not valid numbers
+    if (hasLat && hasLng && (parsed.lat == null || parsed.lng == null)) {
+      return res.status(400).json({
+        success: false,
+        message: 'lat and lng must be valid numbers (lat: -90 to 90, lng: -180 to 180).',
+        code: 'GEO_PARAMS_INVALID',
+      });
+    }
     const emptyPayload = {
       success: true,
       filters: {
@@ -1587,6 +1606,9 @@ exports.searchPublicListings = async (req, res) => {
         tags: parsed.tags,
         verified: parsed.verified,
         listingType: parsed.listingType,
+        lat: parsed.lat,
+        lng: parsed.lng,
+        radius: parsed.lat != null ? parsed.radiusKm : null,
         page: parsed.page,
         limit: parsed.limit,
         unsupported,
@@ -1606,6 +1628,9 @@ exports.searchPublicListings = async (req, res) => {
         tag: parsed.tag,
         tags: parsed.tags,
         verified: parsed.verified,
+        lat: parsed.lat,
+        lng: parsed.lng,
+        radiusKm: parsed.radiusKm,
       }),
       parsed.keyword ? resolveBusinessIdsByKeyword(parsed.keyword) : Promise.resolve([]),
     ]);
