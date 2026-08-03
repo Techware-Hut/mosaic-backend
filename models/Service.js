@@ -246,6 +246,9 @@ serviceSchema.post('save', async function (doc, next) {
 // Indexes for faster queries
 serviceSchema.index({ ownerId: 1 });
 serviceSchema.index({ categoryId: 1 });
-serviceSchema.index({ location: '2dsphere' }); // enables $nearSphere geo queries
+serviceSchema.index(
+  { location: '2dsphere' },
+  { partialFilterExpression: { 'location.type': 'Point', 'location.coordinates': { $exists: true } } }
+); // enables $nearSphere geo queries
 
 module.exports = mongoose.model('Service', serviceSchema);
