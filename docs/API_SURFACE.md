@@ -106,7 +106,7 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 | GET | `/api/business/:id/shipping-settings` | same | `getBusinessShippingSettings` | business_owner | Read shipping settings | 🟡 |
 | PUT | `/api/business/:id/shipping-settings` | same | `updateBusinessShippingSettings` | business_owner | Update shipping | 🟡 |
 | GET | `/api/business/:id/tax-settings` | same | `getBusinessTaxSettings` | business_owner | Read tax settings | 🟡 |
-| PUT | `/api/business/:id/tax-settings` | same | `updateBusinessTaxSettings` | business_owner | Update tax | 🟡 |
+| PUT | `/api/business/:id/tax-settings` | same | `updateBusinessTaxSettings` | business_owner | Update tax settings | 🟡 |
 | GET | `/api/business/public/:slug` | — | `getBusinessBySlugPublic` | ⚪ Public | Public business by slug | 🟢 P6.4 related |
 | GET | `/api/business/:slug` | `authenticate`, `isBusinessOwner` | `getBusinessBySlug` | business_owner | Owner business by slug | 🟡 |
 | PUT | `/api/business/:id` | `authenticate`, `isBusinessOwner` | `updateBusiness` | business_owner | Update business | 🟡 |
@@ -129,8 +129,8 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 | --- | --- | --- | --- | --- | --- | --- |
 | POST | `/api/connect/:businessId/account-link` | `authenticate`, `isBusinessOwner` | `createAccountLink` | business_owner | Start Connect onboarding | 🟡 P5.1 |
 | GET | `/api/connect/:businessId/status` | same | `getStatus` | business_owner | Connect account status | 🟡 |
-| GET | `/api/connect/return` | — | `handleReturn` | ⚪ Public | Connect OAuth return | 🟡 browser |
-| GET | `/api/connect/refresh` | — | `handleRefresh` | ⚪ Public | Connect refresh link | 🟡 browser |
+| GET | `/api/connect/return` | — | `handleReturn` | ⚪ Public | Connect OAuth return | 🟢 browser |
+| GET | `/api/connect/refresh` | — | `handleRefresh` | ⚪ Public | Connect refresh link | 🟢 browser |
 
 ### Stripe dashboard embed — [`routes/stripe.routes.js`](../routes/stripe.routes.js) → `/stripe`
 
@@ -220,6 +220,7 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/services/list` | — | `getAllServices` | ⚪ Public | Service listings | 🟢 |
 | GET | `/api/public/search` | — | `searchPublicListings` | ⚪ Public | Keyword/location search | 🟢 P6.1–P6.2 |
+| GET | `/api/public/locations/states` | — | `publicMarketplaceStates.controller.getPublicMarketplaceStates` | ⚪ Public | Eligible state list for the location dropdown (approved, active businesses with ≥1 eligible public listing) | 🟢 |
 | GET | `/api/services/:slug` | — | `getServiceBySlug` | ⚪ Public | Service by slug | 🟢 |
 | GET | `/api/public/services/:id` | — | `getServiceById` | ⚪ Public | Service by ID | 🟢 |
 | GET | `/api/public/foods/:id` | — | `getFoodById` | ⚪ Public | Food by ID | 🟢 |
@@ -311,8 +312,8 @@ Router-level: `authenticate`, `isCustomer`.
 | Method | Route | Middleware | Controller | Auth/Role | Purpose | Smoke Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/wishlist/` | router-level | `getWishlist` | customer | Get wishlist | 🟡 |
-| POST | `/api/wishlist/:productVariantId` | router-level | `addToWishlist` | customer | Add item | 🟡 |
-| DELETE | `/api/wishlist/:productVariantId` | router-level | `removeFromWishlist` | customer | Remove item | 🟡 |
+| POST | `/api/wishlist/:productVariantId` | router-level | `addToWishlist` | customer | Add to wishlist | 🟡 |
+| DELETE | `/api/wishlist/:productVariantId` | router-level | `removeFromWishlist` | customer | Remove from wishlist | 🟡 |
 
 ### Enquiries — [`routes/enquiryRoutes.js`](../routes/enquiryRoutes.js) → `/api/enquiries`
 
@@ -391,8 +392,8 @@ Controllers: [`subscriptionPlanRoutes.js`](../routes/subscriptionPlanRoutes.js),
 | GET | `/api/bookings/customer/service` | same | `getCustomerServiceBookings` | customer | Customer service bookings | 🟡 |
 | GET | `/api/bookings/customer/food` | same | `getCustomerFoodBookings` | customer | Customer food bookings | 🟡 |
 | PUT | `/api/bookings/service/:id/request-payment` | `authenticate`, `isBusinessOwner` | `requestServiceBookingPayment` | business_owner | Request payment | 🔴 |
-| PUT | `/api/bookings/service/:id/approve` | same | `approveServiceBooking` | business_owner | Approve booking | 🟡 |
-| PUT | `/api/bookings/service/:id/reject` | same | `rejectServiceBooking` | business_owner | Reject booking | 🟡 |
+| PUT | `/api/bookings/service/:id/approve` | `authenticate`, `isBusinessOwner` | `approveServiceBooking` | business_owner | Approve booking | 🟡 |
+| PUT | `/api/bookings/service/:id/reject` | `authenticate`, `isBusinessOwner` | `rejectServiceBooking` | business_owner | Reject booking | 🟡 |
 | PUT | `/api/bookings/confirm/:id` | `authenticate`, `isBusinessOwner` | inline | business_owner | Confirm booking | 🟡 |
 | PUT | `/api/bookings/complete/:id` | same | inline | business_owner | Complete booking | 🟡 |
 | PUT | `/api/bookings/cancel/:id` | `authenticate` | inline | Authenticated | Cancel booking | 🟡 |
