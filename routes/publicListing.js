@@ -1,12 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { getAllServices, getServiceBySlug, getAllProducts,getProductsByFilters, getAllFood, getProductById, getVendorProfile, getProductsByBusinessId, getServiceById, getFoodById, searchPublicListings} = require('../controllers/publicListing');
+const { getPublicMarketplaceStates } = require('../controllers/publicMarketplaceStates.controller');
 const { listProductsRanked  } = require('../controllers/productListingController');
 const attachSimilarQuery = require('../middlewares/attachSimilarQuery');
 
 
 router.get('/services/list', getAllServices);
 router.get('/public/search', searchPublicListings);
+router.get('/public/locations/states', getPublicMarketplaceStates);
 
 router.get('/services/:slug', getServiceBySlug);
 router.get('/public/services/:id', getServiceById);
