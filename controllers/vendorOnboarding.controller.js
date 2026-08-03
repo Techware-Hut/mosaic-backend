@@ -60,7 +60,7 @@ exports.saveDraft = async (req, res) => {
     const userId = req.user._id;
     const payload = { ...req.body };
 
-    // 1️⃣ Check existing onboarding
+    // 1️⃣ Check if onboarding exists
     let onboarding = await VendorOnboarding.findOne({ userId });
 
     // 2️⃣ ❌ Block ONLY if verified (not submitted)
@@ -188,7 +188,7 @@ exports.saveDraft = async (req, res) => {
 //     const userId = req.user._id;
 //     const payload = { ...req.body }; // copy of frontend data
 
-//     // 1️⃣ Check existing onboarding
+//     // 1️⃣ Check if onboarding exists
 //     let onboarding = await VendorOnboarding.findOne({ userId });
 
 //     // 2️⃣ Lock if already submitted
@@ -233,9 +233,10 @@ exports.saveDraft = async (req, res) => {
 //     // Map social URLs
 //     const urlFields = ["websiteUrl", "facebookUrl", "instagramUrl", "linkedinUrl", "tiktokUrl"];
 //     urlFields.forEach((field) => {
-//       const key = field.replace("Url", ""); // websiteUrl -> website
 //       if (payload[field] !== undefined) {
-//         onboarding[key] = payload[field];
+//         const key = field.replace("Url", ""); // websiteUrl -> website
+//         payload[key] = payload[field];
+//         delete payload[field];
 //       }
 //     });
 
@@ -286,7 +287,7 @@ exports.saveDraft = async (req, res) => {
 //     // 8️⃣ Ensure status is always draft
 //     onboarding.status = "draft";
 
-//     // 9️⃣ Save
+//     // 9️⃣ Save document
 //     await onboarding.save();
 
 //     return res.status(200).json({
@@ -392,7 +393,7 @@ exports.saveDraft = async (req, res) => {
 //     };
 
 //     // 6️⃣ Apply ONLY the mapped fields that exist in payload
-//     // Do not overwrite existing data with undefined
+//     // This ensures we don't overwrite existing data with undefined
 //     Object.keys(mappedPayload).forEach(key => {
 //       if (mappedPayload[key] !== undefined) {
 //         onboarding[key] = mappedPayload[key];
@@ -600,7 +601,7 @@ exports.updateBusinessProfile = async (req, res) => {
 //       ...(payload.instagram !== undefined && { instagram: payload.instagram }),
 //       ...(payload.twitter !== undefined && { twitter: payload.twitter }),
 //       ...(payload.linkedin !== undefined && { linkedin: payload.linkedin }),
-//       ...(payload.tiktok !== undefined && { tiktok: payload.tiktok }),
+//       ...(payload.tiktokUrl !== undefined && { tiktok: payload.tiktokUrl }),
 //       
 //       // Map business profile fields
 //       ...(payload.firstName !== undefined && { firstName: payload.firstName }),
@@ -920,8 +921,6 @@ exports.handleVendorPaymentWebhook = async (req, res) => {
             await onboarding.save();
 
             console.log(`Vendor verification payment failed for user ${userId}`);
-          } else {
-            console.log(`No onboarding record found for payment ${failedPaymentIntent.id}`);
           }
         } catch (error) {
           console.error('Failed to update vendor verification payment failure:', error);
@@ -1191,8 +1190,8 @@ if (
 //        PAYMENT VALIDATION (MANDATORY)
 //     ------------------------------ */
 //     // if (
-//     //   onboarding.verificationPayment &&
-//     //   onboarding.verificationPayment.status !== 'paid'
+//     //   !onboarding.verificationPayment ||
+//     //   onboarding.verificationPayment.status !== "paid"
 //     // ) {
 //     //   return res.status(402).json({
 //     //     success: false,
@@ -1231,9 +1230,10 @@ if (
 //     try {
 //       // 1️⃣ Notify Admin
 //       await sendAdminOnboardingSubmissionEmail({
-//         adminEmail: process.env.ADMIN_EMAIL,
+//         adminEmail: process.env.ADMIN_EMAIL, // e.g. admin@mosaicbizhub.com
 //         applicationId: onboarding.applicationId,
 //         businessName: onboarding.businessName,
+//         vendorName: user.name,
 //       });
 
 //       // 2️⃣ Notify Vendor
@@ -1661,5 +1661,6 @@ exports.getApplicationId = async (req, res) => {
     });
   }
 };
+
 
 
