@@ -1,6 +1,18 @@
 const mongoose = require("mongoose");
 const slugify = require("slugify");
 
+// GeoJSON location subdocument. _id: false keeps parity with the previous
+// nested-path shape; the PARENT field carries default: undefined so a new
+// Business never materializes a partial location (#251).
+const locationSchema = new mongoose.Schema(
+  {
+    type: { type: String, enum: ['Point'] },
+    coordinates: { type: [Number] }, // [lng, lat] — populated automatically from address on save
+    address: { type: String, default: '' }, // geocoded formatted address
+  },
+  { _id: false }
+);
+
 const businessSchema = new mongoose.Schema(
   {
     // ===== CORE BUSINESS INFO =====
@@ -49,10 +61,14 @@ const businessSchema = new mongoose.Schema(
     },
     
     // ===== LOCATION FOR GEO SEARCH =====
+    // default: undefined — a new Business must NOT materialize a partial
+    // location. The old address default ('') produced { address: '' } on
+    // every new document, which the collection's 2dsphere index rejects with
+    // Mongo error 16755 (#251). location exists only when a real GeoJSON
+    // Point is explicitly set (e.g. by the geocoding write paths).
     location: {
-      type: { type: String, enum: ['Point'] },
-      coordinates: { type: [Number] }, // [lng, lat] — populated automatically from address on save
-      address: { type: String, default: '' }, // geocoded formatted address
+      type: locationSchema,
+      default: undefined,
     },
     
     // ===== SOCIAL MEDIA =====
