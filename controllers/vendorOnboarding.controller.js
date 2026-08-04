@@ -12,7 +12,10 @@ const {
   applyVendorBusinessProfileFields,
   applyVendorDraftField,
 } = require('../utils/vendorOnboardingProfileFields');
-const { syncBusinessFromOnboarding } = require('../utils/syncBusinessFromOnboarding');
+const {
+  syncBusinessFromOnboarding,
+  isVendorSubscriptionError,
+} = require('../utils/syncBusinessFromOnboarding');
 const { validateStage1Payload } = require('../utils/vendorOnboardingValidation');
 const { deliverVendorOnboardingEmails } = require('../utils/vendorOnboardingEmailDelivery');
 
@@ -37,6 +40,39 @@ function logVendorOnboardingEvent(endpoint, req, onboarding, { httpStatus, categ
   }
 
   console.info('[vendor-onboarding]', JSON.stringify(payload));
+}
+
+/**
+ * Safe Business-sync failure logger.
+ * Logs only: error name, stable code, Mongoose validation FIELD NAMES
+ * (never values/messages), request ID, and the applicationId suffix.
+ * Never logs payloads, emails, phones, tokens, cookies, or document URLs.
+ */
+function logBusinessSyncFailure(endpoint, req, onboarding, error) {
+  const validationFields =
+    error && error.name === 'ValidationError' && error.errors
+      ? Object.keys(error.errors)
+      : undefined;
+
+  const payload = {
+    endpoint,
+    errorName: error?.name || 'Error',
+    code: error?.code || undefined,
+    validationFields,
+    applicationIdSuffix: onboarding?.applicationId
+      ? String(onboarding.applicationId).slice(-6)
+      : undefined,
+  };
+
+  const requestId = req?.requestId || req?.headers?.['x-request-id'];
+  if (requestId) {
+    payload.requestId = String(requestId).slice(0, 128);
+  }
+
+  console.error(
+    '[vendor-onboarding] business sync failed:',
+    JSON.stringify(payload)
+  );
 }
 
 const isNonEmptyString = (value) =>
@@ -534,7 +570,24 @@ exports.updateBusinessProfile = async (req, res) => {
         Subscription,
       });
     } catch (businessError) {
-      console.error('Business sync failed:', businessError.message);
+      logBusinessSyncFailure(
+        'PUT /business-profile',
+        req,
+        onboarding,
+        businessError
+      );
+      if (isVendorSubscriptionError(businessError)) {
+        // Actionable conflict: the vendor's profile fields are already saved
+        // on the onboarding draft above; the sync is retried on the next
+        // profile save once the subscription linkage is in place.
+        // Do NOT pretend the sync completed.
+        return res.status(businessError.statusCode || 409).json({
+          success: false,
+          code: businessError.code,
+          message: businessError.message,
+          nextAction: businessError.nextAction,
+        });
+      }
       return res.status(500).json({
         success: false,
         message: 'Failed to sync business profile data',
@@ -702,7 +755,22 @@ exports.patchBusinessProfile = async (req, res) => {
         Subscription,
       });
     } catch (businessError) {
-      console.error('Business sync failed:', businessError.message);
+      logBusinessSyncFailure(
+        'PATCH /business-profile',
+        req,
+        onboarding,
+        businessError
+      );
+      if (isVendorSubscriptionError(businessError)) {
+        // Same contract as PUT: actionable conflict, saved draft preserved,
+        // vendor stays at their current stage, sync retried on next save.
+        return res.status(businessError.statusCode || 409).json({
+          success: false,
+          code: businessError.code,
+          message: businessError.message,
+          nextAction: businessError.nextAction,
+        });
+      }
       return res.status(500).json({
         success: false,
         message: 'Failed to sync business profile data',
@@ -827,6 +895,7 @@ exports.createVerificationPayment = async (req, res) => {
         amount: 24.99,
         currency: 'usd',
         status: 'pending',
+        applicationId: onboarding.applicationId || 'N/A',
         applicationStatus: 'payment_pending'
       }
     });
