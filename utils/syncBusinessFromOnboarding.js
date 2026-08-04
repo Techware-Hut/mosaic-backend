@@ -1,3 +1,32 @@
+const VENDOR_SUBSCRIPTION_REQUIRED = 'VENDOR_SUBSCRIPTION_REQUIRED';
+const VENDOR_SUBSCRIPTION_INVALID = 'VENDOR_SUBSCRIPTION_INVALID';
+
+const VENDOR_SUBSCRIPTION_REQUIRED_MESSAGE =
+  'An active vendor subscription is required before your business profile can be completed.';
+const VENDOR_SUBSCRIPTION_INVALID_MESSAGE =
+  'Your vendor subscription record is incomplete. Please contact support so we can finish linking your subscription.';
+
+/**
+ * Typed conflict error for the Business sync subscription gate.
+ * Carries only safe, client-displayable fields (no payload echoes).
+ */
+function createVendorSubscriptionError(code, message, nextAction) {
+  const error = new Error(message);
+  error.name = 'VendorSubscriptionSyncError';
+  error.code = code;
+  error.statusCode = 409;
+  error.nextAction = nextAction;
+  return error;
+}
+
+function isVendorSubscriptionError(error) {
+  return (
+    Boolean(error) &&
+    (error.code === VENDOR_SUBSCRIPTION_REQUIRED ||
+      error.code === VENDOR_SUBSCRIPTION_INVALID)
+  );
+}
+
 function hasAnyAddressValue(address) {
   if (!address) return false;
   return ['street', 'city', 'state', 'country', 'zipCode'].some(
@@ -88,6 +117,30 @@ async function syncBusinessFromOnboarding({
     status: 'active',
   }).sort({ createdAt: -1 });
 
+  // The Business schema hard-requires a real subscription linkage:
+  //   - subscriptionId / subscriptionPlanId are required refs
+  //   - subscriptionStatus enum is active|expired|cancelled|pending
+  // Writing null refs or a synthetic 'inactive' status throws a Mongoose
+  // ValidationError, which surfaced in production as a generic HTTP 500
+  // ("Failed to sync business profile data") and blocked vendors at Stage 3.
+  // Fail fast with an actionable, typed conflict BEFORE touching Business,
+  // so no partial Business is ever created.
+  if (!subscription) {
+    throw createVendorSubscriptionError(
+      VENDOR_SUBSCRIPTION_REQUIRED,
+      VENDOR_SUBSCRIPTION_REQUIRED_MESSAGE,
+      'complete_subscription'
+    );
+  }
+
+  if (!subscription.subscriptionPlanId) {
+    throw createVendorSubscriptionError(
+      VENDOR_SUBSCRIPTION_INVALID,
+      VENDOR_SUBSCRIPTION_INVALID_MESSAGE,
+      'contact_support'
+    );
+  }
+
   let business = await Business.findOne({ owner: userId });
 
   const businessData = {
@@ -104,9 +157,9 @@ async function syncBusinessFromOnboarding({
     listingType: onboarding.businessType || 'product',
     points: onboarding.totalVerificationPoints || 0,
     badge: onboarding.badge || null,
-    subscriptionId: subscription?._id || null,
-    subscriptionPlanId: subscription?.subscriptionPlanId || null,
-    subscriptionStatus: subscription?.status || 'inactive',
+    subscriptionId: subscription._id,
+    subscriptionPlanId: subscription.subscriptionPlanId,
+    subscriptionStatus: subscription.status,
   };
 
   if (!business) {
@@ -165,6 +218,20 @@ async function syncBusinessFromOnboarding({
     await onboarding.save();
   }
 
+  // Keep the reverse linkage in sync so subscription → business lookups work.
+  // Single-field $set (via updateOne) avoids revalidating unrelated legacy
+  // subscription fields that full-document save() would trip over.
+  if (
+    !subscription.businessId ||
+    subscription.businessId.toString() !== business._id.toString()
+  ) {
+    await Subscription.updateOne(
+      { _id: subscription._id },
+      { $set: { businessId: business._id } }
+    );
+    subscription.businessId = business._id;
+  }
+
   return business;
 }
 
@@ -174,4 +241,9 @@ module.exports = {
   buildAddressFromOnboarding,
   buildSocialLinksFromOnboarding,
   normalizeMinorityCategories,
+  isVendorSubscriptionError,
+  VENDOR_SUBSCRIPTION_REQUIRED,
+  VENDOR_SUBSCRIPTION_INVALID,
+  VENDOR_SUBSCRIPTION_REQUIRED_MESSAGE,
+  VENDOR_SUBSCRIPTION_INVALID_MESSAGE,
 };
