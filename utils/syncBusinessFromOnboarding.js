@@ -27,6 +27,23 @@ function isVendorSubscriptionError(error) {
   );
 }
 
+/**
+ * A Business location is safe to persist only when it is a complete GeoJSON
+ * Point: type 'Point' with exactly two finite numeric coordinates.
+ * Anything else — including the schema's historical materialized
+ * { address: '' } — is rejected by the 2dsphere index with Mongo error
+ * 16755 on save (production incident #251).
+ */
+function hasValidGeoPoint(location) {
+  return (
+    Boolean(location) &&
+    location.type === 'Point' &&
+    Array.isArray(location.coordinates) &&
+    location.coordinates.length === 2 &&
+    location.coordinates.every((value) => Number.isFinite(value))
+  );
+}
+
 function hasAnyAddressValue(address) {
   if (!address) return false;
   return ['street', 'city', 'state', 'country', 'zipCode'].some(
@@ -202,10 +219,16 @@ async function syncBusinessFromOnboarding({
     business.subscriptionId = businessData.subscriptionId;
     business.subscriptionPlanId = businessData.subscriptionPlanId;
     business.subscriptionStatus = businessData.subscriptionStatus;
+  }
 
-    if (business.location) {
-      business.location = undefined;
-    }
+  // The businesses collection's 2dsphere index rejects any location that is
+  // not a complete GeoJSON Point (Mongo error 16755, production #251).
+  // Preserve a valid Point; explicitly unset anything else — including the
+  // schema's historical { address: '' } materialization — before saving, for
+  // both newly constructed and existing Business records. Never fabricate
+  // coordinates here.
+  if (!hasValidGeoPoint(business.location)) {
+    business.location = undefined;
   }
 
   await business.save();
@@ -242,6 +265,7 @@ module.exports = {
   buildSocialLinksFromOnboarding,
   normalizeMinorityCategories,
   isVendorSubscriptionError,
+  hasValidGeoPoint,
   VENDOR_SUBSCRIPTION_REQUIRED,
   VENDOR_SUBSCRIPTION_INVALID,
   VENDOR_SUBSCRIPTION_REQUIRED_MESSAGE,
