@@ -1079,9 +1079,19 @@ exports.getBusinessBySlug = async (req, res) => {
         });
         business = await businessQuery().lean();
       } catch (backfillError) {
+        // Non-blocking by design. Log only safe metadata (error name, stable
+        // code, validation field names) — never error.message, which can echo
+        // user-provided values from Mongoose validation/cast messages.
         console.error(
           "[getBusinessBySlug] profile backfill sync failed:",
-          backfillError.message
+          JSON.stringify({
+            errorName: backfillError?.name || 'Error',
+            code: backfillError?.code || undefined,
+            validationFields:
+              backfillError?.name === 'ValidationError' && backfillError?.errors
+                ? Object.keys(backfillError.errors)
+                : undefined,
+          })
         );
       }
     }

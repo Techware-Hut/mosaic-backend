@@ -68,10 +68,19 @@ function loadController({ onboarding, queryLog = {} }) {
 
   Business.findOne = async () => null;
 
+  // A usable active subscription: the Business sync gate (#248) refuses the
+  // sync without one, so profile-save tests must provide a realistic link.
   const subscriptionMock = {
     findOne: () => ({
-      sort: () => Promise.resolve(null),
+      sort: () =>
+        Promise.resolve({
+          _id: '507f1f77bcf86cd799439022',
+          subscriptionPlanId: '507f1f77bcf86cd799439033',
+          status: 'active',
+          businessId: null,
+        }),
     }),
+    updateOne: async () => ({ acknowledged: true, modifiedCount: 1 }),
   };
 
   const mailerMock = {
