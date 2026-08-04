@@ -220,6 +220,7 @@ Mounts: `/api/vendor-onboarding` and `/admin/vendor-onboard-verify-stage1` (same
 | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/services/list` | — | `getAllServices` | ⚪ Public | Service listings | 🟢 |
 | GET | `/api/public/search` | — | `searchPublicListings` | ⚪ Public | Keyword/location search | 🟢 P6.1–P6.2 |
+| GET | `/api/public/locations/states` | — | `publicMarketplaceStates.controller.getPublicMarketplaceStates` | ⚪ Public | Eligible state list for the location dropdown (approved, active businesses with ≥1 eligible public listing) | 🟢 |
 | GET | `/api/services/:slug` | — | `getServiceBySlug` | ⚪ Public | Service by slug | 🟢 |
 | GET | `/api/public/services/:id` | — | `getServiceById` | ⚪ Public | Service by ID | 🟢 |
 | GET | `/api/public/foods/:id` | — | `getFoodById` | ⚪ Public | Food by ID | 🟢 |
