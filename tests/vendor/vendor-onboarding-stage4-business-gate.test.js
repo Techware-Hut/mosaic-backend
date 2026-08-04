@@ -127,10 +127,12 @@ function buildBusinessMocks({ existingBusiness = null, saveError = null } = {}) 
             _id: '507f1f77bcf86cd799439022',
             subscriptionPlanId: '507f1f77bcf86cd799439033',
             status: 'active',
+            businessId: null,
           }).then(resolve, reject);
         },
       }),
     }),
+    updateOne: async () => ({ acknowledged: true, modifiedCount: 1 }),
   };
 
   return {

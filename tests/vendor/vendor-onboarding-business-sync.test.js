@@ -86,8 +86,10 @@ function buildBusinessMocks({ existingBusiness = null, saveError = null } = {}) 
         _id: subscriptionId,
         subscriptionPlanId: '507f1f77bcf86cd799439033',
         status: 'active',
+        businessId: null,
       }),
     }),
+    updateOne: async () => ({ acknowledged: true, modifiedCount: 1 }),
   };
 
   return { Business, Subscription, getCreatedBusiness: () => createdBusiness };
