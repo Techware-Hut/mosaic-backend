@@ -122,10 +122,9 @@ test('parsePublicSearchQuery normalizes search alias and clamps limit', () => {
   assert.equal(parsed.listingType, 'all');
 });
 
-test('detectUnsupportedGeoParams flags geolocation params', () => {
-  const unsupported = detectUnsupportedGeoParams({ lat: '40.7', radius: '10' });
-  assert.ok(unsupported.some((item) => item.param === 'lat'));
-  assert.ok(unsupported.some((item) => item.param === 'radius'));
+test('detectUnsupportedGeoParams flags unsupported nearMe params', () => {
+  const unsupported = detectUnsupportedGeoParams({ nearMe: 'true' });
+  assert.ok(unsupported.some((item) => item.param === 'nearMe'));
   assert.equal(unsupported[0].reason, 'geolocation not implemented');
 });
 
@@ -353,7 +352,7 @@ test('searchPublicListings returns safe empty arrays when tag filter matches not
   assert.equal(res.body.totals.all, 0);
 });
 
-test('searchPublicListings reports unsupported geolocation params', async () => {
+test('searchPublicListings reports nearMe as unsupported but accepts lat/lng/radius as geo params', async () => {
   const controller = loadSearchController({
     Business: { find: async () => [] },
     VendorOnboardingStage1: { find: async () => [] },
@@ -364,10 +363,34 @@ test('searchPublicListings reports unsupported geolocation params', async () => 
   });
 
   const res = mockResponse();
-  await controller.searchPublicListings({ query: { nearMe: 'true', lat: '1', lng: '2' } }, res);
+  // nearMe is still unsupported; lat/lng are now implemented
+  await controller.searchPublicListings({ query: { nearMe: 'true', lat: '40.7128', lng: '-74.0060' } }, res);
 
   assert.ok(Array.isArray(res.body.filters.unsupported));
-  assert.ok(res.body.filters.unsupported.length >= 3);
+  // Only nearMe should be in unsupported — lat/lng are now supported
+  const unsupportedParams = res.body.filters.unsupported.map((u) => u.param);
+  assert.ok(unsupportedParams.includes('nearMe'), 'nearMe should remain unsupported');
+  assert.ok(!unsupportedParams.includes('lat'), 'lat should now be a supported geo param');
+  assert.ok(!unsupportedParams.includes('lng'), 'lng should now be a supported geo param');
+});
+
+test('searchPublicListings parses lat/lng/radius and exposes them in response filters', async () => {
+  const controller = loadSearchController({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+    ProductCategory: { findOne: async () => null },
+    ServiceCategory: { findOne: async () => null },
+    FoodCategory: { findOne: async () => null },
+  });
+
+  const res = mockResponse();
+  await controller.searchPublicListings({ query: { lat: '40.7128', lng: '-74.0060', radius: '15' } }, res);
+
+  assert.ok(res.body.filters, 'response should have filters');
+  assert.strictEqual(res.body.filters.lat, 40.7128, 'lat should be parsed as float');
+  assert.strictEqual(res.body.filters.lng, -74.006, 'lng should be parsed as float');
+  assert.strictEqual(res.body.filters.radius, 15, 'radius should be parsed as km');
 });
 
 test('searchPublicListings listingType product skips service and food queries', async () => {
@@ -484,4 +507,174 @@ test('searchPublicListings defaults to approved active business scope when no fi
   assert.ok(productFindFilter);
   assert.equal(productFindFilter.isPublished, true);
   assert.deepEqual(productFindFilter.businessId.$in, [activeBusinessId]);
+});
+
+// ─── resolveBusinessIdsByGeo unit tests ───────────────────────────────────────
+
+test('resolveBusinessIdsByGeo returns null when lat/lng are missing', async () => {
+  const filters = loadFiltersWithMocks({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+  });
+
+  assert.equal(await filters.resolveBusinessIdsByGeo(null, null), null);
+  assert.equal(await filters.resolveBusinessIdsByGeo(undefined, undefined), null);
+});
+
+test('resolveBusinessIdsByGeo returns null for invalid coordinates', async () => {
+  const filters = loadFiltersWithMocks({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+  });
+
+  // Out of range values are invalid
+  assert.equal(await filters.resolveBusinessIdsByGeo(999, 999), null);
+  assert.equal(await filters.resolveBusinessIdsByGeo(NaN, NaN), null);
+});
+
+test('resolveBusinessIdsByGeo passes $nearSphere query with correct coordinates and radius', async () => {
+  const id = '507f1f77bcf86cd799439099';
+  let capturedFilter = null;
+
+  const filters = loadFiltersWithMocks({
+    Business: {
+      find: async (filter) => {
+        capturedFilter = filter;
+        return [{ _id: id }];
+      },
+    },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+  });
+
+  const result = await filters.resolveBusinessIdsByGeo(40.7128, -74.006, 10);
+
+  assert.ok(Array.isArray(result), 'should return an array');
+  assert.equal(result.length, 1);
+  assert.equal(String(result[0]), id);
+
+  // Verify $nearSphere is used with correct structure
+  assert.ok(capturedFilter?.location?.$nearSphere, '$nearSphere should be in filter');
+  const near = capturedFilter.location.$nearSphere;
+  assert.equal(near.$geometry.type, 'Point');
+  assert.deepEqual(near.$geometry.coordinates, [-74.006, 40.7128]); // [lng, lat]
+  assert.equal(near.$maxDistance, 10 * 1000, 'maxDistance should be km * 1000 metres');
+});
+
+test('resolveBusinessIdsByGeo returns empty array when no businesses are nearby', async () => {
+  const filters = loadFiltersWithMocks({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+  });
+
+  const result = await filters.resolveBusinessIdsByGeo(40.7128, -74.006, 25);
+  assert.ok(Array.isArray(result));
+  assert.equal(result.length, 0);
+});
+
+test('resolveBusinessIdsByGeo intersects with other filters when combined', async () => {
+  const mongoose = require('mongoose');
+  const geoId = new mongoose.Types.ObjectId();
+  const nonGeoId = new mongoose.Types.ObjectId();
+
+  // Simulate: geo returns geoId, location text filter returns both
+  let callCount = 0;
+  const filters = loadFiltersWithMocks({
+    Business: {
+      find: async () => {
+        callCount++;
+        // First call = geo, subsequent = location text
+        if (callCount === 1) return [{ _id: geoId }];
+        return [{ _id: geoId }, { _id: nonGeoId }];
+      },
+    },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+  });
+
+  // resolveCombinedBusinessFilters with both geo + city should intersect results
+  const result = await filters.resolveCombinedBusinessFilters({
+    lat: 40.7128, lng: -74.006, radiusKm: 25,
+    city: 'New York', state: '', country: '', location: '', zip: '',
+    tag: '', tags: '', verified: false, minorityType: '',
+  });
+
+  // Result should only include the geoId (intersection)
+  assert.ok(Array.isArray(result));
+  const resultStrings = result.map(String);
+  assert.ok(resultStrings.includes(String(geoId)), 'geo match should be in result');
+  assert.ok(!resultStrings.includes(String(nonGeoId)), 'non-geo match should be excluded by intersection');
+});
+
+// ─── Geo param validation 400 tests ──────────────────────────────────────────
+
+test('searchPublicListings returns 400 when lat is supplied without lng', async () => {
+  const controller = loadSearchController({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+    ProductCategory: { findOne: async () => null },
+    ServiceCategory: { findOne: async () => null },
+    FoodCategory: { findOne: async () => null },
+  });
+
+  const res = mockResponse();
+  await controller.searchPublicListings({ query: { lat: '40.7128' } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'GEO_PARAMS_INCOMPLETE');
+});
+
+test('searchPublicListings returns 400 when lng is supplied without lat', async () => {
+  const controller = loadSearchController({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+    ProductCategory: { findOne: async () => null },
+    ServiceCategory: { findOne: async () => null },
+    FoodCategory: { findOne: async () => null },
+  });
+
+  const res = mockResponse();
+  await controller.searchPublicListings({ query: { lng: '-74.006' } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'GEO_PARAMS_INCOMPLETE');
+});
+
+test('searchPublicListings returns 400 when lat/lng are non-numeric strings', async () => {
+  const controller = loadSearchController({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+    ProductCategory: { findOne: async () => null },
+    ServiceCategory: { findOne: async () => null },
+    FoodCategory: { findOne: async () => null },
+  });
+
+  const res = mockResponse();
+  await controller.searchPublicListings({ query: { lat: 'abc', lng: 'xyz' } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'GEO_PARAMS_INVALID');
+});
+
+test('searchPublicListings returns 400 when lat/lng are out of valid range', async () => {
+  const controller = loadSearchController({
+    Business: { find: async () => [] },
+    VendorOnboardingStage1: { find: async () => [] },
+    MinorityType: {},
+    ProductCategory: { findOne: async () => null },
+    ServiceCategory: { findOne: async () => null },
+    FoodCategory: { findOne: async () => null },
+  });
+
+  const res = mockResponse();
+  await controller.searchPublicListings({ query: { lat: '999', lng: '999' } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'GEO_PARAMS_INVALID');
 });

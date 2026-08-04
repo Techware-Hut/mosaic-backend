@@ -49,10 +49,11 @@ const businessSchema = new mongoose.Schema(
     },
     
     // ===== LOCATION FOR GEO SEARCH =====
-    // location: {
-    //   type: { type: String, enum: ['Point'], default: 'Point' },
-    //   coordinates: { type: [Number], index: '2dsphere' }, // [longitude, latitude]
-    // },
+    location: {
+      type: { type: String, enum: ['Point'] },
+      coordinates: { type: [Number] }, // [lng, lat] — populated automatically from address on save
+      address: { type: String, default: '' }, // geocoded formatted address
+    },
     
     // ===== SOCIAL MEDIA =====
     socialLinks: {
@@ -264,7 +265,10 @@ const businessSchema = new mongoose.Schema(
 );
 
 // ===== INDEXES FOR PERFORMANCE =====
-businessSchema.index({ location: '2dsphere' });
+businessSchema.index(
+  { location: '2dsphere' },
+  { partialFilterExpression: { 'location.type': 'Point', 'location.coordinates': { $exists: true } } }
+);
 businessSchema.index({ tags: 1 });
 businessSchema.index({ isActive: 1, isApproved: 1 });
 businessSchema.index({ 'usage.totalProducts': 1 });

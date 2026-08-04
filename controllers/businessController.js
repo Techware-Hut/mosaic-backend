@@ -37,6 +37,7 @@ const {
 const { sendVendorStorefrontPublishedEmail } = require("../utils/WellcomeMailer");
 const { deliverVendorOnboardingEmail } = require("../utils/vendorOnboardingEmailDelivery");
 const User = require("../models/User");
+const { safeGeocodeAddress } = require('../utils/geocode');
 
 exports.createBusiness = async (req, res) => {
   try {
@@ -180,6 +181,24 @@ exports.createBusiness = async (req, res) => {
       stripeSubscriptionId,
       minorityType: user.minorityType,
     });
+
+    // Auto-geocode business address — best-effort, never blocks save
+    const addressForGeo = [
+      req.body.address || '',
+      req.body.city || '',
+      req.body.state || '',
+      req.body.country || '',
+    ].filter(Boolean).join(', ');
+    if (addressForGeo) {
+      const geo = await safeGeocodeAddress(addressForGeo);
+      if (geo) {
+        newBusiness.location = {
+          type: 'Point',
+          coordinates: geo.coordinates,
+          address: geo.address,
+        };
+      }
+    }
 
     await newBusiness.save();
 
@@ -524,6 +543,27 @@ exports.updateBusiness = async (req, res) => {
         ...business.socialLinks,
         ...req.body.socialLinks,
       };
+    }
+
+    // Re-geocode when address is updated — best-effort, never blocks save
+    if (req.body.address) {
+      const addr = req.body.address;
+      const addressForGeo = [
+        addr.street || business.address?.street || '',
+        addr.city || business.address?.city || '',
+        addr.state || business.address?.state || '',
+        addr.country || business.address?.country || '',
+      ].filter(Boolean).join(', ');
+      if (addressForGeo) {
+        const geo = await safeGeocodeAddress(addressForGeo);
+        if (geo) {
+          business.location = {
+            type: 'Point',
+            coordinates: geo.coordinates,
+            address: geo.address,
+          };
+        }
+      }
     }
 
     await business.save();
@@ -1039,9 +1079,19 @@ exports.getBusinessBySlug = async (req, res) => {
         });
         business = await businessQuery().lean();
       } catch (backfillError) {
+        // Non-blocking by design. Log only safe metadata (error name, stable
+        // code, validation field names) — never error.message, which can echo
+        // user-provided values from Mongoose validation/cast messages.
         console.error(
           "[getBusinessBySlug] profile backfill sync failed:",
-          backfillError.message
+          JSON.stringify({
+            errorName: backfillError?.name || 'Error',
+            code: backfillError?.code || undefined,
+            validationFields:
+              backfillError?.name === 'ValidationError' && backfillError?.errors
+                ? Object.keys(backfillError.errors)
+                : undefined,
+          })
         );
       }
     }

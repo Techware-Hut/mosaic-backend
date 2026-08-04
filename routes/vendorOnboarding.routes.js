@@ -45,8 +45,10 @@ router.get("/onboarding-data", authMiddleware, requireVerifiedVendor, getOnboard
 router.put("/business-profile", authMiddleware, requireStage1VerifiedVendor, updateBusinessProfile);
 router.patch("/business-profile", authMiddleware, requireStage1VerifiedVendor, patchBusinessProfile);
 
-// In routes/vendorOnboarding.routes.js, add:
-router.get('/status/:applicationId', getStatusByApplicationId);
+// Status reads return vendor onboarding/contact/subscription/business-sync
+// data: authentication is required here, and the controller restricts reads
+// to the owning vendor or an explicitly authorized admin.
+router.get('/status/:applicationId', authMiddleware, getStatusByApplicationId);
 
 router.get('/applicationId',authMiddleware,getApplicationId);
 
