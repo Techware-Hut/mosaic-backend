@@ -895,7 +895,6 @@ exports.createVerificationPayment = async (req, res) => {
         amount: 24.99,
         currency: 'usd',
         status: 'pending',
-        applicationId: onboarding.applicationId || 'N/A',
         applicationStatus: 'payment_pending'
       }
     });
