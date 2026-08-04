@@ -364,20 +364,20 @@ exports.saveDraft = async (req, res) => {
 //     // 5️⃣ Map EXISTING frontend fields to database fields (NO CHANGES HERE)
 //     const mappedPayload = {
 //       ...payload,
-      
+//       
 //       // Map URL fields - ONLY if they exist in payload
 //       ...(payload.websiteUrl !== undefined && { website: payload.websiteUrl }),
 //       ...(payload.facebookUrl !== undefined && { facebook: payload.facebookUrl }),
 //       ...(payload.instagramUrl !== undefined && { instagram: payload.instagramUrl }),
 //       ...(payload.linkedinUrl !== undefined && { linkedin: payload.linkedinUrl }),
 //       ...(payload.tiktokUrl !== undefined && { tiktok: payload.tiktokUrl }),
-      
+//       
 //       // Map other fields - ONLY if they exist in payload
 //       ...(payload.businessOwnershipType !== undefined && { ownershipType: payload.businessOwnershipType }),
 //       ...(payload.numberOfEmployees !== undefined && { employeesCount: payload.numberOfEmployees }),
 //       ...(payload.businessEmail !== undefined && { secondaryBusinessEmail: payload.businessEmail }),
 //       ...(payload.hasThirdPartyBooking !== undefined && { usesThirdPartyBooking: payload.hasThirdPartyBooking }),
-      
+//       
 //       // Remove frontend-only fields
 //       websiteUrl: undefined,
 //       facebookUrl: undefined,
@@ -594,33 +594,33 @@ exports.updateBusinessProfile = async (req, res) => {
 //     // 3️⃣ Map ALL fields from payload to database fields
 //     const mappedPayload = {
 //       ...payload,
-      
+//       
 //       // Map URL fields
 //       ...(payload.website !== undefined && { website: payload.website }),
 //       ...(payload.facebook !== undefined && { facebook: payload.facebook }),
 //       ...(payload.instagram !== undefined && { instagram: payload.instagram }),
 //       ...(payload.twitter !== undefined && { twitter: payload.twitter }),
 //       ...(payload.linkedin !== undefined && { linkedin: payload.linkedin }),
-//       ...(payload.tiktok !== undefined && { tiktok: payload.tiktok }),
-      
+//       ...(payload.tiktokUrl !== undefined && { tiktok: payload.tiktokUrl }),
+//       
 //       // Map business profile fields
 //       ...(payload.firstName !== undefined && { firstName: payload.firstName }),
 //       ...(payload.lastName !== undefined && { lastName: payload.lastName }),
 //       ...(payload.primaryEmail !== undefined && { primaryEmail: payload.primaryEmail }),
 //       ...(payload.primaryPhone !== undefined && { primaryPhone: payload.primaryPhone }),
 //       ...(payload.language !== undefined && { language: payload.language }),
-      
+//       
 //       // Business Information
 //       ...(payload.licenseNumber !== undefined && { licenseNumber: payload.licenseNumber }),
 //       ...(payload.businessBio !== undefined && { businessBio: payload.businessBio }),
 //       ...(payload.characterLimit !== undefined && { characterLimit: payload.characterLimit }),
 //       ...(payload.businessProfileImage !== undefined && { businessProfileImage: payload.businessProfileImage }),
-      
+//       
 //       // Contact Information
 //       ...(payload.businessEmail !== undefined && { businessEmail: payload.businessEmail }),
 //       ...(payload.businessPhone !== undefined && { businessPhone: payload.businessPhone }),
 //       ...(payload.alternatePhone !== undefined && { alternatePhone: payload.alternatePhone }),
-      
+//       
 //       // Additional Documents
 //       ...(payload.refundPolicyDocument !== undefined && { refundPolicyDocument: payload.refundPolicyDocument }),
 //       ...(payload.termsDocument !== undefined && { termsDocument: payload.termsDocument }),
@@ -629,6 +629,7 @@ exports.updateBusinessProfile = async (req, res) => {
 //     };
 
 //     // 4️⃣ Apply ONLY the mapped fields that exist in payload
+//     // This ensures we don't overwrite existing data with undefined
 //     Object.keys(mappedPayload).forEach(key => {
 //       if (mappedPayload[key] !== undefined) {
 //         onboarding[key] = mappedPayload[key];
@@ -685,6 +686,28 @@ exports.patchBusinessProfile = async (req, res) => {
 
     // 6️⃣ Save document
     await onboarding.save();
+
+    // ========== REQUIRED BUSINESS SYNC ==========
+    // PATCH must uphold the same contract as PUT /business-profile:
+    // a profile save must not report success while the required Business
+    // sync failed. The sync is idempotent (keyed on owner) — it updates the
+    // existing Business or creates one only when none exists.
+    try {
+      const Business = require('../models/Business');
+      const Subscription = require('../models/Subscription');
+      await syncBusinessFromOnboarding({
+        userId,
+        onboarding,
+        Business,
+        Subscription,
+      });
+    } catch (businessError) {
+      console.error('Business sync failed:', businessError.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to sync business profile data',
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -1261,6 +1284,17 @@ exports.getStatusByApplicationId = async (req, res) => {
       });
     }
 
+    // Access control (P0 review): status reads expose vendor onboarding,
+    // contact, subscription and business-sync data. The route requires
+    // authMiddleware; this guard keeps the endpoint safe even if route
+    // wiring changes.
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
     // Load models
     const Subscription = require('../models/Subscription');
     const VendorOnboarding = require('../models/VendorOnboardingStage1');
@@ -1276,6 +1310,20 @@ exports.getStatusByApplicationId = async (req, res) => {
     }
 
     const userId = onboarding.userId;
+
+    // Ownership scoping: only the owning vendor or an explicitly authorized
+    // admin may read this application's status.
+    const isAuthorizedAdmin = req.user.role === 'admin';
+    const isOwningVendor =
+      req.user.role === 'business_owner' &&
+      String(req.user._id) === String(userId);
+
+    if (!isAuthorizedAdmin && !isOwningVendor) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have access to this application'
+      });
+    }
 
     // Fetch subscription only - Business Profile data is in onboarding
     const subscription = await Subscription.findOne({ userId })
@@ -1293,6 +1341,14 @@ exports.getStatusByApplicationId = async (req, res) => {
     let currentStage = 1;
     let status = 'Stage 1 - Document Verification';
     let nextAction = '';
+    // Stage 4 (listing) requires a synced Business record, not just profile
+    // fields on the onboarding document. When profile data is present but the
+    // required business sync never succeeded, we must not report Stage 4 ready.
+    let businessSyncMissing = false;
+    // The Business record actually found for this owner. Its _id is the source
+    // of truth for details.stage3.businessId — onboarding.businessId may be
+    // absent or stale.
+    let syncedBusinessId = null;
 
     // Stage 1 - Onboarding Status
     switch (onboarding.status) {
@@ -1342,10 +1398,31 @@ exports.getStatusByApplicationId = async (req, res) => {
             // ✅ STAGE 3 - Business Profile (Data is in onboarding document)
             // Check if logo AND bio exist
             if (hasLogo && hasBio) {
-              // ✅ PROFILE COMPLETE - Move to Stage 4 immediately
-              currentStage = 4;
-              status = '✅ Onboarding Complete!';
-              nextAction = 'Proceed with product/service/food upload';
+              // Profile fields alone do NOT prove the REQUIRED business sync
+              // succeeded (e.g. profile saved via PATCH or draft paths, or a
+              // past sync failure). Stage 4 needs a real Business record owned
+              // by this vendor — the same record GET /api/business/my reads.
+              const Business = require('../models/Business');
+              const syncedBusiness = await Business.findOne({ owner: userId })
+                .select('_id')
+                .lean();
+
+              if (syncedBusiness) {
+                // ✅ PROFILE + BUSINESS SYNCED - Move to Stage 4
+                syncedBusinessId = syncedBusiness._id;
+                currentStage = 4;
+                status = '✅ Onboarding Complete!';
+                nextAction = 'Proceed with product/service/food upload';
+              } else {
+                // ❌ BUSINESS SYNC MISSING - keep vendor at Stage 3 with an
+                // actionable, machine-readable recovery signal. Recovery is
+                // idempotent: re-saving the business profile (PUT/PATCH
+                // /business-profile) re-runs syncBusinessFromOnboarding, which
+                // creates the Business only when none exists for this owner.
+                businessSyncMissing = true;
+                status = 'Stage 3 - Business Sync Pending';
+                nextAction = 'Re-save your business profile to finish setup. If this persists, contact support.';
+              }
             } else {
               // ❌ PROFILE INCOMPLETE
               status = 'Stage 3 - Business Profile Incomplete';
@@ -1405,11 +1482,18 @@ exports.getStatusByApplicationId = async (req, res) => {
             subscribedAt: subscription?.createdAt || null
           },
           stage3: {
-            // ✅ Use onboarding data directly
-            status: hasLogo && hasBio ? 'completed' : 'in_progress',
+            // ✅ Use onboarding data directly, but Stage 3 is only complete
+            // when the required Business sync has also succeeded.
+            status: hasLogo && hasBio && !businessSyncMissing ? 'completed' : 'in_progress',
             badge: null,
             totalPoints: 0,
-            isComplete: hasLogo && hasBio,
+            isComplete: hasLogo && hasBio && !businessSyncMissing,
+            // Machine-readable recovery signal: profile fields are present but
+            // no Business record exists for this owner yet.
+            businessSyncFailed: businessSyncMissing,
+            // The found Business record wins over onboarding.businessId,
+            // which may be absent or stale.
+            businessId: businessSyncMissing ? null : (syncedBusinessId || onboarding.businessId || null),
             hasLogo: hasLogo,
             hasBio: hasBio,
             businessName: onboarding.businessName || null,
