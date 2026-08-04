@@ -295,7 +295,7 @@ test('status endpoint keeps vendor at Stage 3 when profile complete but Business
   const res = mockResponse();
 
   await controller.getStatusByApplicationId(
-    { params: { applicationId } },
+    { params: { applicationId }, user: { _id: userId, role: 'business_owner' } },
     res
   );
 
@@ -319,7 +319,7 @@ test('status endpoint reports Stage 4 ready when Business exists (existing vendo
   const res = mockResponse();
 
   await controller.getStatusByApplicationId(
-    { params: { applicationId } },
+    { params: { applicationId }, user: { _id: userId, role: 'business_owner' } },
     res
   );
 
@@ -343,7 +343,7 @@ test('status endpoint: incomplete profile stays Stage 3 without sync flag', asyn
   const res = mockResponse();
 
   await controller.getStatusByApplicationId(
-    { params: { applicationId } },
+    { params: { applicationId }, user: { _id: userId, role: 'business_owner' } },
     res
   );
 
@@ -353,4 +353,177 @@ test('status endpoint: incomplete profile stays Stage 3 without sync flag', asyn
   assert.equal(data.status, 'Stage 3 - Business Profile Incomplete');
   assert.equal(data.details.stage3.businessSyncFailed, false);
   assert.equal(data.details.stage4.status, 'locked');
+});
+
+// ---------------------------------------------------------------------------
+// P0 review Blocker 3 — status endpoint access control.
+// GET /api/vendor-onboarding/status/:applicationId returns vendor onboarding,
+// contact, subscription and business-sync data: it must require
+// authentication and restrict reads to the owning vendor or an admin.
+// ---------------------------------------------------------------------------
+
+test('status endpoint rejects unauthenticated requests (401)', async () => {
+  const onboarding = buildOnboarding({ businessId });
+  const businessMocks = buildBusinessMocks({
+    existingBusiness: { _id: businessId, owner: userId },
+  });
+  const controller = loadController({ onboarding, businessMocks });
+  const res = mockResponse();
+
+  await controller.getStatusByApplicationId(
+    { params: { applicationId } }, // no req.user — route auth missing/bypassed
+    res
+  );
+
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.body.success, false);
+  assert.match(res.body.message, /Authentication required/);
+});
+
+test('status endpoint allows the owning vendor', async () => {
+  const onboarding = buildOnboarding({ businessId });
+  const businessMocks = buildBusinessMocks({
+    existingBusiness: { _id: businessId, owner: userId },
+  });
+  const controller = loadController({ onboarding, businessMocks });
+  const res = mockResponse();
+
+  await controller.getStatusByApplicationId(
+    { params: { applicationId }, user: { _id: userId, role: 'business_owner' } },
+    res
+  );
+
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.data.applicationId, applicationId);
+});
+
+test('status endpoint rejects a different vendor (403)', async () => {
+  const otherVendorId = '507f1f77bcf86cd799439077';
+  const onboarding = buildOnboarding({ businessId });
+  const businessMocks = buildBusinessMocks({
+    existingBusiness: { _id: businessId, owner: userId },
+  });
+  const controller = loadController({ onboarding, businessMocks });
+  const res = mockResponse();
+
+  await controller.getStatusByApplicationId(
+    { params: { applicationId }, user: { _id: otherVendorId, role: 'business_owner' } },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.success, false);
+  assert.match(res.body.message, /do not have access/);
+  // Nothing about the application leaks in the error payload.
+  assert.equal(res.body.data, undefined);
+});
+
+test('status endpoint rejects authenticated non-vendor non-admin roles (403)', async () => {
+  const onboarding = buildOnboarding({ businessId });
+  const businessMocks = buildBusinessMocks({
+    existingBusiness: { _id: businessId, owner: userId },
+  });
+  const controller = loadController({ onboarding, businessMocks });
+  const res = mockResponse();
+
+  await controller.getStatusByApplicationId(
+    { params: { applicationId }, user: { _id: userId, role: 'customer' } },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.success, false);
+});
+
+test('status endpoint allows an explicitly authorized admin', async () => {
+  const adminId = '507f1f77bcf86cd799439066';
+  const onboarding = buildOnboarding({ businessId });
+  const businessMocks = buildBusinessMocks({
+    existingBusiness: { _id: businessId, owner: userId },
+  });
+  const controller = loadController({ onboarding, businessMocks });
+  const res = mockResponse();
+
+  await controller.getStatusByApplicationId(
+    { params: { applicationId }, user: { _id: adminId, role: 'admin' } },
+    res
+  );
+
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.data.currentStage, 4);
+});
+
+test('status route requires authentication middleware', () => {
+  const fs = require('node:fs');
+  const routesPath = path.resolve(
+    __dirname,
+    '../../routes/vendorOnboarding.routes.js'
+  );
+  const source = fs.readFileSync(routesPath, 'utf8');
+
+  // The status route must be registered WITH authMiddleware…
+  assert.match(
+    source,
+    /router\.get\(\s*['"]\/status\/:applicationId['"]\s*,\s*authMiddleware\s*,\s*getStatusByApplicationId\s*\)/,
+    'status route must require authMiddleware'
+  );
+  // …and must never be registered bare again.
+  assert.doesNotMatch(
+    source,
+    /router\.get\(\s*['"]\/status\/:applicationId['"]\s*,\s*getStatusByApplicationId\s*\)/,
+    'status route must not be public'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// P0 review — backend contract consistency: when the Business lookup proves
+// a Business exists, the response must carry that found record's _id even if
+// onboarding.businessId is missing or stale.
+// ---------------------------------------------------------------------------
+
+test('status endpoint returns the found Business _id when onboarding.businessId is absent', async () => {
+  const onboarding = buildOnboarding({ businessId: null }); // stale/missing link
+  const businessMocks = buildBusinessMocks({
+    existingBusiness: { _id: businessId, owner: userId }, // …but Business EXISTS
+  });
+  const controller = loadController({ onboarding, businessMocks });
+  const res = mockResponse();
+
+  await controller.getStatusByApplicationId(
+    { params: { applicationId }, user: { _id: userId, role: 'business_owner' } },
+    res
+  );
+
+  assert.equal(res.body.success, true);
+  const { data } = res.body;
+  assert.equal(
+    data.details.stage3.businessId,
+    businessId,
+    'must report the found Business _id, never null'
+  );
+  assert.equal(data.details.stage3.businessSyncFailed, false);
+  assert.equal(data.currentStage, 4, 'Stage 4 remains ready');
+  assert.equal(data.details.stage4.status, 'ready');
+});
+
+test('status endpoint returns the found Business _id when onboarding.businessId is stale', async () => {
+  const staleId = '507f1f77bcf86cd799439055';
+  const onboarding = buildOnboarding({ businessId: staleId });
+  const businessMocks = buildBusinessMocks({
+    existingBusiness: { _id: businessId, owner: userId },
+  });
+  const controller = loadController({ onboarding, businessMocks });
+  const res = mockResponse();
+
+  await controller.getStatusByApplicationId(
+    { params: { applicationId }, user: { _id: userId, role: 'business_owner' } },
+    res
+  );
+
+  assert.equal(res.body.success, true);
+  assert.equal(
+    res.body.data.details.stage3.businessId,
+    businessId,
+    'the found record wins over a stale onboarding.businessId'
+  );
 });
