@@ -629,6 +629,7 @@ exports.updateBusinessProfile = async (req, res) => {
 //     };
 
 //     // 4️⃣ Apply ONLY the mapped fields that exist in payload
+//     // This ensures we don't overwrite existing data with undefined
 //     Object.keys(mappedPayload).forEach(key => {
 //       if (mappedPayload[key] !== undefined) {
 //         onboarding[key] = mappedPayload[key];
@@ -1283,6 +1284,17 @@ exports.getStatusByApplicationId = async (req, res) => {
       });
     }
 
+    // Access control (P0 review): status reads expose vendor onboarding,
+    // contact, subscription and business-sync data. The route requires
+    // authMiddleware; this guard keeps the endpoint safe even if route
+    // wiring changes.
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
     // Load models
     const Subscription = require('../models/Subscription');
     const VendorOnboarding = require('../models/VendorOnboardingStage1');
@@ -1298,6 +1310,20 @@ exports.getStatusByApplicationId = async (req, res) => {
     }
 
     const userId = onboarding.userId;
+
+    // Ownership scoping: only the owning vendor or an explicitly authorized
+    // admin may read this application's status.
+    const isAuthorizedAdmin = req.user.role === 'admin';
+    const isOwningVendor =
+      req.user.role === 'business_owner' &&
+      String(req.user._id) === String(userId);
+
+    if (!isAuthorizedAdmin && !isOwningVendor) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have access to this application'
+      });
+    }
 
     // Fetch subscription only - Business Profile data is in onboarding
     const subscription = await Subscription.findOne({ userId })
@@ -1319,6 +1345,10 @@ exports.getStatusByApplicationId = async (req, res) => {
     // fields on the onboarding document. When profile data is present but the
     // required business sync never succeeded, we must not report Stage 4 ready.
     let businessSyncMissing = false;
+    // The Business record actually found for this owner. Its _id is the source
+    // of truth for details.stage3.businessId — onboarding.businessId may be
+    // absent or stale.
+    let syncedBusinessId = null;
 
     // Stage 1 - Onboarding Status
     switch (onboarding.status) {
@@ -1379,6 +1409,7 @@ exports.getStatusByApplicationId = async (req, res) => {
 
               if (syncedBusiness) {
                 // ✅ PROFILE + BUSINESS SYNCED - Move to Stage 4
+                syncedBusinessId = syncedBusiness._id;
                 currentStage = 4;
                 status = '✅ Onboarding Complete!';
                 nextAction = 'Proceed with product/service/food upload';
@@ -1460,7 +1491,9 @@ exports.getStatusByApplicationId = async (req, res) => {
             // Machine-readable recovery signal: profile fields are present but
             // no Business record exists for this owner yet.
             businessSyncFailed: businessSyncMissing,
-            businessId: businessSyncMissing ? null : (onboarding.businessId || null),
+            // The found Business record wins over onboarding.businessId,
+            // which may be absent or stale.
+            businessId: businessSyncMissing ? null : (syncedBusinessId || onboarding.businessId || null),
             hasLogo: hasLogo,
             hasBio: hasBio,
             businessName: onboarding.businessName || null,
