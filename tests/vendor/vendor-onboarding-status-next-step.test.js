@@ -122,7 +122,11 @@ test('rejected application status returns stored rejection reason and next actio
   const res = mockResponse();
 
   await controller.getStatusByApplicationId(
-    { params: { applicationId: onboarding.applicationId } },
+    {
+      params: { applicationId: onboarding.applicationId },
+      // Status reads now require the owning vendor (or an admin).
+      user: { _id: userId, role: 'business_owner' },
+    },
     res
   );
 
@@ -146,7 +150,11 @@ test('rejected application without stored review metadata gets resubmit default 
   const res = mockResponse();
 
   await controller.getStatusByApplicationId(
-    { params: { applicationId: onboarding.applicationId } },
+    {
+      params: { applicationId: onboarding.applicationId },
+      // Status reads now require the owning vendor (or an admin).
+      user: { _id: userId, role: 'business_owner' },
+    },
     res
   );
 
@@ -169,7 +177,11 @@ test('non-rejected application does not expose rejection metadata', async () => 
   const res = mockResponse();
 
   await controller.getStatusByApplicationId(
-    { params: { applicationId: onboarding.applicationId } },
+    {
+      params: { applicationId: onboarding.applicationId },
+      // Status reads now require the owning vendor (or an admin).
+      user: { _id: userId, role: 'business_owner' },
+    },
     res
   );
 
@@ -188,7 +200,11 @@ test('payment_pending application returns explicit payment next action', async (
   const res = mockResponse();
 
   await controller.getStatusByApplicationId(
-    { params: { applicationId: onboarding.applicationId } },
+    {
+      params: { applicationId: onboarding.applicationId },
+      // Status reads now require the owning vendor (or an admin).
+      user: { _id: userId, role: 'business_owner' },
+    },
     res
   );
 
@@ -209,7 +225,11 @@ test('paid draft application returns submit next action', async () => {
   const res = mockResponse();
 
   await controller.getStatusByApplicationId(
-    { params: { applicationId: onboarding.applicationId } },
+    {
+      params: { applicationId: onboarding.applicationId },
+      // Status reads now require the owning vendor (or an admin).
+      user: { _id: userId, role: 'business_owner' },
+    },
     res
   );
 
