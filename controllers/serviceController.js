@@ -18,6 +18,7 @@ const {
   getMinimumChildServicePrice,
   formatOwnerServiceResponse,
   formatValidationErrorResponse,
+  extractServiceLocationAddress,
 } = require('../lib/service/serviceContract');
 const { normalizeImages } = require('../lib/listing/publicListingDto');
 const { applyLeadConfigToDocument } = require('../utils/serviceLeadConfig');
@@ -793,16 +794,10 @@ exports.updateService = async (req, res) => {
     const serviceLimit = subscriptionPlan?.limits?.serviceListings || 0;
     const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
 
-    if (req.body.coverImage && req.body.coverImage !== service.coverImage) {
-      await deleteCloudinaryFile(service.coverImage).catch(() => { });
-    }
-
-    if (Array.isArray(req.body.images) && Array.isArray(service.images)) {
-      const removedImages = service.images.filter(img => !req.body.images.includes(img));
-      for (const image of removedImages) {
-        await deleteCloudinaryFile(image).catch(() => { });
-      }
-    }
+    // Snapshot media that may be replaced — only delete from Cloudinary after save succeeds
+    // so a failed update never orphan-deletes assets still referenced by the DB record.
+    const previousCoverImage = service.coverImage;
+    const previousImages = Array.isArray(service.images) ? [...service.images] : [];
 
     const requestedPublish =
       req.body.isPublished === true || req.body.isPublished === 'true';
@@ -839,9 +834,10 @@ exports.updateService = async (req, res) => {
       }
     }
 
+    // Never blindly assign `location` — string payloads cast-fail against the GeoJSON subdoc.
     const updatableFields = [
       'title', 'description', 'coverImage', 'images',
-      'bookingToolLink', 'externalLink', 'rfqEnabled', 'maxBookingsPerSlot', 'location', 'contact', 'videos'
+      'bookingToolLink', 'externalLink', 'rfqEnabled', 'maxBookingsPerSlot', 'contact', 'videos'
     ];
 
     for (const field of updatableFields) {
@@ -915,15 +911,21 @@ exports.updateService = async (req, res) => {
       });
     }
 
-    // Re-geocode when location address is updated
-    // Always rebuild a clean GeoJSON object — never assign a plain string
-    if (req.body.location?.address !== undefined) {
-      const newAddress = String(req.body.location.address).trim();
-      // Preserve existing coords if address is unchanged
+    // Re-geocode when location is present (string or { address }).
+    // Always rebuild a clean GeoJSON-compatible object — never assign a plain string.
+    const newAddress = extractServiceLocationAddress(req.body.location);
+    if (newAddress !== undefined) {
       const existingAddress = service.location?.address || '';
       const addressChanged = newAddress !== existingAddress;
 
-      if (addressChanged) {
+      if (!newAddress) {
+        // Empty address -> clear location (do not read .address off undefined)
+        service.location = undefined;
+        service.markModified('location');
+        if (service.contact) {
+          service.contact.address = '';
+        }
+      } else if (addressChanged) {
         const geo = await safeGeocodeAddress(newAddress);
         if (geo) {
           service.location = {
@@ -933,26 +935,38 @@ exports.updateService = async (req, res) => {
           };
         } else {
           // If geocoding fails, save only the address without type/coordinates
+          // (partial 2dsphere filter excludes non-Point docs — index stays intact)
           service.location = { address: newAddress };
         }
-      } else if (newAddress) {
+        if (service.contact) {
+          service.contact.address = service.location.address;
+        }
+      } else {
         // Address unchanged, keep existing coordinates if any
         service.location = {
-          ...(service.location?.coordinates?.length ? { type: 'Point', coordinates: service.location.coordinates } : {}),
-          address: newAddress
+          ...(service.location?.coordinates?.length
+            ? { type: 'Point', coordinates: service.location.coordinates }
+            : {}),
+          address: newAddress,
         };
-      } else {
-        // Empty address -> clear location
-        service.location = undefined;
-      }
-
-      // Sync contact.address to match the display address
-      if (service.contact) {
-        service.contact.address = service.location.address;
+        if (service.contact) {
+          service.contact.address = newAddress;
+        }
       }
     }
 
     await service.save();
+
+    // Post-save media cleanup only (safe if replace failed above)
+    if (req.body.coverImage && req.body.coverImage !== previousCoverImage) {
+      await deleteCloudinaryFile(previousCoverImage).catch(() => { });
+    }
+    if (Array.isArray(req.body.images)) {
+      const removedImages = previousImages.filter((img) => !req.body.images.includes(img));
+      for (const image of removedImages) {
+        await deleteCloudinaryFile(image).catch(() => { });
+      }
+    }
 
     const refreshedService = await Service.findById(service._id)
       .populate('categoryId', 'name')
