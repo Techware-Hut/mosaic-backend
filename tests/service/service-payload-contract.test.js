@@ -9,12 +9,22 @@ const {
   resolveTaxonomyIdFromBody,
   formatOwnerServiceForResponse,
   normalizeServicePayload,
+  extractServiceLocationAddress,
   PUBLISH_CHILD_SERVICE_REQUIRED_MESSAGE,
   validateChildServices,
   validatePublishRequest,
   evaluateServicePublication,
   formatOwnerServiceResponse,
 } = require('../../lib/service/serviceContract');
+
+test('extractServiceLocationAddress accepts string and { address } shapes', () => {
+  assert.equal(extractServiceLocationAddress(undefined), undefined);
+  assert.equal(extractServiceLocationAddress(null), '');
+  assert.equal(extractServiceLocationAddress('  123 Main St  '), '123 Main St');
+  assert.equal(extractServiceLocationAddress({ address: '  456 Market  ' }), '456 Market');
+  assert.equal(extractServiceLocationAddress({ address: '' }), '');
+  assert.equal(extractServiceLocationAddress({ type: 'Point', coordinates: [0, 0] }), '');
+});
 
 test('validateChildServices rejects zero child price with field key', () => {
   const result = validateChildServices([
