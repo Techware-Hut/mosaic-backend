@@ -220,14 +220,16 @@ const getVariantAttribute = (variantDoc, key) => {
 const resolveVariantSelection = (variantDoc, requestedValue) => {
     const requested = requestedValue == null ? '' : String(requestedValue).trim();
     const sizes = Array.isArray(variantDoc?.sizes) ? variantDoc.sizes : null;
+    // Authoritative stock is always top-level ProductVariant.stock (legacy sizes[] may drift).
+    const authoritativeStock = Number(variantDoc?.stock || 0);
 
-    if (sizes) {
+    if (sizes && sizes.length) {
         const selectedSize = sizes.find((entry) => String(entry.size) === requested);
         if (!selectedSize) return null;
 
         return {
             key: String(selectedSize.size),
-            stock: Number(selectedSize.stock || 0),
+            stock: authoritativeStock,
             sku: selectedSize.sku || variantDoc.sku || null,
             price: toNum(selectedSize.price),
             salePrice: toNum(selectedSize.salePrice),
@@ -245,7 +247,7 @@ const resolveVariantSelection = (variantDoc, requestedValue) => {
 
     return {
         key: String(normalizedKey),
-        stock: Number(variantDoc?.stock || 0),
+        stock: authoritativeStock,
         sku: variantDoc?.sku || null,
         price: toNum(variantDoc?.price),
         salePrice: toNum(variantDoc?.salePrice),
@@ -1186,6 +1188,20 @@ mergeGuestCart = async (req, res) => {
             const inc = Math.max(1, Number(it.quantity || 1))
             const shippingMethod = resolveRequestedShippingMethod(it) || 'standard';
 
+            const variantDoc = await ProductVariant.findById(it.variantId);
+            if (!variantDoc || variantDoc.isDeleted || !variantDoc.isPublished) {
+                continue;
+            }
+            const selected = resolveVariantSelection(variantDoc, variantStr);
+            if (!selected) continue;
+
+            const maxStock = selected.allowBackorder
+                ? Number.POSITIVE_INFINITY
+                : Math.max(0, Number(selected.stock || 0));
+            if (maxStock === 0) {
+                continue; // skip out-of-stock guest lines
+            }
+
             const existing = await CartItem.findOne({
                 _id: { $in: cart.items },
                 productId: it.productId,
@@ -1197,12 +1213,17 @@ mergeGuestCart = async (req, res) => {
             });
 
             if (existing) {
-                existing.quantity = Math.max(1, Number(existing.quantity || 0) + inc);
+                const nextQty = Math.max(1, Number(existing.quantity || 0) + inc);
+                existing.quantity = Number.isFinite(maxStock)
+                    ? Math.min(nextQty, maxStock)
+                    : nextQty;
                 // Recompute from product/business settings - never trust guest's stored 0
                 existing.shippingCharge = await resolveShippingChargeForMerge(it.productId, it.variantId, shippingMethod);
                 await existing.save();
             } else {
                 const computedShipping = await resolveShippingChargeForMerge(it.productId, it.variantId, shippingMethod);
+                const qty = Number.isFinite(maxStock) ? Math.min(inc, maxStock) : inc;
+                if (qty < 1) continue;
                 const created = await CartItem.create({
                     productId: it.productId,
                     variantId: it.variantId,
@@ -1211,7 +1232,7 @@ mergeGuestCart = async (req, res) => {
                     variant: variantStr,         // required (string)
                     shippingMethod,
                     shippingCharge: computedShipping,   // computed from DB, not guest's 0
-                    quantity: inc,
+                    quantity: qty,
                 });
                 await Cart.updateOne({ _id: cart._id }, { $addToSet: { items: created._id } });
             }

@@ -9,7 +9,67 @@ const {
   sanitizePaymentIntentForClient,
   sanitizeOrderForPaymentPoll,
 } = require("../utils/paymentIntentResponse");
+const {
+  decrementInventoryForPaidOrder,
+} = require("../lib/inventory/orderInventory");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+/**
+ * Webhook fallback for local Test Mode / missed Stripe CLI forwards:
+ * when Stripe confirms the PI succeeded, mark orders paid/ordered and
+ * decrement inventory once (idempotent via inventoryDecrementedAt).
+ */
+async function reconcileSucceededPaymentIntentOrders(orders, paymentIntent) {
+  if (!paymentIntent || paymentIntent.status !== "succeeded") {
+    return { reconciled: false };
+  }
+
+  for (const order of orders) {
+    const needsPaid = order.paymentStatus !== "paid";
+    const needsOrdered = order.status === "created";
+
+    if (needsPaid || needsOrdered) {
+      const update = {};
+      if (needsPaid) update.paymentStatus = "paid";
+      if (needsOrdered) {
+        update.status = "ordered";
+        update.$push = { statusHistory: { status: "ordered" } };
+      }
+
+      await Order.findByIdAndUpdate(order._id, update);
+      if (needsPaid) order.paymentStatus = "paid";
+      if (needsOrdered) order.status = "ordered";
+
+      console.log("retrieveIntent reconciled paid order (webhook fallback)", {
+        orderId: String(order._id),
+        paymentStatus: order.paymentStatus,
+        status: order.status,
+        paymentIntentId: paymentIntent.id,
+      });
+    }
+
+    try {
+      const inventoryResult = await decrementInventoryForPaidOrder(order);
+      if (inventoryResult.decremented) {
+        console.log(
+          `Inventory decremented via retrieveIntent for order ${order._id}`,
+          JSON.stringify({ lines: inventoryResult.lines?.length || 0 })
+        );
+      } else if (inventoryResult.reason === "already_decremented") {
+        console.log(
+          `Inventory already decremented for order ${order._id} (retrieveIntent idempotent skip)`
+        );
+      }
+    } catch (inventoryErr) {
+      console.error(
+        `Failed to decrement inventory via retrieveIntent for order ${order._id}:`,
+        inventoryErr
+      );
+    }
+  }
+
+  return { reconciled: true };
+}
 
 exports.stripePaymentWebhook = async (req, res) => {
   const sig = req.headers["stripe-signature"];
@@ -89,6 +149,26 @@ exports.stripePaymentWebhook = async (req, res) => {
 
         await order.save();
 
+        try {
+          const inventoryResult = await decrementInventoryForPaidOrder(order);
+          if (inventoryResult.decremented) {
+            console.log(
+              `Inventory decremented for paid order ${order._id}`,
+              JSON.stringify({ lines: inventoryResult.lines?.length || 0 })
+            );
+          } else if (inventoryResult.reason === "already_decremented") {
+            console.log(
+              `Inventory already decremented for order ${order._id}, skipping`
+            );
+          }
+        } catch (inventoryErr) {
+          console.error(
+            `Failed to decrement inventory for paid order ${order._id}:`,
+            inventoryErr
+          );
+          // Payment is already succeeded — do not fail the webhook; ops can reconcile.
+        }
+
         if (!shouldSendPaidEmail) {
           console.log(
             `Paid confirmation email already sent for order ${order._id}, skipping duplicate send`
@@ -150,6 +230,8 @@ exports.stripePaymentWebhook = async (req, res) => {
 };
 
 // ✅ Retrieve payment intent details (sanitized for frontend)
+// Also reconciles paid status + inventory when webhooks were not delivered
+// (common in local Stripe Test Mode without `stripe listen`).
 exports.retrieveIntent = async (req, res) => {
   const { id } = req.params;
   const customerId = req.user?.id || req.user?._id;
@@ -180,6 +262,8 @@ exports.retrieveIntent = async (req, res) => {
     }
 
     const paymentIntent = await stripe.paymentIntents.retrieve(id);
+
+    await reconcileSucceededPaymentIntentOrders(orders, paymentIntent);
 
     return res.status(200).json({
       success: true,
