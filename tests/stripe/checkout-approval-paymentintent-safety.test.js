@@ -31,7 +31,14 @@ function mockResponse() {
   };
 }
 
-function loadRetrieveIntent({ orders = [], stripeError = null } = {}) {
+function loadRetrieveIntent({
+  orders = [],
+  stripeError = null,
+  paymentIntentStatus = 'succeeded',
+} = {}) {
+  const orderUpdates = [];
+  let inventoryCalls = 0;
+
   const stripeMock = {
     paymentIntents: {
       retrieve: async () => {
@@ -40,7 +47,7 @@ function loadRetrieveIntent({ orders = [], stripeError = null } = {}) {
         }
         return {
           id: paymentId,
-          status: 'succeeded',
+          status: paymentIntentStatus,
           amount: 3000,
           currency: 'usd',
           created: 1710000000,
@@ -72,6 +79,18 @@ function loadRetrieveIntent({ orders = [], stripeError = null } = {}) {
             populate: async () => orders,
           }),
         }),
+        findByIdAndUpdate: async (id, update) => {
+          orderUpdates.push({ id, update });
+          return { _id: id, ...update };
+        },
+      };
+    }
+    if (request.endsWith('lib/inventory/orderInventory')) {
+      return {
+        decrementInventoryForPaidOrder: async () => {
+          inventoryCalls += 1;
+          return { decremented: true, lines: [] };
+        },
       };
     }
     return originalLoad(request, parent, isMain);
@@ -81,7 +100,11 @@ function loadRetrieveIntent({ orders = [], stripeError = null } = {}) {
   const { retrieveIntent } = require(stripePaymentControllerPath);
   Module._load = originalLoad;
 
-  return { retrieveIntent };
+  return {
+    retrieveIntent,
+    getOrderUpdates: () => orderUpdates,
+    getInventoryCalls: () => inventoryCalls,
+  };
 }
 
 test('retrieveIntent returns sanitized paymentIntent without Stripe internals', async () => {
@@ -169,6 +192,94 @@ test('retrieveIntent maps Stripe errors without leaking internals', async () => 
   assert.equal(res.body.message, 'Failed to fetch payment information');
   assert.equal(res.body.error, undefined);
   assert.equal(JSON.stringify(res.body).includes('sk_'), false);
+});
+
+test('retrieveIntent reconciles pending order and decrements inventory on succeeded PI', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const orders = [{
+    _id: orderId,
+    userId: { toString: () => userId },
+    groupOrderId: 'grp-001',
+    status: 'created',
+    paymentStatus: 'pending',
+    totalAmount: 30,
+    currency: 'USD',
+    items: [{
+      productId: { _id: productId, title: 'Test Product' },
+      variantId: 'var-1',
+      quantity: 1,
+      price: 25,
+      size: 'M',
+    }],
+  }];
+
+  const { retrieveIntent, getOrderUpdates, getInventoryCalls } = loadRetrieveIntent({
+    orders,
+  });
+  const res = mockResponse();
+
+  await retrieveIntent({ params: { id: paymentId }, user: { id: userId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(orders[0].paymentStatus, 'paid');
+  assert.equal(orders[0].status, 'ordered');
+  assert.equal(getOrderUpdates().length, 1);
+  assert.equal(getOrderUpdates()[0].update.paymentStatus, 'paid');
+  assert.equal(getOrderUpdates()[0].update.status, 'ordered');
+  assert.equal(getInventoryCalls(), 1);
+  assert.equal(res.body.orders[0].paymentStatus, 'paid');
+  assert.equal(res.body.orders[0].status, 'ordered');
+});
+
+test('retrieveIntent skips order status rewrite when already paid but still attempts idempotent decrement', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const orders = [{
+    _id: orderId,
+    userId: { toString: () => userId },
+    groupOrderId: 'grp-001',
+    status: 'ordered',
+    paymentStatus: 'paid',
+    totalAmount: 30,
+    currency: 'USD',
+    items: [],
+  }];
+
+  const { retrieveIntent, getOrderUpdates, getInventoryCalls } = loadRetrieveIntent({
+    orders,
+  });
+  const res = mockResponse();
+
+  await retrieveIntent({ params: { id: paymentId }, user: { id: userId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(getOrderUpdates().length, 0);
+  assert.equal(getInventoryCalls(), 1);
+});
+
+test('retrieveIntent does not decrement inventory when PI is not succeeded', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const orders = [{
+    _id: orderId,
+    userId: { toString: () => userId },
+    groupOrderId: 'grp-001',
+    status: 'created',
+    paymentStatus: 'pending',
+    totalAmount: 30,
+    currency: 'USD',
+    items: [],
+  }];
+
+  const { retrieveIntent, getOrderUpdates, getInventoryCalls } = loadRetrieveIntent({
+    orders,
+    paymentIntentStatus: 'requires_payment_method',
+  });
+  const res = mockResponse();
+
+  await retrieveIntent({ params: { id: paymentId }, user: { id: userId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(getOrderUpdates().length, 0);
+  assert.equal(getInventoryCalls(), 0);
 });
 
 test('featured-products route remains canonical', () => {

@@ -97,6 +97,9 @@ const Order = require("../models/Order");
 const User = require("../models/User");
 const ProductVariant = require("../models/ProductVariant")  ;
 const Business = require("../models/Business");
+const {
+  restoreInventoryForOrder,
+} = require("../lib/inventory/orderInventory");
 const { getBusinessCheckoutBlock } = require("../utils/checkoutGuards");
 const {
   sendOrderStatusEmail,
@@ -280,6 +283,8 @@ const getTransferCapabilityStatus = (account) => {
 const resolveVariantSelection = (variantDoc, requestedValue) => {
   const requested = requestedValue == null ? "" : String(requestedValue).trim();
   const sizes = Array.isArray(variantDoc?.sizes) ? variantDoc.sizes : null;
+  // ProductVariant.stock is authoritative; nested sizes[] is display/legacy only.
+  const authoritativeStock = Number(variantDoc?.stock || 0);
 
   if (sizes) {
     const selectedSize = sizes.find((entry) => String(entry.size) === requested);
@@ -287,13 +292,13 @@ const resolveVariantSelection = (variantDoc, requestedValue) => {
 
     return {
       key: String(selectedSize.size),
-      stock: Number(selectedSize.stock || 0),
+      stock: authoritativeStock,
       sku: selectedSize.sku || variantDoc.sku || null,
       price: toNum(selectedSize.price),
       salePrice: toNum(selectedSize.salePrice),
       discountEndDate: selectedSize.discountEndDate || null,
       allowBackorder: Boolean(variantDoc.allowBackorder),
-      stockSource: selectedSize,
+      stockSource: variantDoc,
       usesNestedSizes: true,
     };
   }
@@ -311,7 +316,7 @@ const resolveVariantSelection = (variantDoc, requestedValue) => {
 
   return {
     key: String(normalizedKey),
-    stock: Number(variantDoc?.stock || 0),
+    stock: authoritativeStock,
     sku: variantDoc?.sku || null,
     price: toNum(variantDoc?.price),
     salePrice: toNum(variantDoc?.salePrice),
@@ -1114,32 +1119,12 @@ exports.acceptOrder = async (req, res) => {
       });
     }
 
-    // 🔁 Decrease stock
-    for (const item of order.items) {
-      const variant = await ProductVariant.findById(item.variantId);
-      if (!variant) continue;
-
-      const selectedVariant = resolveVariantSelection(variant, item.size);
-      if (!selectedVariant) {
-        return res.status(500).json({
-          success: false,
-          message: "Order Cannot Be Accepted - Item configuration is invalid",
-        });
-      }
-
-      if (selectedVariant.stock === 0) {
-        return res.status(500).json({
-          success: false,
-          message: "Order Cannot Be Accepted - Item Out of Stock",
-        });
-      }
-
-      selectedVariant.stockSource.stock = Math.max(
-        0,
-        Number(selectedVariant.stockSource.stock || 0) - Number(item.quantity || 0)
+    // Stock is decremented on payment success (inventoryDecrementedAt). Accept
+    // must not decrement again.
+    if (!order.inventoryDecrementedAt) {
+      console.warn(
+        `acceptOrder: order ${order._id} has no inventoryDecrementedAt; stock may not have been reduced on payment`
       );
-
-      await variant.save();
     }
 
     order.status = "accepted";
@@ -1154,7 +1139,7 @@ exports.acceptOrder = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Order accepted and stock updated",
+      message: "Order accepted",
       emailDelivery,
       order: serializeOrderForResponse(order),
     });
@@ -1745,21 +1730,20 @@ exports.cancelOrderByUser = async (req, res) => {
       order.paymentStatus = order.paymentStatus || "pending";
     }
 
-    // If status is 'accepted', we previously decremented stock. Restore it only
-    // after any required refund succeeds so retrying a failed refund cannot
-    // inflate inventory.
-    if (order.status === "accepted") {
-      for (const item of order.items) {
-        const variant = await ProductVariant.findById(item.variantId);
-        if (!variant) continue;
-
-        const selectedVariant = resolveVariantSelection(variant, item.size);
-        if (selectedVariant) {
-          selectedVariant.stockSource.stock =
-            Number(selectedVariant.stockSource.stock || 0) +
-            Number(item.quantity || 0);
-        }
-        await variant.save();
+    // Restore inventory when payment already decremented stock (paid / accepted).
+    if (order.inventoryDecrementedAt) {
+      try {
+        await restoreInventoryForOrder(order);
+        order.inventoryDecrementedAt = undefined;
+      } catch (restoreErr) {
+        console.error(
+          `Failed to restore inventory for cancelled order ${order._id}:`,
+          restoreErr
+        );
+        return res.status(500).json({
+          success: false,
+          message: "Failed to restore inventory after cancellation. Please contact support.",
+        });
       }
     }
 

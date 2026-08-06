@@ -1,6 +1,9 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Order = require('../models/Order');
 const Subscription = require('../models/Subscription'); // ← ADD THIS LINE
+const {
+  decrementInventoryForPaidOrder,
+} = require('../lib/inventory/orderInventory');
 
 
 const toStripePayloadBuffer = (body) => {
@@ -74,7 +77,7 @@ const handleStripeWebhook = async (req, res) => {
         orderId,
       });
 
-      // Update order status to 'paid' and 'completed'
+      // Update order status to 'paid' / 'ordered', then decrement inventory once.
       try {
         const updatedOrder = await Order.findByIdAndUpdate(orderId, { 
           paymentStatus: 'paid', 
@@ -89,6 +92,25 @@ const handleStripeWebhook = async (req, res) => {
             paymentStatus: updatedOrder.paymentStatus,
             status: updatedOrder.status,
           });
+
+          try {
+            const inventoryResult = await decrementInventoryForPaidOrder(updatedOrder);
+            if (inventoryResult.decremented) {
+              console.log(
+                `Inventory decremented for paid order ${updatedOrder._id}`,
+                JSON.stringify({ lines: inventoryResult.lines?.length || 0 })
+              );
+            } else if (inventoryResult.reason === 'already_decremented') {
+              console.log(
+                `Inventory already decremented for order ${updatedOrder._id}, skipping`
+              );
+            }
+          } catch (inventoryErr) {
+            console.error(
+              `Failed to decrement inventory for paid order ${updatedOrder._id}:`,
+              inventoryErr
+            );
+          }
         }
       } catch (error) {
         console.error(`Failed to update order ${orderId} after payment success:`, error);

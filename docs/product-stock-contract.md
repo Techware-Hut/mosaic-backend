@@ -2,14 +2,14 @@
 
 Status: release-readiness sweep for vendor inventory, July 3, 2026.
 
-This document records the backend contract used by the vendor inventory dashboard. It is intentionally scoped to product variant stock and does not change checkout, Stripe, payouts, subscriptions, or webhook behavior.
+This document records the backend contract used by the vendor inventory dashboard and paid-order inventory decrement.
 
 ## Source of Truth
 
 - `ProductVariant.stock` is the authoritative stock field for vendor product inventory.
 - Legacy callers may still send stock inside the first `sizes[]` row. Product create/update paths normalize that fallback into top-level variant stock for backward compatibility.
 - Product-level stock values are derived summaries only. The backend now exposes aggregate stock metadata so frontend screens do not have to infer inventory state from stale nested size data.
-- Negative stock is invalid. Stock decrement operations that would go below zero are rejected.
+- Negative stock is invalid for vendor stock edits. Paid-order decrements floor at zero if an oversell race occurs after payment already succeeded.
 
 ## Route Matrix
 
@@ -64,5 +64,6 @@ Manual release smoke should still verify:
 ## Limitations
 
 - This contract covers product inventory only. Service and food listing availability are separate flows.
-- This pass does not alter checkout stock reservation, Stripe payment, payout, subscription, or webhook logic.
-- Public cart and paid checkout behavior require separate staging smoke with approved test accounts.
+- Paid checkout decrements `ProductVariant.stock` once via `inventoryDecrementedAt` idempotency when payment succeeds (Stripe `payment_intent.succeeded` handlers). Vendor order accept does not decrement again.
+- Guest cart merge and cart add/update prefer top-level `ProductVariant.stock` over legacy nested `sizes[].stock`.
+- Public cart and paid checkout behavior should be smoke-tested on staging with approved test accounts after inventory changes.

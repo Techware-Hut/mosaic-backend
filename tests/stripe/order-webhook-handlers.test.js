@@ -72,12 +72,22 @@ function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
             ...defaultOrder,
             ...update,
             _id: id,
+            items: defaultOrder.items || [],
           };
         },
       };
     }
     if (request.endsWith('models/Subscription')) {
       return {};
+    }
+    if (request.endsWith('lib/inventory/orderInventory')) {
+      return {
+        decrementInventoryForPaidOrder: async () => ({
+          decremented: true,
+          reason: 'mocked',
+          lines: [],
+        }),
+      };
     }
     return originalLoad(request, parent, isMain);
   };
@@ -120,6 +130,14 @@ function loadFailedPaymentWebhook() {
     }
     if (request.endsWith('models/Subscription')) {
       return {};
+    }
+    if (request.endsWith('lib/inventory/orderInventory')) {
+      return {
+        decrementInventoryForPaidOrder: async () => ({
+          decremented: false,
+          reason: 'mocked',
+        }),
+      };
     }
     return originalLoad(request, parent, isMain);
   };
@@ -203,6 +221,15 @@ function loadPostPaymentWebhook({ orders = [], charge = {} } = {}) {
         sendOrderPaidEmails: async () => {
           emailSendCount += 1;
         },
+      };
+    }
+    if (request.endsWith('lib/inventory/orderInventory')) {
+      return {
+        decrementInventoryForPaidOrder: async () => ({
+          decremented: true,
+          reason: 'mocked',
+          lines: [],
+        }),
       };
     }
     return originalLoad(request, parent, isMain);
