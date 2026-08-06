@@ -5,6 +5,7 @@ const path = require('node:path');
 const {
   countProductListingUsage,
   assertProductListingQuota,
+  resolveProductListingLimit,
 } = require('../../utils/listingTierLimits');
 
 test('countProductListingUsage sums products and variants', async () => {
@@ -47,4 +48,46 @@ test('assertProductListingQuota reports remaining slots', () => {
 test('assertProductListingQuota treats missing incoming as zero', () => {
   const result = assertProductListingQuota({ total: 9, limit: 10 });
   assert.equal(result.ok, true);
+});
+
+test('assertProductListingQuota allows unlimited limits', () => {
+  const result = assertProductListingQuota({
+    total: 10_000,
+    incomingCount: 50,
+    limit: Number.POSITIVE_INFINITY,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.unlimited, true);
+});
+
+test('resolveProductListingLimit uses plan limit in production when override unset', () => {
+  const limit = resolveProductListingLimit(10, {
+    env: {},
+    nodeEnv: 'production',
+  });
+  assert.equal(limit, 10);
+});
+
+test('resolveProductListingLimit is unlimited outside production when override unset', () => {
+  const limit = resolveProductListingLimit(10, {
+    env: {},
+    nodeEnv: 'development',
+  });
+  assert.equal(limit, Number.POSITIVE_INFINITY);
+});
+
+test('resolveProductListingLimit honors numeric PRODUCT_LISTING_LIMIT_OVERRIDE', () => {
+  const limit = resolveProductListingLimit(10, {
+    env: { PRODUCT_LISTING_LIMIT_OVERRIDE: '100' },
+    nodeEnv: 'production',
+  });
+  assert.equal(limit, 100);
+});
+
+test('resolveProductListingLimit honors unlimited PRODUCT_LISTING_LIMIT_OVERRIDE', () => {
+  const limit = resolveProductListingLimit(10, {
+    env: { PRODUCT_LISTING_LIMIT_OVERRIDE: 'unlimited' },
+    nodeEnv: 'production',
+  });
+  assert.equal(limit, Number.POSITIVE_INFINITY);
 });

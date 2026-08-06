@@ -17,6 +17,8 @@ const ADMIN_AUDIT_ACTIONS = Object.freeze({
   BUSINESS_DISAPPROVE: 'business.disapprove',
   BUSINESS_ACTIVATE: 'business.activate',
   BUSINESS_DEACTIVATE: 'business.deactivate',
+  BUSINESS_HARD_DELETE: 'business.hard_delete',
+  BUSINESS_CLEANUP_BATCH: 'business.cleanup_batch',
   BUSINESS_TAGS_UPDATE: 'business.tags_update',
   BUSINESS_FEATURE: 'business.feature',
   BUSINESS_UNFEATURE: 'business.unfeature',
