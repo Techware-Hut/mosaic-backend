@@ -13,6 +13,7 @@ const VendorOnboardingStage1 = require('../models/VendorOnboardingStage1');
 const {
   countProductListingUsage,
   assertProductListingQuota,
+  resolveProductListingLimit,
 } = require('../utils/listingTierLimits');
 const {
   PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
@@ -331,7 +332,9 @@ exports.createProductWithVariants = async (req, res) => {
     }
 
     const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    const productLimit = subscriptionPlan?.limits?.productListings || 0;
+    const productLimit = resolveProductListingLimit(
+      subscriptionPlan?.limits?.productListings || 0
+    );
     const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
 
     const incomingVariantCount = Array.isArray(variants) ? variants.length : 0;
@@ -1258,7 +1261,9 @@ exports.addVariants = async (req, res) => {
       return res.status(404).json({ error: 'Subscription plan not found' });
     }
 
-    const productLimit = subscriptionPlan?.limits?.productListings || 0;
+    const productLimit = resolveProductListingLimit(
+      subscriptionPlan?.limits?.productListings || 0
+    );
     const incomingVariantCount = Array.isArray(variants) ? variants.length : 0;
     const usage = await countProductListingUsage({
       Product,

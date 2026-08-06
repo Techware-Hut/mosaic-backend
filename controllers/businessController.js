@@ -24,6 +24,10 @@ const {
   applyListingTypeCategoryFilter,
   buildStorefrontPath,
   mapFirstListingIdByBusiness,
+  filterDirectoryBusinessesWithPublicListings,
+  buildAddressStateFilter,
+  PUBLIC_SERVICE_FILTER,
+  PUBLIC_FOOD_FILTER,
 } = require("../lib/marketplace/vendorDirectoryQuery");
 const {
   attachListingSnapshotToBusiness,
@@ -930,9 +934,15 @@ exports.getProductBusinesses = async (req, res) => {
     }
 
     if (search) filters.businessName = { $regex: search, $options: "i" };
-    if (city) filters["address.city"] = city;
-    if (state) filters["address.state"] = state;
-    if (country) filters["address.country"] = country;
+    if (city) filters["address.city"] = { $regex: `^${String(city).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" };
+    const stateFilter = buildAddressStateFilter(state);
+    if (stateFilter) filters["address.state"] = stateFilter;
+    if (country) {
+      filters["address.country"] = {
+        $regex: `^${String(country).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        $options: "i",
+      };
+    }
 
     applyListingTypeCategoryFilter(
       filters,
@@ -970,19 +980,34 @@ exports.getProductBusinesses = async (req, res) => {
     const limitNum = Math.max(1, Math.min(50, parseInt(limit, 10) || 10));
     const skip = (pageNum - 1) * limitNum;
 
-    const businesses = await Business.find(filters)
-      .select("businessName slug logo listingType description tags isFeatured")
-      .skip(skip)
-      .limit(limitNum)
+    // Approved+active candidates first, then require a type-matching public listing
+    // before pagination so inactive/empty storefronts never fill the directory.
+    const candidates = await Business.find(filters)
+      .select("_id listingType")
       .sort({ isFeatured: -1, updatedAt: -1, createdAt: -1 })
       .lean();
 
-    const total = await Business.countDocuments(filters);
+    const eligibleIds = await filterDirectoryBusinessesWithPublicListings(candidates);
+    const total = eligibleIds.length;
+    const pageIds = eligibleIds.slice(skip, skip + limitNum);
 
-    const serviceBusinessIds = businesses
+    const businesses = pageIds.length
+      ? await Business.find({ _id: { $in: pageIds } })
+          .select("businessName slug logo listingType description tags isFeatured")
+          .lean()
+      : [];
+
+    const businessById = new Map(
+      businesses.map((business) => [String(business._id), business])
+    );
+    const orderedBusinesses = pageIds
+      .map((id) => businessById.get(id))
+      .filter(Boolean);
+
+    const serviceBusinessIds = orderedBusinesses
       .filter((business) => business.listingType === "service")
       .map((business) => business._id);
-    const foodBusinessIds = businesses
+    const foodBusinessIds = orderedBusinesses
       .filter((business) => business.listingType === "food")
       .map((business) => business._id);
 
@@ -990,7 +1015,7 @@ exports.getProductBusinesses = async (req, res) => {
       serviceBusinessIds.length
         ? Service.find({
             businessId: { $in: serviceBusinessIds },
-            isPublished: true,
+            ...PUBLIC_SERVICE_FILTER,
           })
             .select("_id businessId")
             .sort({ createdAt: -1 })
@@ -999,7 +1024,7 @@ exports.getProductBusinesses = async (req, res) => {
       foodBusinessIds.length
         ? Food.find({
             businessId: { $in: foodBusinessIds },
-            isPublished: true,
+            ...PUBLIC_FOOD_FILTER,
           })
             .select("_id businessId")
             .sort({ createdAt: -1 })
@@ -1015,7 +1040,7 @@ exports.getProductBusinesses = async (req, res) => {
       total,
       page: pageNum,
       totalPages: Math.ceil(total / limitNum) || 0,
-      data: businesses.map((business) => {
+      data: orderedBusinesses.map((business) => {
         const businessId = String(business._id);
         const listingId =
           business.listingType === "service"

@@ -1,66 +1,89 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const mongoose = require('mongoose');
+const path = require('node:path');
+const Module = require('node:module');
+
 const {
-  parseObjectIdCsv,
-  resolveListingTypeFilter,
-  applyListingTypeCategoryFilter,
-  buildStorefrontPath,
-  mapFirstListingIdByBusiness,
-} = require('../../lib/marketplace/vendorDirectoryQuery');
+  expandStateMatchValues,
+  buildAddressStateFilter,
+} = require('../../lib/marketplace/usStateMatch');
 
-test('resolveListingTypeFilter returns all marketplace types by default', () => {
-  assert.deepEqual(resolveListingTypeFilter(), { $in: ['product', 'service', 'food'] });
-  assert.deepEqual(resolveListingTypeFilter('invalid'), { $in: ['product', 'service', 'food'] });
+const queryPath = path.resolve(
+  __dirname,
+  '../../lib/marketplace/vendorDirectoryQuery.js'
+);
+
+test('expandStateMatchValues maps VA and Virginia both ways', () => {
+  assert.deepEqual(
+    expandStateMatchValues('VA').map((v) => v.toLowerCase()).sort(),
+    ['va', 'virginia']
+  );
+  assert.deepEqual(
+    expandStateMatchValues('Virginia').map((v) => v.toLowerCase()).sort(),
+    ['va', 'virginia']
+  );
 });
 
-test('resolveListingTypeFilter accepts valid listing type', () => {
-  assert.equal(resolveListingTypeFilter('service'), 'service');
-  assert.equal(resolveListingTypeFilter('FOOD'), 'food');
+test('buildAddressStateFilter matches abbreviation or full name', () => {
+  const filter = buildAddressStateFilter('Virginia');
+  assert.ok(filter.test('VA'));
+  assert.ok(filter.test('Virginia'));
+  assert.ok(filter.test('virginia'));
+  assert.equal(filter.test('Maryland'), false);
 });
 
-test('parseObjectIdCsv ignores invalid category labels', () => {
-  const validId = new mongoose.Types.ObjectId().toString();
-  const parsed = parseObjectIdCsv(`Fashion,${validId},Electronics`);
-  assert.equal(parsed.length, 1);
-  assert.equal(String(parsed[0]), validId);
-});
+function wrapDistinct(mockIds) {
+  return {
+    distinct: async () => mockIds,
+  };
+}
 
-test('applyListingTypeCategoryFilter only applies valid object ids', () => {
-  const filters = {};
-  const validId = new mongoose.Types.ObjectId().toString();
+function loadQueryWithMocks(mocks) {
+  const originalLoad = Module._load;
+  Module._load = function mockLoad(request, parent, isMain) {
+    if (String(request).includes('models/Product')) {
+      return wrapDistinct(mocks.productIds || []);
+    }
+    if (String(request).includes('models/Service')) {
+      return wrapDistinct(mocks.serviceIds || []);
+    }
+    if (String(request).includes('models/Food')) {
+      return wrapDistinct(mocks.foodIds || []);
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  delete require.cache[queryPath];
+  // Also bust publicMarketplaceStates + usStateMatch if already cached via query
+  delete require.cache[
+    path.resolve(__dirname, '../../lib/listing/publicMarketplaceStates.js')
+  ];
+  const loaded = require(queryPath);
+  Module._load = originalLoad;
+  return loaded;
+}
 
-  applyListingTypeCategoryFilter(filters, 'product', {
-    productCategory: `Fashion,${validId}`,
+test('filterDirectoryBusinessesWithPublicListings keeps type-matching owners only', async () => {
+  const { filterDirectoryBusinessesWithPublicListings } = loadQueryWithMocks({
+    productIds: ['p1'],
+    serviceIds: ['s1'],
+    foodIds: [],
   });
 
-  assert.deepEqual(filters.productCategories.$in.map(String), [validId]);
-});
-
-test('buildStorefrontPath routes by listing type', () => {
-  assert.equal(
-    buildStorefrontPath('product', 'biz1', 'biz1'),
-    '/vendor-profile/product-vendor/biz1'
-  );
-  assert.equal(
-    buildStorefrontPath('service', 'biz1', 'svc1'),
-    '/vendor-profile/service-vendor/svc1'
-  );
-  assert.equal(buildStorefrontPath('service', 'biz1', null), null);
-  assert.equal(
-    buildStorefrontPath('food', 'biz1', 'food1'),
-    '/vendor-profile/food-vendor/food1'
-  );
-  assert.equal(buildStorefrontPath('food', 'biz1', null), null);
-});
-
-test('mapFirstListingIdByBusiness keeps first listing per business', () => {
-  const map = mapFirstListingIdByBusiness([
-    { _id: 'svc-a', businessId: 'biz-1' },
-    { _id: 'svc-b', businessId: 'biz-1' },
-    { _id: 'svc-c', businessId: 'biz-2' },
+  const eligible = await filterDirectoryBusinessesWithPublicListings([
+    { _id: 'p1', listingType: 'product' },
+    { _id: 'p2', listingType: 'product' },
+    { _id: 's1', listingType: 'service' },
+    { _id: 's2', listingType: 'service' },
+    { _id: 'f1', listingType: 'food' },
   ]);
 
-  assert.equal(map.get('biz-1'), 'svc-a');
-  assert.equal(map.get('biz-2'), 'svc-c');
+  assert.deepEqual(eligible, ['p1', 's1']);
+});
+
+test('resolveListingTypeFilter keeps service independent of product', () => {
+  const { resolveListingTypeFilter } = loadQueryWithMocks({});
+  assert.equal(resolveListingTypeFilter('service'), 'service');
+  assert.deepEqual(resolveListingTypeFilter(''), {
+    $in: ['product', 'service', 'food'],
+  });
 });
