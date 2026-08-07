@@ -23,6 +23,9 @@ const {
 const { normalizeImages } = require('../lib/listing/publicListingDto');
 const { applyLeadConfigToDocument } = require('../utils/serviceLeadConfig');
 const { publicMarketplaceBusinessFilter } = require('../lib/marketplace/businessEligibility');
+const {
+  PUBLIC_SERVICE_FILTER,
+} = require('../lib/listing/publicMarketplaceStates');
 const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
 const { safeGeocodeAddress } = require('../utils/geocode');
 const { S3Client } = require('@aws-sdk/client-s3');
@@ -1073,10 +1076,15 @@ exports.getBusinessServiceById = async (req, res) => {
         .populate('businessId', 'businessName owner');
 
     // Supports both serviceId and businessId on the same endpoint param.
-    let service = await populateService(Service.findById(id));
+    // Public endpoint: only published + active listings (never drafts / inactive).
+    let service = await populateService(
+      Service.findOne({ _id: id, ...PUBLIC_SERVICE_FILTER })
+    );
     if (!service) {
       service = await populateService(
-        Service.findOne({ businessId: id }).sort({ createdAt: -1 })
+        Service.findOne({ businessId: id, ...PUBLIC_SERVICE_FILTER }).sort({
+          createdAt: -1,
+        })
       );
     }
 
@@ -1091,12 +1099,6 @@ exports.getBusinessServiceById = async (req, res) => {
     ).select('_id').lean();
 
     if (!visibleBusiness) {
-      return res.status(404).json({
-        message: 'Business service not found.'
-      });
-    }
-
-    if (service.isPublished !== true) {
       return res.status(404).json({
         message: 'Business service not found.'
       });

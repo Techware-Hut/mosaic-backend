@@ -23,6 +23,9 @@ const {
 } = require('../utils/uploadDiagnostics');
 const { publicMarketplaceBusinessFilter } = require('../lib/marketplace/businessEligibility');
 const {
+  PUBLIC_FOOD_FILTER,
+} = require('../lib/listing/publicMarketplaceStates');
+const {
   validateFoodPublishState,
 } = require('../lib/marketplace/listingPricePolicy');
 const { safeGeocodeAddress } = require('../utils/geocode');
@@ -231,9 +234,16 @@ exports.getBusinessFoodById = async (req, res) => {
         .populate('subcategoryId', 'name')
         .populate('businessId', 'businessName owner');
 
-    let food = await populateFood(Food.findById(id));
+    // Public endpoint: only published + active listings (never drafts / inactive).
+    let food = await populateFood(
+      Food.findOne({ _id: id, ...PUBLIC_FOOD_FILTER })
+    );
     if (!food) {
-      food = await populateFood(Food.findOne({ businessId: id }).sort({ createdAt: -1 }));
+      food = await populateFood(
+        Food.findOne({ businessId: id, ...PUBLIC_FOOD_FILTER }).sort({
+          createdAt: -1,
+        })
+      );
     }
 
     if (!food) {
