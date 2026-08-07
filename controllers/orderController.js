@@ -98,6 +98,8 @@ const User = require("../models/User");
 const ProductVariant = require("../models/ProductVariant")  ;
 const Business = require("../models/Business");
 const {
+  reserveInventoryForOrder,
+  releaseInventoryReservation,
   restoreInventoryForOrder,
 } = require("../lib/inventory/orderInventory");
 const { getBusinessCheckoutBlock } = require("../utils/checkoutGuards");
@@ -939,6 +941,21 @@ exports.initiateOrder = async (req, res) => {
       paymentMethod: "stripe",
     }).save();
 
+    const reservation = await reserveInventoryForOrder(order);
+    if (!reservation.reserved) {
+      order.paymentStatus = "failed";
+      order.status = "cancelled";
+      order.statusHistory.push({ status: "cancelled" });
+      await order.save();
+
+      return res.status(400).json({
+        success: false,
+        code: "INVENTORY_CHANGED",
+        message:
+          "Inventory changed during checkout. Return to your cart and adjust the unavailable quantity.",
+      });
+    }
+
     const platformFeeCents = Number.parseInt(
       process.env.PLATFORM_FEE_CENTS || "0"
     );
@@ -954,23 +971,44 @@ exports.initiateOrder = async (req, res) => {
       platformFeeCents,
     });
 
-    const paymentIntent = await stripe.paymentIntents.create(
-      {
-        amount: Math.round(totalAmount * 100),
-        currency: "usd",
-        metadata: {
-          groupOrderId,
-          orderId: order._id.toString(),
+    let paymentIntent;
+    try {
+      paymentIntent = await stripe.paymentIntents.create(
+        {
+          amount: Math.round(totalAmount * 100),
+          currency: "usd",
+          metadata: {
+            groupOrderId,
+            orderId: order._id.toString(),
+          },
+          application_fee_amount: platformFeeCents,
+          transfer_data: {
+            destination: business.stripeConnectAccountId,
+          },
         },
-        application_fee_amount: platformFeeCents,
-        transfer_data: {
-          destination: business.stripeConnectAccountId,
-        },
-      },
-      {
-        idempotencyKey: `pi:${order._id.toString()}`,
+        {
+          idempotencyKey: `pi:${order._id.toString()}`,
+        }
+      );
+
+      order.paymentId = paymentIntent.id;
+      await order.save();
+    } catch (paymentIntentError) {
+      try {
+        if (paymentIntent?.id) {
+          await stripe.paymentIntents.cancel(paymentIntent.id, {
+            cancellation_reason: "abandoned",
+          });
+        }
+        await releaseInventoryReservation(order);
+      } catch (cleanupError) {
+        console.error(
+          `Failed to cancel payment/release inventory reservation for order ${order._id}:`,
+          cleanupError
+        );
       }
-    );
+      throw paymentIntentError;
+    }
 
     console.log("Order payment intent created", {
       orderId: order._id.toString(),
@@ -978,9 +1016,6 @@ exports.initiateOrder = async (req, res) => {
       clientSecretPresent: Boolean(paymentIntent.client_secret),
       stripeConnectAccountId: business?.stripeConnectAccountId || null,
     });
-
-    order.paymentId = paymentIntent.id;
-    await order.save();
 
     return res.status(201).json({
       success: true,
@@ -1728,6 +1763,28 @@ exports.cancelOrderByUser = async (req, res) => {
     } else {
       // Not paid yet (e.g., pending) – ensure we reflect that:
       order.paymentStatus = order.paymentStatus || "pending";
+    }
+
+    if (order.inventoryReservedAt) {
+      try {
+        if (order.paymentId) {
+          await stripe.paymentIntents.cancel(order.paymentId, {
+            cancellation_reason: "requested_by_customer",
+          });
+        }
+        await releaseInventoryReservation(order);
+        order.inventoryReservedAt = undefined;
+        order.paymentStatus = "failed";
+      } catch (releaseErr) {
+        console.error(
+          `Failed to cancel payment/release inventory for order ${order._id}:`,
+          releaseErr
+        );
+        return res.status(502).json({
+          success: false,
+          message: "Failed to cancel the pending payment. Please try again or contact support.",
+        });
+      }
     }
 
     // Restore inventory when payment already decremented stock (paid / accepted).

@@ -44,13 +44,12 @@ function buildVariant(overrides = {}) {
     ownerId: { toString: () => owner },
     businessId: biz,
     sku: 'SKU-TEST',
-    allowBackorder: false,
-    // Authoritative SoT used by resolveVariantSelection / initiateOrder.
     stock: overrides.stock ?? 10,
+    allowBackorder: false,
     sizes: [
       {
         size: 'M',
-        stock: overrides.stock ?? 10,
+        stock: 10,
         price: overrides.price ?? 25,
         salePrice: null,
         sku: 'SKU-M',
@@ -178,6 +177,19 @@ function loadInitiateOrder({
             email: 'customer@example.com',
           }),
         }),
+      };
+    }
+    if (request.endsWith('lib/inventory/orderInventory')) {
+      return {
+        reserveInventoryForOrder: async (order) => {
+          order.inventoryReservedAt = new Date();
+          return { reserved: true, lines: [] };
+        },
+        releaseInventoryReservation: async (order) => {
+          order.inventoryReservedAt = undefined;
+          return { restored: true, lines: [] };
+        },
+        restoreInventoryForOrder: async () => ({ restored: true, lines: [] }),
       };
     }
     if (request.endsWith('utils/orderPhase')) {
