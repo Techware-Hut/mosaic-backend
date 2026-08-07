@@ -197,6 +197,16 @@ exports.saveDraft = async (req, res) => {
     // 8️⃣ Status handling — draft save never auto-resubmits for admin review
     if (onboarding.status === 'rejected') {
       onboarding.status = 'draft';
+      // Correction after admin reject must be re-verified — checklist flags
+      // are protected from vendor writes and would otherwise stay true forever.
+      onboarding.verificationChecklist = {
+        ...(onboarding.verificationChecklist?.toObject?.() ||
+          onboarding.verificationChecklist ||
+          {}),
+        minorityDocs: false,
+        taxDocs: false,
+        businessLicense: false,
+      };
     } else if (!onboarding.status) {
       onboarding.status = 'draft';
     }
@@ -955,7 +965,11 @@ exports.handleVendorPaymentWebhook = async (req, res) => {
           if (onboarding) {
             onboarding.verificationPayment.status = 'paid';
             onboarding.verificationPayment.paidAt = new Date();
-            onboarding.status = 'draft';
+            // Only demote payment-in-progress apps. Never yank submitted /
+            // rejected / verified applications back to draft on a late webhook.
+            if (onboarding.status === 'payment_pending') {
+              onboarding.status = 'draft';
+            }
 
             await onboarding.save();
 
@@ -1167,6 +1181,11 @@ if (
     ------------------------------ */
     onboarding.status = "submitted";
     onboarding.submittedAt = new Date();
+    // Clear stale rejection UI once the app is back in the review queue.
+    onboarding.reviewDecision = undefined;
+    onboarding.rejectionReason = undefined;
+    onboarding.requiredNextAction = undefined;
+    onboarding.rejectedAt = undefined;
     await onboarding.save();
 
     /* ------------------------------
