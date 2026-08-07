@@ -16,15 +16,31 @@ const {
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 async function cancelRetryablePaymentIntent(paymentIntent) {
-  if (!paymentIntent?.id || paymentIntent.status === "canceled") return;
+  if (!paymentIntent?.id) {
+    return { status: paymentIntent?.status || "unknown", paymentIntent };
+  }
+
+  if (
+    paymentIntent.status === "canceled" ||
+    paymentIntent.status === "succeeded"
+  ) {
+    return { status: paymentIntent.status, paymentIntent };
+  }
 
   try {
-    await stripe.paymentIntents.cancel(paymentIntent.id, {
+    const canceled = await stripe.paymentIntents.cancel(paymentIntent.id, {
       cancellation_reason: "abandoned",
     });
+    return {
+      status: canceled?.status || "canceled",
+      paymentIntent: canceled || paymentIntent,
+    };
   } catch (error) {
     const current = await stripe.paymentIntents.retrieve(paymentIntent.id);
-    if (current?.status !== "canceled") throw error;
+    if (current?.status === "canceled" || current?.status === "succeeded") {
+      return { status: current.status, paymentIntent: current };
+    }
+    throw error;
   }
 }
 
@@ -85,6 +101,34 @@ async function reconcileSucceededPaymentIntentOrders(orders, paymentIntent) {
   return { reconciled: true };
 }
 
+async function failUnpaidOrderAndReleaseReservation(order, paymentIntent) {
+  const failedOrder = await Order.findOneAndUpdate(
+    {
+      _id: order._id,
+      paymentStatus: { $ne: "paid" },
+      inventoryDecrementedAt: null,
+    },
+    {
+      $set: {
+        paymentStatus: "failed",
+        status: "cancelled",
+      },
+    },
+    { new: true }
+  );
+
+  if (!failedOrder) {
+    console.log("Ignoring stale failed/canceled payment event for paid/finalized order", {
+      orderId: String(order._id),
+      paymentIntentId: paymentIntent.id,
+    });
+    return { ignored: true };
+  }
+
+  await releaseInventoryReservation(failedOrder);
+  return { ignored: false, order: failedOrder };
+}
+
 exports.stripePaymentWebhook = async (req, res) => {
   const sig = req.headers["stripe-signature"];
 
@@ -106,16 +150,22 @@ exports.stripePaymentWebhook = async (req, res) => {
       event.type === "payment_intent.canceled"
     ) {
       const paymentIntent = event.data.object;
+      let cancellation = null;
       if (event.type === "payment_intent.payment_failed") {
-        await cancelRetryablePaymentIntent(paymentIntent);
+        cancellation = await cancelRetryablePaymentIntent(paymentIntent);
       }
 
       const orders = await Order.find({ paymentId: paymentIntent.id }).populate([]);
+      if (cancellation?.status === "succeeded") {
+        await reconcileSucceededPaymentIntentOrders(
+          orders,
+          cancellation.paymentIntent
+        );
+        return res.json({ received: true });
+      }
+
       for (const order of orders) {
-        await releaseInventoryReservation(order);
-        order.paymentStatus = "failed";
-        order.status = "cancelled";
-        await order.save();
+        await failUnpaidOrderAndReleaseReservation(order, paymentIntent);
       }
 
       return res.json({ received: true });
@@ -300,13 +350,14 @@ exports.retrieveIntent = async (req, res) => {
     await reconcileSucceededPaymentIntentOrders(orders, paymentIntent);
     if (paymentIntent.status === "canceled") {
       for (const order of orders) {
-        await releaseInventoryReservation(order);
-        await Order.findByIdAndUpdate(order._id, {
-          paymentStatus: "failed",
-          status: "cancelled",
-        });
-        order.paymentStatus = "failed";
-        order.status = "cancelled";
+        const failureResult = await failUnpaidOrderAndReleaseReservation(
+          order,
+          paymentIntent
+        );
+        if (!failureResult.ignored) {
+          order.paymentStatus = "failed";
+          order.status = "cancelled";
+        }
       }
     }
 

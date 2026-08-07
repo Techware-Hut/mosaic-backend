@@ -108,6 +108,17 @@ function loadPostPaymentWebhook({
         find: () => ({
           populate: async () => orders,
         }),
+        findOneAndUpdate: async (filter, update) => {
+          const order = orders.find(
+            (candidate) =>
+              String(candidate._id) === String(filter._id) &&
+              candidate.paymentStatus !== filter.paymentStatus.$ne &&
+              candidate.inventoryDecrementedAt == null
+          );
+          if (!order) return null;
+          Object.assign(order, update.$set);
+          return order;
+        },
       };
     }
     if (request.endsWith('utils/OrderMail')) {

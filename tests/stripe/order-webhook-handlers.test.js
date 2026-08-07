@@ -132,9 +132,9 @@ function loadFailedPaymentWebhook() {
     }
     if (request.endsWith('models/Order')) {
       return {
-        findByIdAndUpdate: async (id, update) => {
-          updates.push({ id, update });
-          return { _id: id, ...update };
+        findOneAndUpdate: async (filter, update) => {
+          updates.push({ filter, update });
+          return { _id: filter._id, ...update.$set };
         },
       };
     }
@@ -264,6 +264,265 @@ function loadPostPaymentWebhook({ orders = [], charge = {} } = {}) {
   };
 }
 
+function matchesOrderFilter(order, filter) {
+  return Object.entries(filter).every(([key, expected]) => {
+    const actual = order[key];
+    if (key === '_id') return String(actual) === String(expected);
+    if (expected === null) return actual == null;
+    if (expected && typeof expected === 'object' && '$ne' in expected) {
+      return actual !== expected.$ne;
+    }
+    return actual === expected;
+  });
+}
+
+function applyOrderUpdate(order, update) {
+  const direct = Object.fromEntries(
+    Object.entries(update).filter(([key]) => !key.startsWith('$'))
+  );
+  Object.assign(order, direct, update.$set || {});
+
+  for (const key of Object.keys(update.$unset || {})) {
+    delete order[key];
+  }
+
+  for (const [key, value] of Object.entries(update.$push || {})) {
+    order[key] ||= [];
+    order[key].push(value);
+  }
+
+  return order;
+}
+
+function paymentIntentEvent(type, status) {
+  return {
+    type,
+    data: {
+      object: {
+        id: PAYMENT_ID,
+        status,
+        latest_charge: type === 'payment_intent.succeeded' ? 'ch_test_001' : null,
+        currency: 'usd',
+        metadata: { orderId: ORDER_ID },
+      },
+    },
+  };
+}
+
+function loadOrderWebhookSequence({
+  events,
+  cancelRaceToSucceeded = false,
+  cancelFailureStatus = null,
+}) {
+  let eventIndex = 0;
+  let finalizeCalls = 0;
+  let releaseCalls = 0;
+  const order = {
+    _id: ORDER_ID,
+    paymentId: PAYMENT_ID,
+    paymentStatus: 'pending',
+    status: 'created',
+    inventoryReservedAt: new Date('2026-08-07T00:00:00.000Z'),
+    inventoryDecrementedAt: null,
+    statusHistory: [{ status: 'created' }],
+    items: [],
+  };
+  const succeededIntent = paymentIntentEvent(
+    'payment_intent.succeeded',
+    'succeeded'
+  ).data.object;
+
+  const stripeMock = {
+    webhooks: {
+      constructEvent: () => events[eventIndex++],
+    },
+    paymentIntents: {
+      cancel: async () => {
+        if (cancelRaceToSucceeded || cancelFailureStatus) {
+          throw new Error(
+            cancelRaceToSucceeded
+              ? 'PaymentIntent already succeeded'
+              : 'PaymentIntent cancellation failed'
+          );
+        }
+        return { id: PAYMENT_ID, status: 'canceled' };
+      },
+      retrieve: async () =>
+        cancelRaceToSucceeded
+          ? succeededIntent
+          : { id: PAYMENT_ID, status: cancelFailureStatus || 'canceled' },
+    },
+  };
+
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === 'stripe') return createStripeModule(stripeMock);
+    if (request.endsWith('models/Order')) {
+      return {
+        findByIdAndUpdate: async (id, update) => {
+          if (String(id) !== String(order._id)) return null;
+          return applyOrderUpdate(order, update);
+        },
+        findOneAndUpdate: async (filter, update) => {
+          if (!matchesOrderFilter(order, filter)) return null;
+          return applyOrderUpdate(order, update);
+        },
+      };
+    }
+    if (request.endsWith('models/Subscription')) return {};
+    if (request.endsWith('lib/inventory/orderInventory')) {
+      return {
+        decrementInventoryForPaidOrder: async () => {
+          if (order.inventoryDecrementedAt) {
+            return { decremented: false, reason: 'already_decremented' };
+          }
+          finalizeCalls += 1;
+          order.inventoryDecrementedAt = new Date();
+          delete order.inventoryReservedAt;
+          return { decremented: true, reason: 'reservation_finalized', lines: [] };
+        },
+        releaseInventoryReservation: async () => {
+          releaseCalls += 1;
+          delete order.inventoryReservedAt;
+          return { restored: true, lines: [] };
+        },
+      };
+    }
+    return originalLoad(request, parent, isMain);
+  };
+
+  delete require.cache[webhookControllerPath];
+  const { handleStripeWebhook } = require(webhookControllerPath);
+  Module._load = originalLoad;
+
+  return {
+    order,
+    invoke: async () => {
+      const res = mockResponse();
+      await handleStripeWebhook(
+        {
+          headers: {
+            'stripe-signature': 'sig_test',
+            'content-type': 'application/json',
+          },
+          body: Buffer.from('{}'),
+        },
+        res
+      );
+      return res;
+    },
+    getFinalizeCalls: () => finalizeCalls,
+    getReleaseCalls: () => releaseCalls,
+  };
+}
+
+function loadPostPaymentWebhookSequence({
+  events,
+  cancelRaceToSucceeded = false,
+  cancelFailureStatus = null,
+}) {
+  let eventIndex = 0;
+  let finalizeCalls = 0;
+  let releaseCalls = 0;
+  const order = buildOrderForPostPayment();
+  order.inventoryReservedAt = new Date('2026-08-07T00:00:00.000Z');
+  order.inventoryDecrementedAt = null;
+  order.paidConfirmationEmailSentAt = new Date('2026-08-07T00:00:00.000Z');
+  const succeededIntent = paymentIntentEvent(
+    'payment_intent.succeeded',
+    'succeeded'
+  ).data.object;
+
+  const stripeMock = {
+    webhooks: {
+      constructEvent: () => events[eventIndex++],
+    },
+    paymentIntents: {
+      cancel: async () => {
+        if (cancelRaceToSucceeded || cancelFailureStatus) {
+          throw new Error(
+            cancelRaceToSucceeded
+              ? 'PaymentIntent already succeeded'
+              : 'PaymentIntent cancellation failed'
+          );
+        }
+        return { id: PAYMENT_ID, status: 'canceled' };
+      },
+      retrieve: async () =>
+        cancelRaceToSucceeded
+          ? succeededIntent
+          : { id: PAYMENT_ID, status: cancelFailureStatus || 'canceled' },
+    },
+    charges: {
+      retrieve: async () => ({
+        transfer: 'tr_test_001',
+        application_fee: 'fee_test_001',
+      }),
+    },
+  };
+
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === 'stripe') return createStripeModule(stripeMock);
+    if (request.endsWith('models/Order')) {
+      return {
+        find: () => ({ populate: async () => [order] }),
+        findByIdAndUpdate: async (id, update) => {
+          if (String(id) !== String(order._id)) return null;
+          return applyOrderUpdate(order, update);
+        },
+        findOneAndUpdate: async (filter, update) => {
+          if (!matchesOrderFilter(order, filter)) return null;
+          return applyOrderUpdate(order, update);
+        },
+      };
+    }
+    if (request.endsWith('utils/OrderMail')) {
+      return { sendOrderPaidEmails: async () => {} };
+    }
+    if (request.endsWith('lib/inventory/orderInventory')) {
+      return {
+        decrementInventoryForPaidOrder: async () => {
+          if (order.inventoryDecrementedAt) {
+            return { decremented: false, reason: 'already_decremented' };
+          }
+          finalizeCalls += 1;
+          order.inventoryDecrementedAt = new Date();
+          delete order.inventoryReservedAt;
+          return { decremented: true, reason: 'reservation_finalized', lines: [] };
+        },
+        releaseInventoryReservation: async () => {
+          releaseCalls += 1;
+          delete order.inventoryReservedAt;
+          return { restored: true, lines: [] };
+        },
+      };
+    }
+    return originalLoad(request, parent, isMain);
+  };
+
+  delete require.cache[stripePaymentControllerPath];
+  const { stripePaymentWebhook } = require(stripePaymentControllerPath);
+  Module._load = originalLoad;
+
+  return {
+    order,
+    invoke: async () => {
+      const res = mockResponse();
+      await stripePaymentWebhook(
+        {
+          headers: { 'stripe-signature': 'sig_test' },
+          body: Buffer.from('{}'),
+        },
+        res
+      );
+      return res;
+    },
+    getFinalizeCalls: () => finalizeCalls,
+    getReleaseCalls: () => releaseCalls,
+  };
+}
+
 test('order status webhook marks order paid and ordered on payment_intent.succeeded', async () => {
   process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
   const { handleStripeWebhook, getUpdates } = loadOrderStatusWebhook();
@@ -329,8 +588,8 @@ test('order status webhook cancels a retryable failed intent and releases invent
   );
 
   assert.equal(res.statusCode, 200);
-  assert.equal(getUpdates()[0].update.paymentStatus, 'failed');
-  assert.equal(getUpdates()[0].update.status, 'cancelled');
+  assert.equal(getUpdates()[0].update.$set.paymentStatus, 'failed');
+  assert.equal(getUpdates()[0].update.$set.status, 'cancelled');
   assert.deepEqual(getCancellations(), [
     {
       id: PAYMENT_ID,
@@ -391,4 +650,182 @@ test('post-payment webhook duplicate succeed keeps paid status without corruptio
   assert.equal(order.items[0].chargeId, 'ch_test_001');
   assert.equal(order.items[0].transferId, 'tr_test_001');
   assert.equal(order.items[0].applicationFeeId, 'fee_test_001');
+});
+
+test('order status webhook ignores stale payment_failed after paid finalization', async () => {
+  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
+  const harness = loadOrderWebhookSequence({
+    events: [
+      paymentIntentEvent('payment_intent.succeeded', 'succeeded'),
+      paymentIntentEvent('payment_intent.payment_failed', 'requires_payment_method'),
+    ],
+  });
+
+  assert.equal((await harness.invoke()).statusCode, 200);
+  assert.equal((await harness.invoke()).statusCode, 200);
+  assert.equal(harness.order.paymentStatus, 'paid');
+  assert.equal(harness.order.status, 'ordered');
+  assert.ok(harness.order.inventoryDecrementedAt);
+  assert.equal(harness.getFinalizeCalls(), 1);
+  assert.equal(harness.getReleaseCalls(), 0);
+});
+
+test('order status webhook ignores stale canceled after paid finalization', async () => {
+  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
+  const harness = loadOrderWebhookSequence({
+    events: [
+      paymentIntentEvent('payment_intent.succeeded', 'succeeded'),
+      paymentIntentEvent('payment_intent.canceled', 'canceled'),
+    ],
+  });
+
+  await harness.invoke();
+  await harness.invoke();
+  assert.equal(harness.order.paymentStatus, 'paid');
+  assert.equal(harness.order.status, 'ordered');
+  assert.equal(harness.getFinalizeCalls(), 1);
+  assert.equal(harness.getReleaseCalls(), 0);
+});
+
+test('order status webhook ignores failure after inventory finalization marker', async () => {
+  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
+  const harness = loadOrderWebhookSequence({
+    events: [
+      paymentIntentEvent('payment_intent.payment_failed', 'requires_payment_method'),
+    ],
+  });
+  harness.order.inventoryDecrementedAt = new Date('2026-08-07T00:05:00.000Z');
+
+  assert.equal((await harness.invoke()).statusCode, 200);
+  assert.equal(harness.order.paymentStatus, 'pending');
+  assert.equal(harness.order.status, 'created');
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.getReleaseCalls(), 0);
+});
+
+test('order status webhook reconciles cancel race that already succeeded', async () => {
+  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
+  const harness = loadOrderWebhookSequence({
+    events: [
+      paymentIntentEvent('payment_intent.payment_failed', 'requires_payment_method'),
+      paymentIntentEvent('payment_intent.succeeded', 'succeeded'),
+    ],
+    cancelRaceToSucceeded: true,
+  });
+
+  const failedDelivery = await harness.invoke();
+  assert.equal(failedDelivery.statusCode, 200);
+  assert.equal(harness.order.paymentStatus, 'paid');
+  assert.equal(harness.order.status, 'ordered');
+  assert.equal(harness.getFinalizeCalls(), 1);
+  assert.equal(harness.getReleaseCalls(), 0);
+
+  await harness.invoke();
+  assert.equal(harness.getFinalizeCalls(), 1);
+  assert.equal(harness.getReleaseCalls(), 0);
+});
+
+test('post-payment webhook ignores stale payment_failed after paid finalization', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const harness = loadPostPaymentWebhookSequence({
+    events: [
+      paymentIntentEvent('payment_intent.succeeded', 'succeeded'),
+      paymentIntentEvent('payment_intent.payment_failed', 'requires_payment_method'),
+    ],
+  });
+
+  await harness.invoke();
+  await harness.invoke();
+  assert.equal(harness.order.paymentStatus, 'paid');
+  assert.equal(harness.order.status, 'ordered');
+  assert.ok(harness.order.inventoryDecrementedAt);
+  assert.equal(harness.getFinalizeCalls(), 1);
+  assert.equal(harness.getReleaseCalls(), 0);
+});
+
+test('post-payment webhook ignores stale canceled after paid finalization', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const harness = loadPostPaymentWebhookSequence({
+    events: [
+      paymentIntentEvent('payment_intent.succeeded', 'succeeded'),
+      paymentIntentEvent('payment_intent.canceled', 'canceled'),
+    ],
+  });
+
+  await harness.invoke();
+  await harness.invoke();
+  assert.equal(harness.order.paymentStatus, 'paid');
+  assert.equal(harness.order.status, 'ordered');
+  assert.equal(harness.getFinalizeCalls(), 1);
+  assert.equal(harness.getReleaseCalls(), 0);
+});
+
+test('post-payment webhook ignores cancellation after inventory finalization marker', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const harness = loadPostPaymentWebhookSequence({
+    events: [paymentIntentEvent('payment_intent.canceled', 'canceled')],
+  });
+  harness.order.inventoryDecrementedAt = new Date('2026-08-07T00:05:00.000Z');
+
+  assert.deepEqual((await harness.invoke()).body, { received: true });
+  assert.equal(harness.order.paymentStatus, 'pending');
+  assert.equal(harness.order.status, 'created');
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.getReleaseCalls(), 0);
+});
+
+test('post-payment webhook reconciles cancel race that already succeeded', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const harness = loadPostPaymentWebhookSequence({
+    events: [
+      paymentIntentEvent('payment_intent.payment_failed', 'requires_payment_method'),
+      paymentIntentEvent('payment_intent.succeeded', 'succeeded'),
+    ],
+    cancelRaceToSucceeded: true,
+  });
+
+  const failedDelivery = await harness.invoke();
+  assert.deepEqual(failedDelivery.body, { received: true });
+  assert.equal(harness.order.paymentStatus, 'paid');
+  assert.equal(harness.order.status, 'ordered');
+  assert.equal(harness.getFinalizeCalls(), 1);
+  assert.equal(harness.getReleaseCalls(), 0);
+
+  await harness.invoke();
+  assert.equal(harness.getFinalizeCalls(), 1);
+  assert.equal(harness.getReleaseCalls(), 0);
+});
+
+test('order status webhook keeps reservation when cancellation is unconfirmed', async () => {
+  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
+  const harness = loadOrderWebhookSequence({
+    events: [
+      paymentIntentEvent('payment_intent.payment_failed', 'requires_payment_method'),
+    ],
+    cancelFailureStatus: 'requires_payment_method',
+  });
+
+  const response = await harness.invoke();
+  assert.equal(response.statusCode, 500);
+  assert.equal(harness.order.paymentStatus, 'pending');
+  assert.ok(harness.order.inventoryReservedAt);
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.getReleaseCalls(), 0);
+});
+
+test('post-payment webhook keeps reservation when cancellation is unconfirmed', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const harness = loadPostPaymentWebhookSequence({
+    events: [
+      paymentIntentEvent('payment_intent.payment_failed', 'requires_payment_method'),
+    ],
+    cancelFailureStatus: 'requires_payment_method',
+  });
+
+  const response = await harness.invoke();
+  assert.equal(response.statusCode, 500);
+  assert.equal(harness.order.paymentStatus, 'pending');
+  assert.ok(harness.order.inventoryReservedAt);
+  assert.equal(harness.getFinalizeCalls(), 0);
+  assert.equal(harness.getReleaseCalls(), 0);
 });

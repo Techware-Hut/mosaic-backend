@@ -15,6 +15,9 @@ This document records the backend contract used by the vendor inventory dashboar
 - Payment success finalizes the existing reservation without decrementing a
   second time. Failed/cancelled PaymentIntents release the reservation exactly
   once; the retryable failed intent is cancelled before stock is released.
+- A failed event that loses the Stripe cancellation race to `succeeded` is
+  reconciled through the existing success path. Stale failed/canceled events
+  cannot overwrite an order that is already paid or inventory-finalized.
 - Multi-line reserve, legacy paid-time decrement, release, and paid-order
   restore run in MongoDB transactions so a failure on any line rolls the whole
   inventory mutation back.
@@ -26,6 +29,9 @@ This document records the backend contract used by the vendor inventory dashboar
   schedule, and batch size are configurable with
   `INVENTORY_RESERVATION_TTL_MINUTES`, `INVENTORY_RESERVATION_EXPIRY_CRON`, and
   `INVENTORY_RESERVATION_EXPIRY_BATCH_LIMIT`.
+- Cancel-before-release favors inventory integrity and stale-client-secret
+  safety over retrying the same PaymentIntent. The shopper may need to restart
+  checkout; changing that tradeoff requires written product approval.
 
 ## Route Matrix
 
@@ -71,6 +77,8 @@ Automated coverage includes:
 - concurrent final-unit reservation and legacy paid-time fallback
 - multi-line rollback on reservation/release failure
 - webhook/retrieve replay and idempotent paid-order restoration
+- stale failed/canceled delivery after success and cancellation-lost-to-success
+  reconciliation
 
 Manual release smoke should still verify:
 
@@ -91,8 +99,10 @@ Manual release smoke should still verify:
 - `inventoryAdjustments` records the exact on-hand amount changed so releasing
   a partial/zero-stock backorder cannot manufacture stock.
 - The inventory mutation path requires MongoDB transaction support (a replica
-  set or sharded cluster). Confirm that capability in staging before enabling
-  the hotfix in production.
+  set or sharded cluster). Production capability was proven read-only against a
+  three-member `ReplicaSetWithPrimary`, including a committed snapshot
+  transaction and exact live-data correlation. See
+  [`inventory-reservation-operations.md`](inventory-reservation-operations.md).
 - Guest cart merge and cart add/update prefer top-level `ProductVariant.stock` over legacy nested `sizes[].stock`.
 - Public cart and paid checkout behavior should be smoke-tested on staging with approved test accounts after inventory changes.
 
@@ -108,3 +118,7 @@ cancel retryable intents before releasing their stock, and verify there are no
 remaining reservation markers. Code rollback is safe only after that drain;
 the schema additions themselves can remain because they are backward
 compatible.
+
+The abandoned-reservation procedure, Stripe decision matrix, rolling-deploy
+checkout gate, per-instance version requirement, and legacy-stock audit are in
+[`inventory-reservation-operations.md`](inventory-reservation-operations.md).
