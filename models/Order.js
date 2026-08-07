@@ -184,6 +184,11 @@ const orderSchema = new Schema(
       type: Date,
       default: null,
     },
+    /** Set once when paid webhook decrements ProductVariant.stock (idempotency). */
+    inventoryDecrementedAt: {
+      type: Date,
+      default: null,
+    },
     lifecycleEmailLog: [
       {
         event: String,
