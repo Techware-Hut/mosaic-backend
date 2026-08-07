@@ -45,10 +45,12 @@ function buildVariant(overrides = {}) {
     businessId: biz,
     sku: 'SKU-TEST',
     allowBackorder: false,
+    // Authoritative SoT used by resolveVariantSelection / initiateOrder.
+    stock: overrides.stock ?? 10,
     sizes: [
       {
         size: 'M',
-        stock: 10,
+        stock: overrides.stock ?? 10,
         price: overrides.price ?? 25,
         salePrice: null,
         sku: 'SKU-M',
