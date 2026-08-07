@@ -13,6 +13,9 @@ const app = require('./app');
 const connectDB = require('./config/Db');
 const { logReleaseIdentityAtStartup } = require('./utils/releaseIdentity');
 const { startOnboardingReminderScheduler } = require('./jobs/onboardingReminders');
+const {
+  startInventoryReservationExpiryScheduler,
+} = require('./jobs/inventoryReservationExpiry');
 
 const PORT = process.env.PORT || 3001;
 
@@ -21,6 +24,7 @@ const startServer = async () => {
     await connectDB();
     logReleaseIdentityAtStartup();
     startOnboardingReminderScheduler();
+    startInventoryReservationExpiryScheduler();
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);
     });

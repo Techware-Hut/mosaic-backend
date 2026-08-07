@@ -68,6 +68,7 @@ function loadPostPaymentWebhook({
   eventType = 'payment_intent.succeeded',
 } = {}) {
   let emailSendCount = 0;
+  let inventoryReleaseCount = 0;
 
   const stripeMock = {
     webhooks: {
@@ -76,6 +77,9 @@ function loadPostPaymentWebhook({
         data: {
           object: {
             id: PAYMENT_ID,
+            status: eventType === 'payment_intent.payment_failed'
+              ? 'requires_payment_method'
+              : 'succeeded',
             latest_charge: 'ch_test_001',
             currency: 'usd',
           },
@@ -87,6 +91,10 @@ function loadPostPaymentWebhook({
         transfer: 'tr_test_001',
         application_fee: 'fee_test_001',
       }),
+    },
+    paymentIntents: {
+      cancel: async (id) => ({ id, status: 'canceled' }),
+      retrieve: async (id) => ({ id, status: 'canceled' }),
     },
   };
 
@@ -112,6 +120,18 @@ function loadPostPaymentWebhook({
         },
       };
     }
+    if (request.endsWith('lib/inventory/orderInventory')) {
+      return {
+        decrementInventoryForPaidOrder: async () => ({
+          decremented: true,
+          lines: [],
+        }),
+        releaseInventoryReservation: async () => {
+          inventoryReleaseCount += 1;
+          return { restored: true, lines: [] };
+        },
+      };
+    }
     return originalLoad(request, parent, isMain);
   };
 
@@ -122,6 +142,7 @@ function loadPostPaymentWebhook({
   return {
     stripePaymentWebhook,
     getEmailSendCount: () => emailSendCount,
+    getInventoryReleaseCount: () => inventoryReleaseCount,
   };
 }
 
@@ -204,7 +225,11 @@ test('post-payment webhook skips duplicate paid confirmation emails', async () =
 test('post-payment webhook does not send confirmation on failed payment event', async () => {
   process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
   const order = buildOrderForPostPayment();
-  const { stripePaymentWebhook, getEmailSendCount } = loadPostPaymentWebhook({
+  const {
+    stripePaymentWebhook,
+    getEmailSendCount,
+    getInventoryReleaseCount,
+  } = loadPostPaymentWebhook({
     orders: [order],
     eventType: 'payment_intent.payment_failed',
   });
@@ -222,6 +247,9 @@ test('post-payment webhook does not send confirmation on failed payment event', 
   assert.equal(getEmailSendCount(), 0);
   assert.equal(order.paidConfirmationEmailSentAt, null);
   assert.equal(order.lifecycleEmailLog.length, 0);
+  assert.equal(getInventoryReleaseCount(), 1);
+  assert.equal(order.paymentStatus, 'failed');
+  assert.equal(order.status, 'cancelled');
 });
 
 test('initiateOrder no longer sends pre-payment customer or vendor emails', () => {

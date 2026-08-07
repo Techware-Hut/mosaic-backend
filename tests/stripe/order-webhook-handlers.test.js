@@ -101,6 +101,8 @@ function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
 
 function loadFailedPaymentWebhook() {
   const updates = [];
+  const cancellations = [];
+  let releaseCalls = 0;
   const stripeMock = {
     webhooks: {
       constructEvent: () => ({
@@ -108,10 +110,18 @@ function loadFailedPaymentWebhook() {
         data: {
           object: {
             id: PAYMENT_ID,
+            status: 'requires_payment_method',
             metadata: { orderId: ORDER_ID },
           },
         },
       }),
+    },
+    paymentIntents: {
+      cancel: async (id, params) => {
+        cancellations.push({ id, params });
+        return { id, status: 'canceled' };
+      },
+      retrieve: async (id) => ({ id, status: 'canceled' }),
     },
   };
 
@@ -137,6 +147,10 @@ function loadFailedPaymentWebhook() {
           decremented: false,
           reason: 'mocked',
         }),
+        releaseInventoryReservation: async () => {
+          releaseCalls += 1;
+          return { restored: true, lines: [] };
+        },
       };
     }
     return originalLoad(request, parent, isMain);
@@ -146,7 +160,12 @@ function loadFailedPaymentWebhook() {
   const { handleStripeWebhook } = require(webhookControllerPath);
   Module._load = originalLoad;
 
-  return { handleStripeWebhook, getUpdates: () => updates };
+  return {
+    handleStripeWebhook,
+    getUpdates: () => updates,
+    getCancellations: () => cancellations,
+    getReleaseCalls: () => releaseCalls,
+  };
 }
 
 function buildOrderForPostPayment(overrides = {}) {
@@ -291,9 +310,14 @@ test('order status webhook duplicate succeed is idempotent', async () => {
   assert.equal(getUpdates()[1].update.paymentStatus, 'paid');
 });
 
-test('order status webhook marks failed payment as cancelled', async () => {
+test('order status webhook cancels a retryable failed intent and releases inventory', async () => {
   process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
-  const { handleStripeWebhook, getUpdates } = loadFailedPaymentWebhook();
+  const {
+    handleStripeWebhook,
+    getUpdates,
+    getCancellations,
+    getReleaseCalls,
+  } = loadFailedPaymentWebhook();
   const res = mockResponse();
 
   await handleStripeWebhook(
@@ -307,6 +331,13 @@ test('order status webhook marks failed payment as cancelled', async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(getUpdates()[0].update.paymentStatus, 'failed');
   assert.equal(getUpdates()[0].update.status, 'cancelled');
+  assert.deepEqual(getCancellations(), [
+    {
+      id: PAYMENT_ID,
+      params: { cancellation_reason: 'abandoned' },
+    },
+  ]);
+  assert.equal(getReleaseCalls(), 1);
 });
 
 test('post-payment webhook stores charge transfer and application fee IDs', async () => {

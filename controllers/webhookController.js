@@ -3,6 +3,7 @@ const Order = require('../models/Order');
 const Subscription = require('../models/Subscription'); // ← ADD THIS LINE
 const {
   decrementInventoryForPaidOrder,
+  releaseInventoryReservation,
 } = require('../lib/inventory/orderInventory');
 
 
@@ -20,6 +21,21 @@ const toStripePayloadBuffer = (body) => {
   }
 
   return null;
+};
+
+const cancelRetryablePaymentIntent = async (paymentIntent) => {
+  if (!paymentIntent?.id || paymentIntent.status === 'canceled') return;
+
+  try {
+    await stripe.paymentIntents.cancel(paymentIntent.id, {
+      cancellation_reason: 'abandoned',
+    });
+  } catch (error) {
+    // Webhook delivery is at-least-once. A prior delivery may already have
+    // cancelled the intent; only treat that exact terminal state as success.
+    const current = await stripe.paymentIntents.retrieve(paymentIntent.id);
+    if (current?.status !== 'canceled') throw error;
+  }
 };
 
 // Webhook to handle Stripe events (like successful payments)
@@ -128,8 +144,10 @@ const handleStripeWebhook = async (req, res) => {
         orderId: failedOrderId,
       });
 
-      // Update order status to 'failed'
+      // A failed PaymentIntent is normally retryable. Cancel it before
+      // releasing stock so the old client secret cannot later oversell.
       try {
+        await cancelRetryablePaymentIntent(failedPaymentIntent);
         const failedOrder = await Order.findByIdAndUpdate(failedOrderId, { 
           paymentStatus: 'failed', 
           status: 'cancelled' 
@@ -138,6 +156,7 @@ const handleStripeWebhook = async (req, res) => {
         if (!failedOrder) {
           console.warn(`Order webhook could not find failed order ${failedOrderId} for payment intent ${failedPaymentIntent.id}.`);
         } else {
+          await releaseInventoryReservation(failedOrder);
           console.log('Order marked failed from webhook', {
             orderId: failedOrder._id.toString(),
             paymentStatus: failedOrder.paymentStatus,
@@ -147,6 +166,26 @@ const handleStripeWebhook = async (req, res) => {
       } catch (error) {
         console.error(`Failed to update order ${failedOrderId} after payment failure:`, error);
         return res.status(500).send('Failed to update order status');
+      }
+
+      res.status(200).send({ received: true });
+      break;
+
+    case 'payment_intent.canceled':
+      const canceledPaymentIntent = event.data.object;
+      const canceledOrderId = canceledPaymentIntent.metadata.orderId;
+      try {
+        const canceledOrder = await Order.findByIdAndUpdate(canceledOrderId, {
+          paymentStatus: 'failed',
+          status: 'cancelled',
+        }, { new: true });
+
+        if (canceledOrder) {
+          await releaseInventoryReservation(canceledOrder);
+        }
+      } catch (error) {
+        console.error(`Failed to release inventory for cancelled order ${canceledOrderId}:`, error);
+        return res.status(500).send('Failed to release order inventory');
       }
 
       res.status(200).send({ received: true });

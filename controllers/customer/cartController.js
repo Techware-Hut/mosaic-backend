@@ -880,7 +880,7 @@ async function getVariantsMini(req, res, next) {
             isDeleted: false,
             isPublished: true,
         })
-            .select("_id productId label color allowBackorder images sizes")
+            .select("_id productId label color stock allowBackorder images sizes")
             .exec();
 
         const variants = docs.map((d) => d.toJSON());
@@ -896,6 +896,9 @@ async function getVariantsMini(req, res, next) {
                 productId: v.productId,
                 label: v.label,
                 color: v.color,
+                // ProductVariant.stock is authoritative. Guest cart hydration
+                // must not depend on legacy sizes[] rows being present.
+                stock: Number(v.stock || 0),
                 allowBackorder: v.allowBackorder,
                 images: v.images,
                 sizes: filtered,

@@ -11,8 +11,22 @@ const {
 } = require("../utils/paymentIntentResponse");
 const {
   decrementInventoryForPaidOrder,
+  releaseInventoryReservation,
 } = require("../lib/inventory/orderInventory");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+async function cancelRetryablePaymentIntent(paymentIntent) {
+  if (!paymentIntent?.id || paymentIntent.status === "canceled") return;
+
+  try {
+    await stripe.paymentIntents.cancel(paymentIntent.id, {
+      cancellation_reason: "abandoned",
+    });
+  } catch (error) {
+    const current = await stripe.paymentIntents.retrieve(paymentIntent.id);
+    if (current?.status !== "canceled") throw error;
+  }
+}
 
 /**
  * Webhook fallback for local Test Mode / missed Stripe CLI forwards:
@@ -87,6 +101,26 @@ exports.stripePaymentWebhook = async (req, res) => {
   }
 
   try {
+    if (
+      event.type === "payment_intent.payment_failed" ||
+      event.type === "payment_intent.canceled"
+    ) {
+      const paymentIntent = event.data.object;
+      if (event.type === "payment_intent.payment_failed") {
+        await cancelRetryablePaymentIntent(paymentIntent);
+      }
+
+      const orders = await Order.find({ paymentId: paymentIntent.id }).populate([]);
+      for (const order of orders) {
+        await releaseInventoryReservation(order);
+        order.paymentStatus = "failed";
+        order.status = "cancelled";
+        await order.save();
+      }
+
+      return res.json({ received: true });
+    }
+
     if (event.type === "payment_intent.succeeded") {
       const pi = event.data.object;
       const paymentId = pi.id;
@@ -264,6 +298,17 @@ exports.retrieveIntent = async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.retrieve(id);
 
     await reconcileSucceededPaymentIntentOrders(orders, paymentIntent);
+    if (paymentIntent.status === "canceled") {
+      for (const order of orders) {
+        await releaseInventoryReservation(order);
+        await Order.findByIdAndUpdate(order._id, {
+          paymentStatus: "failed",
+          status: "cancelled",
+        });
+        order.paymentStatus = "failed";
+        order.status = "cancelled";
+      }
+    }
 
     return res.status(200).json({
       success: true,

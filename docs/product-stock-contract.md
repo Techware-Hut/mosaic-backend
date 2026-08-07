@@ -9,7 +9,23 @@ This document records the backend contract used by the vendor inventory dashboar
 - `ProductVariant.stock` is the authoritative stock field for vendor product inventory.
 - Legacy callers may still send stock inside the first `sizes[]` row. Product create/update paths normalize that fallback into top-level variant stock for backward compatibility.
 - Product-level stock values are derived summaries only. The backend now exposes aggregate stock metadata so frontend screens do not have to infer inventory state from stale nested size data.
-- Negative stock is invalid for vendor stock edits. Paid-order decrements floor at zero if an oversell race occurs after payment already succeeded.
+- Negative stock is invalid for vendor stock edits. Checkout atomically reserves
+  available `ProductVariant.stock` before returning a PaymentIntent client
+  secret, so concurrent non-backorder buyers cannot oversell the final unit.
+- Payment success finalizes the existing reservation without decrementing a
+  second time. Failed/cancelled PaymentIntents release the reservation exactly
+  once; the retryable failed intent is cancelled before stock is released.
+- Multi-line reserve, legacy paid-time decrement, release, and paid-order
+  restore run in MongoDB transactions so a failure on any line rolls the whole
+  inventory mutation back.
+- Automated abandoned-reservation expiry is disabled by default until product
+  approves a TTL. The current operational proposal is 30 minutes. When enabled,
+  the worker cancels the PaymentIntent before releasing stock; if Stripe already
+  reports a successful payment, it finalizes the reservation instead. Enable it
+  explicitly with `ENABLE_INVENTORY_RESERVATION_EXPIRY=true`; the proposed TTL,
+  schedule, and batch size are configurable with
+  `INVENTORY_RESERVATION_TTL_MINUTES`, `INVENTORY_RESERVATION_EXPIRY_CRON`, and
+  `INVENTORY_RESERVATION_EXPIRY_BATCH_LIMIT`.
 
 ## Route Matrix
 
@@ -52,6 +68,9 @@ Automated coverage includes:
 - top-level stock normalization
 - legacy `sizes[0]` stock fallback
 - vendor private product list stock metadata
+- concurrent final-unit reservation and legacy paid-time fallback
+- multi-line rollback on reservation/release failure
+- webhook/retrieve replay and idempotent paid-order restoration
 
 Manual release smoke should still verify:
 
@@ -64,6 +83,28 @@ Manual release smoke should still verify:
 ## Limitations
 
 - This contract covers product inventory only. Service and food listing availability are separate flows.
-- Paid checkout decrements `ProductVariant.stock` once via `inventoryDecrementedAt` idempotency when payment succeeds (Stripe `payment_intent.succeeded` handlers). Vendor order accept does not decrement again.
+- Paid checkout reserves `ProductVariant.stock` once via
+  `inventoryReservedAt`, then converts that marker to
+  `inventoryDecrementedAt` when Stripe reports payment success. Duplicate
+  webhook/poll reconciliation is idempotent, and vendor order accept does not
+  decrement again.
+- `inventoryAdjustments` records the exact on-hand amount changed so releasing
+  a partial/zero-stock backorder cannot manufacture stock.
+- The inventory mutation path requires MongoDB transaction support (a replica
+  set or sharded cluster). Confirm that capability in staging before enabling
+  the hotfix in production.
 - Guest cart merge and cart add/update prefer top-level `ProductVariant.stock` over legacy nested `sizes[].stock`.
 - Public cart and paid checkout behavior should be smoke-tested on staging with approved test accounts after inventory changes.
+
+## Rollback Safety
+
+Do not revert the reservation-aware code while orders still have
+`inventoryReservedAt` set. The pre-hotfix payment-success path does not
+understand reservations and would decrement those orders a second time.
+
+Before rollback, stop or gate new checkout initiation, reconcile every active
+reservation against its Stripe PaymentIntent, finalize succeeded intents,
+cancel retryable intents before releasing their stock, and verify there are no
+remaining reservation markers. Code rollback is safe only after that drain;
+the schema additions themselves can remain because they are backward
+compatible.
