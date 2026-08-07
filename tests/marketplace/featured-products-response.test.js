@@ -169,6 +169,8 @@ test('getFeaturedProducts scopes query to approved active businesses', async () 
   assert.equal(capturedBusinessFindQuery.value.isActive, true);
   assert.equal(capturedFindQuery.value.isFeatured, true);
   assert.equal(capturedFindQuery.value.isPublished, true);
+  assert.equal(capturedFindQuery.value.isDeleted, false);
+  assert.deepEqual(capturedFindQuery.value.isActive, { $ne: false });
   assert.deepEqual(capturedFindQuery.value.businessId.$in, [activeBusinessId]);
 });
 

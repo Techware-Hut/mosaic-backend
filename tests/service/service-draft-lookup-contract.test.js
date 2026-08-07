@@ -63,6 +63,7 @@ function buildService(overrides = {}) {
     categoryId: { _id: '507f1f77bcf86cd799439014', name: 'Beauty' },
     subcategoryId: { _id: '507f1f77bcf86cd799439015', name: 'Hair' },
     isPublished: false,
+    isActive: true,
     coverImage: 'https://example.com/cover.jpg',
     images: ['https://example.com/gallery.jpg'],
     services: [],
@@ -87,6 +88,20 @@ function loadController(options = {}) {
       return {
         findById: () => makeQuery(null),
         findOne: (query) => {
+          // Public marketplace helpers require published + active.
+          if (query.isPublished === true && service.isPublished !== true) {
+            return makeQuery(null);
+          }
+          if (
+            query.isActive &&
+            query.isActive.$ne === false &&
+            service.isActive === false
+          ) {
+            return makeQuery(null);
+          }
+          if (query._id === serviceId || query._id === service._id) {
+            return makeQuery(service);
+          }
           if (query.businessId === businessId && (!query.ownerId || query.ownerId === ownerId)) {
             return makeQuery(service);
           }
@@ -251,6 +266,18 @@ test('private business service lookup returns owner-shaped business hours and pe
   }]);
   assert.deepEqual(res.body.service.faq, [{ question: 'Hours?', answer: '9 to 5' }]);
   assert.equal(res.body.service.categoryId.name, 'Beauty');
+});
+
+test('public business-service lookup hides inactive published service', async () => {
+  const controller = loadController({
+    service: buildService({ isPublished: true, isActive: false }),
+  });
+  const res = mockResponse();
+
+  await controller.getBusinessServiceById({ params: { id: businessId } }, res);
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, 'Business service not found.');
 });
 
 test('public business-service lookup returns amenities and faq for published service', async () => {

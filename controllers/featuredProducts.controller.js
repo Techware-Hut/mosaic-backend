@@ -4,6 +4,9 @@ const { toPublicListingCard } = require('../lib/listing/publicListingDto');
 const {
   publicMarketplaceBusinessFilter,
 } = require('../lib/marketplace/businessEligibility');
+const {
+  PUBLIC_PRODUCT_FILTER,
+} = require('../lib/listing/publicMarketplaceStates');
 
 const FEATURED_MAX_LIMIT = 50;
 
@@ -38,8 +41,7 @@ exports.getFeaturedProducts = async (req, res) => {
 
     const query = {
       isFeatured: true,
-      isPublished: true,
-      isDeleted: false,
+      ...PUBLIC_PRODUCT_FILTER,
       businessId: { $in: visibleBusinessIds },
     };
 

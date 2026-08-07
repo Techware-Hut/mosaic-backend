@@ -301,6 +301,48 @@ test('legacy business-food endpoint hides rejected-live vendor', async () => {
   assert.equal(publicDetail.status, 404);
 });
 
+test('legacy business-food endpoint hides draft food for approved vendor', async () => {
+  const agent = createAgent(getApp());
+  const vendor = await registerAndVerify(agent, { role: 'business_owner' });
+  const user = await User.findOne({ email: vendor.email });
+  const business = await seedApprovedBusiness(user, {
+    listingType: 'food',
+    isApproved: true,
+    isActive: true,
+    businessName: 'Approved Draft Food Vendor',
+  });
+
+  const category = await FoodCategory.create({
+    name: `Draft Food Category ${Date.now()}`,
+  });
+  const subcategory = await FoodSubcategory.create({
+    name: `Draft Food Subcategory ${Date.now()}`,
+    category: category._id,
+  });
+
+  const food = await Food.create({
+    title: 'Unpublished Menu Item',
+    description: 'Draft must stay off public legacy lookup',
+    price: 18,
+    categoryId: category._id,
+    subcategoryId: subcategory._id,
+    businessId: business._id,
+    ownerId: user._id,
+    isPublished: false,
+  });
+
+  const legacyDetail = await agent.get(`/api/food/business-food/${food._id}`);
+  assert.equal(legacyDetail.status, 404);
+
+  const publicDetail = await agent.get(`/api/public/foods/${food._id}`);
+  assert.equal(publicDetail.status, 404);
+
+  const profile = await agent.get(
+    `/api/public/product/vendor-profile/${business._id}`
+  );
+  assert.equal(profile.status, 404);
+});
+
 test('GET /api/business returns all approved marketplace listing types', async () => {
   const agent = createAgent(getApp());
   const res = await agent.get('/api/business').query({ limit: 50 });
