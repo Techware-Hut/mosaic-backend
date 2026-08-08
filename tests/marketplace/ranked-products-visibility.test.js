@@ -91,6 +91,7 @@ test('listProductsRanked requires published products from approved active busine
   assert.ok(capturedFindQuery.value);
   assert.equal(capturedFindQuery.value.isDeleted, false);
   assert.equal(capturedFindQuery.value.isPublished, true);
+  assert.deepEqual(capturedFindQuery.value.isActive, { $ne: false });
   assert.equal(capturedBusinessFindQuery.value.isApproved, true);
   assert.equal(capturedBusinessFindQuery.value.isActive, true);
   assert.ok(Array.isArray(capturedFindQuery.value.businessId.$in));

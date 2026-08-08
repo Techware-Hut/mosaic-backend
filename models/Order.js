@@ -50,6 +50,23 @@ const orderItemSchema = new Schema(
   { _id: false }
 );
 
+const inventoryAdjustmentSchema = new Schema(
+  {
+    variantId: {
+      type: Schema.Types.ObjectId,
+      ref: "ProductVariant",
+      required: true,
+    },
+    size: String,
+    quantity: {
+      type: Number,
+      min: 0,
+      required: true,
+    },
+  },
+  { _id: false }
+);
+
 const orderSchema = new Schema(
   {
     groupOrderId: {
@@ -184,9 +201,28 @@ const orderSchema = new Schema(
       type: Date,
       default: null,
     },
-    /** Set once when paid webhook decrements ProductVariant.stock (idempotency). */
+    /** Set while checkout holds stock for an unpaid PaymentIntent. */
+    inventoryReservedAt: {
+      type: Date,
+      default: null,
+    },
+    /** Set once when payment finalizes a stock reservation (idempotency). */
     inventoryDecrementedAt: {
       type: Date,
+      default: null,
+    },
+    /** Set once when a reservation/sale is released back to stock. */
+    inventoryRestoredAt: {
+      type: Date,
+      default: null,
+    },
+    /** Exact on-hand quantities changed, including partial backorders. */
+    inventoryAdjustments: {
+      type: [inventoryAdjustmentSchema],
+      default: [],
+    },
+    inventoryAdjustmentVersion: {
+      type: Number,
       default: null,
     },
     lifecycleEmailLog: [
@@ -224,5 +260,6 @@ const orderSchema = new Schema(
 
 orderSchema.index({ userId: 1, vendorId: 1, status: 1 });
 orderSchema.index({ groupOrderId: 1 });
+orderSchema.index({ inventoryReservedAt: 1, inventoryDecrementedAt: 1 });
 
 module.exports = mongoose.model("Order", orderSchema);

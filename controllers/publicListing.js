@@ -33,6 +33,9 @@ const {
   publicMarketplaceBusinessFilter,
 } = require('../lib/marketplace/businessEligibility');
 const {
+  filterDirectoryBusinessesWithPublicListings,
+} = require('../lib/marketplace/vendorDirectoryQuery');
+const {
   findPublicCategory,
 } = require('../utils/categoryVisibility');
 
@@ -372,7 +375,11 @@ exports.getServiceById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const service = await Service.findById(id)
+    const service = await Service.findOne({
+      _id: id,
+      isPublished: true,
+      ...PUBLIC_ACTIVE_LISTING_FILTER,
+    })
       .populate('categoryId', 'name slug')
       .populate('subcategoryId', 'name slug')
       .populate({
@@ -394,13 +401,6 @@ exports.getServiceById = async (req, res) => {
       });
 
     if (!service) {
-      return res.status(404).json({
-        success: false,
-        message: 'Service not found',
-      });
-    }
-
-    if (service.isPublished !== true) {
       return res.status(404).json({
         success: false,
         message: 'Service not found',
@@ -664,7 +664,11 @@ exports.getFoodById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const food = await Food.findById(id)
+    const food = await Food.findOne({
+      _id: id,
+      isPublished: true,
+      ...PUBLIC_ACTIVE_LISTING_FILTER,
+    })
       .populate('categoryId', 'name')
       .populate('subcategoryId', 'name')
       .populate({
@@ -685,13 +689,6 @@ exports.getFoodById = async (req, res) => {
       });
 
     if (!food) {
-      return res.status(404).json({
-        success: false,
-        message: 'Food item not found',
-      });
-    }
-
-    if (food.isPublished !== true) {
       return res.status(404).json({
         success: false,
         message: 'Food item not found',
@@ -1479,6 +1476,17 @@ exports.getVendorProfile = async (req, res) => {
     .lean();
 
     if (!business) {
+      return res.status(404).json({
+        success: false,
+        message: 'Business not found'
+      });
+    }
+
+    // Align with directory cards: require ≥1 live type-matching public listing.
+    const eligibleIds = await filterDirectoryBusinessesWithPublicListings([
+      business,
+    ]);
+    if (!eligibleIds.length) {
       return res.status(404).json({
         success: false,
         message: 'Business not found'

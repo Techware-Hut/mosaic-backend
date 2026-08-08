@@ -55,7 +55,7 @@ function loadOrderController({
     email: [],
     refundCreate: [],
     variantFindById: [],
-    restoreInventory: [],
+    inventoryRestore: [],
     sequence: [],
   };
 
@@ -72,34 +72,6 @@ function loadOrderController({
             },
           },
         };
-      };
-    }
-
-    if (request.endsWith('lib/inventory/orderInventory')) {
-      return {
-        restoreInventoryForOrder: async (ord) => {
-          calls.sequence.push('restore');
-          calls.restoreInventory.push(String(ord._id));
-          const qty = Number(ord.items?.[0]?.quantity || 0);
-          if (variant) {
-            if (typeof variant.stock === 'number') {
-              variant.stock += qty;
-            }
-            if (Array.isArray(variant.sizes) && variant.sizes[0]) {
-              variant.sizes[0].stock =
-                Number(variant.sizes[0].stock || 0) + qty;
-            }
-            if (typeof variant.save === 'function') {
-              await variant.save();
-            }
-          }
-          ord.inventoryDecrementedAt = undefined;
-          return { restored: true, lines: [] };
-        },
-        decrementInventoryForPaidOrder: async () => ({
-          decremented: false,
-          reason: 'mocked',
-        }),
       };
     }
 
@@ -134,7 +106,6 @@ function loadOrderController({
             },
           };
         },
-        updateOne: async () => ({ acknowledged: true }),
       };
     }
 
@@ -144,6 +115,21 @@ function loadOrderController({
           calls.sequence.push('variant');
           calls.variantFindById.push(id);
           return variant;
+        },
+      };
+    }
+
+    if (request.endsWith('lib/inventory/orderInventory')) {
+      return {
+        reserveInventoryForOrder: async () => ({ reserved: true, lines: [] }),
+        releaseInventoryReservation: async () => ({ restored: true, lines: [] }),
+        restoreInventoryForOrder: async (targetOrder) => {
+          calls.sequence.push('inventory_restore');
+          calls.inventoryRestore.push(targetOrder._id);
+          const quantity = Number(targetOrder.items?.[0]?.quantity || 0);
+          if (variant?.sizes?.[0]) variant.sizes[0].stock += quantity;
+          if (variant?.save) await variant.save();
+          return { restored: true, lines: [] };
         },
       };
     }
@@ -237,6 +223,7 @@ test('cancelOrderByUser does not restore accepted-order stock when refund fails'
     status: 'accepted',
     paymentStatus: 'paid',
     paymentId: 'pi_failed',
+    inventoryDecrementedAt: new Date('2026-08-06T00:00:00Z'),
     items: [{ variantId: 'variant-1', size: 'M', quantity: 2 }],
   });
   const { controller, calls } = loadOrderController({
@@ -263,10 +250,9 @@ test('cancelOrderByUser does not restore accepted-order stock when refund fails'
   assert.equal(order.getSaveCalls(), 0);
 });
 
-test('cancelOrderByUser restores inventory when inventoryDecrementedAt is set after successful refund', async () => {
+test('cancelOrderByUser restores accepted-order stock after successful refund', async () => {
   const size = { size: 'M', stock: 3 };
   const variant = {
-    stock: 3,
     sizes: [size],
     async save() {
       this.saveCalls = (this.saveCalls || 0) + 1;
@@ -276,7 +262,7 @@ test('cancelOrderByUser restores inventory when inventoryDecrementedAt is set af
     status: 'accepted',
     paymentStatus: 'paid',
     paymentId: 'pi_success',
-    inventoryDecrementedAt: new Date('2026-08-06T00:00:00.000Z'),
+    inventoryDecrementedAt: new Date('2026-08-06T00:00:00Z'),
     items: [{ variantId: 'variant-1', size: 'M', quantity: 2 }],
   });
   const { controller, calls } = loadOrderController({ order, variant });
@@ -290,8 +276,8 @@ test('cancelOrderByUser restores inventory when inventoryDecrementedAt is set af
   assert.equal(res.statusCode, null);
   assert.equal(res.body.success, true);
   assert.equal(calls.sequence[0], 'refund');
-  assert.equal(calls.sequence[1], 'restore');
-  assert.deepEqual(calls.restoreInventory, ['order-1']);
+  assert.equal(calls.sequence[1], 'inventory_restore');
+  assert.deepEqual(calls.inventoryRestore, ['order-1']);
   assert.deepEqual(calls.refundCreate, [
     {
       payment_intent: 'pi_success',
@@ -305,11 +291,9 @@ test('cancelOrderByUser restores inventory when inventoryDecrementedAt is set af
     },
   ]);
   assert.equal(size.stock, 5);
-  assert.equal(variant.stock, 5);
   assert.equal(variant.saveCalls, 1);
   assert.equal(order.status, 'cancelled');
   assert.equal(order.paymentStatus, 'refunded');
-  assert.equal(order.inventoryDecrementedAt, undefined);
   assert.deepEqual(order.statusHistory, [{ status: 'cancelled' }]);
   assert.equal(order.lifecycleEmailLog.length, 1);
   assert.equal(order.lifecycleEmailLog[0].event, 'order_cancelled');

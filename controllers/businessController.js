@@ -1196,6 +1196,17 @@ exports.getBusinessBySlugPublic = async (req, res) => {
       });
     }
 
+    // Align with directory cards: empty product storefronts stay private.
+    const eligibleIds = await filterDirectoryBusinessesWithPublicListings([
+      business,
+    ]);
+    if (!eligibleIds.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Business not found or not a product listing",
+      });
+    }
+
     res.status(200).json({
       success: true,
       data: toPublicBusinessCard(business),

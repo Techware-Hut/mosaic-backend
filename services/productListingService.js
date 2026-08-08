@@ -54,6 +54,7 @@ async function fetchEligibleProducts({
   const match = {
     isPublished: true,
     isDeleted: false,
+    isActive: { $ne: false },
     ...(cat ? { categoryId: cat } : {}),
     ...(sub ? { subcategoryId: sub } : {}),
     ...(exclude ? { _id: { $ne: exclude } } : {}),

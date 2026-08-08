@@ -192,6 +192,17 @@ test('getServiceById merges business tags into service detail payload', async ()
   Module._load = function mockLoad(request, parent, isMain) {
     if (String(request).endsWith('models/Service')) {
       return {
+        findOne: () => ({
+          populate() {
+            return {
+              populate() {
+                return {
+                  populate: async () => serviceDoc,
+                };
+              },
+            };
+          },
+        }),
         findById: () => ({
           populate() {
             return {

@@ -205,6 +205,14 @@ function loadPublicListingController(options = {}) {
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request.endsWith('models/Service')) {
+      const populateChainFor = (doc) => ({
+        populate: () => ({
+          populate: () => ({
+            populate: async () => doc,
+          }),
+        }),
+      });
+
       return {
         find: () => ({
           populate: () => ({
@@ -218,15 +226,30 @@ function loadPublicListingController(options = {}) {
         countDocuments: async () => 0,
         findById: () => {
           capturedFindById.called = true;
-          return {
-            populate: () => ({
-              populate: () => ({
-                populate: async () => service,
-              }),
-            }),
-          };
+          return populateChainFor(service);
         },
-        findOne: async () => null,
+        // Public detail now queries with isPublished + isActive filters.
+        findOne: (query = {}) => {
+          capturedFindById.called = true;
+          const idMatch =
+            query._id === serviceId ||
+            query._id === service._id ||
+            (query.slug && query.slug === service.slug);
+          if (!idMatch && !query.slug) {
+            return populateChainFor(null);
+          }
+          if (query.isPublished === true && service.isPublished !== true) {
+            return populateChainFor(null);
+          }
+          if (
+            query.isActive &&
+            query.isActive.$ne === false &&
+            service.isActive === false
+          ) {
+            return populateChainFor(null);
+          }
+          return populateChainFor(service);
+        },
       };
     }
     if (request.endsWith('models/Business')) {

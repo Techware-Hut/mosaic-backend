@@ -197,6 +197,56 @@ test('submitForReview explicitly resubmits rejected application', async () => {
   assert.ok(onboarding.submittedAt instanceof Date);
 });
 
+test('saveDraft on rejected application resets required verification checklist flags', async () => {
+  const onboarding = buildOnboarding({
+    status: 'rejected',
+    verificationChecklist: {
+      taxDocs: true,
+      businessLicense: true,
+      minorityDocs: true,
+      website: true,
+    },
+  });
+  const controller = loadController(onboarding);
+  const res = mockResponse();
+
+  await controller.saveDraft(
+    {
+      user: { _id: userId },
+      body: { businessName: 'Corrected Biz' },
+    },
+    res
+  );
+
+  assert.equal(res.body.success, true);
+  assert.equal(onboarding.status, 'draft');
+  assert.equal(onboarding.verificationChecklist.taxDocs, false);
+  assert.equal(onboarding.verificationChecklist.businessLicense, false);
+  assert.equal(onboarding.verificationChecklist.minorityDocs, false);
+  assert.equal(onboarding.verificationChecklist.website, true);
+});
+
+test('submitForReview clears stale rejection metadata when re-entering the queue', async () => {
+  const onboarding = buildOnboarding({
+    status: 'rejected',
+    rejectionReason: 'Please update EIN docs',
+    requiredNextAction: 'Upload a clearer EIN document',
+    reviewDecision: 'rejected',
+    rejectedAt: new Date('2026-08-01T00:00:00.000Z'),
+  });
+  const controller = loadController(onboarding);
+  const res = mockResponse();
+
+  await controller.submitForReview({ user: { _id: userId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(onboarding.status, 'submitted');
+  assert.equal(onboarding.rejectionReason, undefined);
+  assert.equal(onboarding.requiredNextAction, undefined);
+  assert.equal(onboarding.reviewDecision, undefined);
+  assert.equal(onboarding.rejectedAt, undefined);
+});
+
 test('saveDraft on rejected application still strips protected vendor fields', async () => {
   const onboarding = buildOnboarding({
     status: 'rejected',

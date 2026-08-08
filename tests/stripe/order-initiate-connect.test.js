@@ -44,13 +44,12 @@ function buildVariant(overrides = {}) {
     ownerId: { toString: () => owner },
     businessId: biz,
     sku: 'SKU-TEST',
-    allowBackorder: false,
-    // Authoritative SoT used by resolveVariantSelection / initiateOrder.
     stock: overrides.stock ?? 10,
+    allowBackorder: false,
     sizes: [
       {
         size: 'M',
-        stock: overrides.stock ?? 10,
+        stock: 10,
         price: overrides.price ?? 25,
         salePrice: null,
         sku: 'SKU-M',
@@ -98,11 +97,16 @@ function loadInitiateOrder({
   variants = [buildVariant()],
   variantById = null,
   piCreateError = null,
+  orderSaveErrorAtCall = null,
+  reservationResult = { reserved: true, lines: [] },
   shippingResult = defaultShipping,
   taxPricing = { priceExclTax: 25, priceInclTax: 25 },
 } = {}) {
   const piCreateCalls = [];
   const accountRetrieveCalls = [];
+  const piCancelCalls = [];
+  const reservationCalls = [];
+  const reservationReleaseCalls = [];
 
   const stripeMock = {
     accounts: {
@@ -122,11 +126,16 @@ function loadInitiateOrder({
           client_secret: 'pi_test_001_secret_test',
         };
       },
+      cancel: async (id, params) => {
+        piCancelCalls.push({ id, params });
+        return { id, status: 'canceled' };
+      },
     },
   };
 
   let savedOrderPayload = null;
   let orderIdCounter = 0;
+  let orderSaveCount = 0;
 
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
@@ -147,6 +156,10 @@ function loadInitiateOrder({
           this._id = { toString: () => `order_${++orderIdCounter}` };
         }
         async save() {
+          orderSaveCount += 1;
+          if (orderSaveCount === orderSaveErrorAtCall) {
+            throw new Error('Order save failed');
+          }
           savedOrderPayload = { ...this };
           return this;
         }
@@ -177,6 +190,21 @@ function loadInitiateOrder({
             email: 'customer@example.com',
           }),
         }),
+      };
+    }
+    if (request.endsWith('lib/inventory/orderInventory')) {
+      return {
+        reserveInventoryForOrder: async (order) => {
+          reservationCalls.push(order);
+          if (reservationResult.reserved) order.inventoryReservedAt = new Date();
+          return reservationResult;
+        },
+        releaseInventoryReservation: async (order) => {
+          reservationReleaseCalls.push(order);
+          order.inventoryReservedAt = undefined;
+          return { restored: true, lines: [] };
+        },
+        restoreInventoryForOrder: async () => ({ restored: true, lines: [] }),
       };
     }
     if (request.endsWith('utils/orderPhase')) {
@@ -220,7 +248,10 @@ function loadInitiateOrder({
     initiateOrder: controller.initiateOrder,
     getPiCreateCalls: () => piCreateCalls,
     getAccountRetrieveCalls: () => accountRetrieveCalls,
+    getPiCancelCalls: () => piCancelCalls,
     getSavedOrderPayload: () => savedOrderPayload,
+    getReservationCalls: () => reservationCalls,
+    getReservationReleaseCalls: () => reservationReleaseCalls,
   };
 }
 
@@ -398,7 +429,9 @@ test('initiateOrder maps insufficient_capabilities_for_transfer to safe client m
   process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
   const stripeError = new Error('Transfer capability missing');
   stripeError.code = 'insufficient_capabilities_for_transfer';
-  const { initiateOrder } = loadInitiateOrder({ piCreateError: stripeError });
+  const { initiateOrder, getReservationReleaseCalls } = loadInitiateOrder({
+    piCreateError: stripeError,
+  });
   const res = mockResponse();
 
   await initiateOrder(baseRequest(), res);
@@ -406,6 +439,7 @@ test('initiateOrder maps insufficient_capabilities_for_transfer to safe client m
   assert.equal(res.statusCode, 400);
   assert.match(res.body.message, /onboarding incomplete/i);
   assert.doesNotMatch(JSON.stringify(res.body), /sk_test|whsec_/);
+  assert.equal(getReservationReleaseCalls().length, 1);
 });
 
 test('initiateOrder response exposes clientSecret but not secret keys', async () => {
@@ -427,7 +461,9 @@ test('initiateOrder returns generic 500 on unexpected Stripe errors', async () =
   process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
   const stripeError = new Error('Internal stripe failure');
   stripeError.type = 'StripeAPIError';
-  const { initiateOrder } = loadInitiateOrder({ piCreateError: stripeError });
+  const { initiateOrder, getReservationReleaseCalls } = loadInitiateOrder({
+    piCreateError: stripeError,
+  });
   const res = mockResponse();
 
   await initiateOrder(baseRequest(), res);
@@ -435,6 +471,48 @@ test('initiateOrder returns generic 500 on unexpected Stripe errors', async () =
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.message, 'Server error');
   assert.doesNotMatch(JSON.stringify(res.body), /Internal stripe failure/);
+  assert.equal(getReservationReleaseCalls().length, 1);
+});
+
+test('initiateOrder cancels a created PaymentIntent before releasing stock when order persistence fails', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const {
+    initiateOrder,
+    getPiCancelCalls,
+    getReservationReleaseCalls,
+  } = loadInitiateOrder({ orderSaveErrorAtCall: 2 });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(getPiCancelCalls(), [
+    {
+      id: 'pi_test_001',
+      params: { cancellation_reason: 'abandoned' },
+    },
+  ]);
+  assert.equal(getReservationReleaseCalls().length, 1);
+});
+
+test('initiateOrder returns a corrective cart error when atomic reservation loses a stock race', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const { initiateOrder, getPiCreateCalls, getReservationCalls } = loadInitiateOrder({
+    reservationResult: {
+      reserved: false,
+      reason: 'insufficient_stock',
+      availableStock: 0,
+    },
+  });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'INVENTORY_CHANGED');
+  assert.match(res.body.message, /return to your cart/i);
+  assert.equal(getReservationCalls().length, 1);
+  assert.equal(getPiCreateCalls().length, 0);
 });
 
 test('initiateOrder allows checkout for approved active business with Connect account', async () => {

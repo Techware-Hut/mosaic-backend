@@ -11,6 +11,9 @@ const { toPublicListingCard } = require('../lib/listing/publicListingDto');
 const {
   publicMarketplaceBusinessFilter,
 } = require('../lib/marketplace/businessEligibility');
+const {
+  PUBLIC_PRODUCT_FILTER,
+} = require('../lib/listing/publicMarketplaceStates');
 
 // tiny helper: clip a number into a safe range (with default)
 const clip = (n, lo, hi, d) => {
@@ -47,11 +50,11 @@ async function listProductsRanked(req, res) {
 
     // Simple query first - if no businessType, return all products
     if (!businessType && !location && !minority) {
-      const products = await Product.find({
-        isDeleted: false,
-        isPublished: true,
+      const simpleQuery = {
+        ...PUBLIC_PRODUCT_FILTER,
         businessId: { $in: visibleBusinessIds },
-      })
+      };
+      const products = await Product.find(simpleQuery)
         .populate('businessId', 'businessName')
         .populate('categoryId', 'name')
         .populate('subcategoryId', 'name')
@@ -59,11 +62,7 @@ async function listProductsRanked(req, res) {
         .skip(skip)
         .limit(pageSizeN);
 
-      const total = await Product.countDocuments({
-        isDeleted: false,
-        isPublished: true,
-        businessId: { $in: visibleBusinessIds },
-      });
+      const total = await Product.countDocuments(simpleQuery);
 
       return res.json({
         items: products.map((product) =>
@@ -93,8 +92,7 @@ async function listProductsRanked(req, res) {
       },
       {
         $match: {
-          isDeleted: false,
-          isPublished: true,
+          ...PUBLIC_PRODUCT_FILTER,
           businessId: { $in: visibleBusinessIds },
         }
       }

@@ -1,5 +1,8 @@
 const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+const {
+  MongoMemoryServer,
+  MongoMemoryReplSet,
+} = require('mongodb-memory-server');
 const {
   installProviderStubs,
   resetStripeStub,
@@ -43,13 +46,17 @@ function applyIntegrationEnv(mongoUri) {
   process.env.SENTRY_ENABLED = 'false';
 }
 
-async function startHarness() {
+async function startHarness({ transactions = false } = {}) {
   if (started && app) {
     return app;
   }
 
   installProviderStubs();
-  mongoServer = await MongoMemoryServer.create();
+  mongoServer = transactions
+    ? await MongoMemoryReplSet.create({
+        replSet: { count: 1, storageEngine: 'wiredTiger' },
+      })
+    : await MongoMemoryServer.create();
   applyIntegrationEnv(mongoServer.getUri());
 
   await mongoose.connect(process.env.MONGODB_URI, {

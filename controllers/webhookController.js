@@ -3,6 +3,7 @@ const Order = require('../models/Order');
 const Subscription = require('../models/Subscription'); // ← ADD THIS LINE
 const {
   decrementInventoryForPaidOrder,
+  releaseInventoryReservation,
 } = require('../lib/inventory/orderInventory');
 
 
@@ -20,6 +21,110 @@ const toStripePayloadBuffer = (body) => {
   }
 
   return null;
+};
+
+const cancelRetryablePaymentIntent = async (paymentIntent) => {
+  if (!paymentIntent?.id) {
+    return { status: paymentIntent?.status || 'unknown', paymentIntent };
+  }
+
+  if (
+    paymentIntent.status === 'canceled' ||
+    paymentIntent.status === 'succeeded'
+  ) {
+    return { status: paymentIntent.status, paymentIntent };
+  }
+
+  try {
+    const canceled = await stripe.paymentIntents.cancel(paymentIntent.id, {
+      cancellation_reason: 'abandoned',
+    });
+    return {
+      status: canceled?.status || 'canceled',
+      paymentIntent: canceled || paymentIntent,
+    };
+  } catch (error) {
+    // Webhook delivery is at-least-once. A prior delivery may already have
+    // cancelled the intent, or payment may have won the cancellation race.
+    const current = await stripe.paymentIntents.retrieve(paymentIntent.id);
+    if (current?.status === 'canceled' || current?.status === 'succeeded') {
+      return { status: current.status, paymentIntent: current };
+    }
+    throw error;
+  }
+};
+
+const reconcileSucceededOrderPayment = async (orderId, paymentIntent) => {
+  const updatedOrder = await Order.findByIdAndUpdate(
+    orderId,
+    {
+      paymentStatus: 'paid',
+      status: 'ordered',
+    },
+    { new: true }
+  );
+
+  if (!updatedOrder) {
+    console.warn(
+      `Order webhook could not find order ${orderId} for payment intent ${paymentIntent.id}.`
+    );
+    return { reconciled: false };
+  }
+
+  console.log('Order marked paid from webhook', {
+    orderId: updatedOrder._id.toString(),
+    paymentStatus: updatedOrder.paymentStatus,
+    status: updatedOrder.status,
+  });
+
+  try {
+    const inventoryResult = await decrementInventoryForPaidOrder(updatedOrder);
+    if (inventoryResult.decremented) {
+      console.log(
+        `Inventory decremented for paid order ${updatedOrder._id}`,
+        JSON.stringify({ lines: inventoryResult.lines?.length || 0 })
+      );
+    } else if (inventoryResult.reason === 'already_decremented') {
+      console.log(
+        `Inventory already decremented for order ${updatedOrder._id}, skipping`
+      );
+    }
+  } catch (inventoryErr) {
+    console.error(
+      `Failed to decrement inventory for paid order ${updatedOrder._id}:`,
+      inventoryErr
+    );
+  }
+
+  return { reconciled: true, order: updatedOrder };
+};
+
+const failUnpaidOrderAndReleaseReservation = async (orderId, paymentIntent) => {
+  const failedOrder = await Order.findOneAndUpdate(
+    {
+      _id: orderId,
+      paymentStatus: { $ne: 'paid' },
+      inventoryDecrementedAt: null,
+    },
+    {
+      $set: {
+        paymentStatus: 'failed',
+        status: 'cancelled',
+      },
+    },
+    { new: true }
+  );
+
+  if (!failedOrder) {
+    console.log('Ignoring stale failed/canceled payment event for paid/finalized order', {
+      orderId,
+      paymentIntentId: paymentIntent.id,
+    });
+    return { ignored: true };
+  }
+
+  await releaseInventoryReservation(failedOrder);
+  return { ignored: false, order: failedOrder };
 };
 
 // Webhook to handle Stripe events (like successful payments)
@@ -77,41 +182,8 @@ const handleStripeWebhook = async (req, res) => {
         orderId,
       });
 
-      // Update order status to 'paid' / 'ordered', then decrement inventory once.
       try {
-        const updatedOrder = await Order.findByIdAndUpdate(orderId, { 
-          paymentStatus: 'paid', 
-          status: 'ordered' 
-        }, { new: true });
-
-        if (!updatedOrder) {
-          console.warn(`Order webhook could not find order ${orderId} for payment intent ${paymentIntent.id}.`);
-        } else {
-          console.log('Order marked paid from webhook', {
-            orderId: updatedOrder._id.toString(),
-            paymentStatus: updatedOrder.paymentStatus,
-            status: updatedOrder.status,
-          });
-
-          try {
-            const inventoryResult = await decrementInventoryForPaidOrder(updatedOrder);
-            if (inventoryResult.decremented) {
-              console.log(
-                `Inventory decremented for paid order ${updatedOrder._id}`,
-                JSON.stringify({ lines: inventoryResult.lines?.length || 0 })
-              );
-            } else if (inventoryResult.reason === 'already_decremented') {
-              console.log(
-                `Inventory already decremented for order ${updatedOrder._id}, skipping`
-              );
-            }
-          } catch (inventoryErr) {
-            console.error(
-              `Failed to decrement inventory for paid order ${updatedOrder._id}:`,
-              inventoryErr
-            );
-          }
-        }
+        await reconcileSucceededOrderPayment(orderId, paymentIntent);
       } catch (error) {
         console.error(`Failed to update order ${orderId} after payment success:`, error);
         return res.status(500).send('Failed to update order status');
@@ -128,25 +200,49 @@ const handleStripeWebhook = async (req, res) => {
         orderId: failedOrderId,
       });
 
-      // Update order status to 'failed'
+      // A failed PaymentIntent is normally retryable. Cancel it before
+      // releasing stock so the old client secret cannot later oversell.
       try {
-        const failedOrder = await Order.findByIdAndUpdate(failedOrderId, { 
-          paymentStatus: 'failed', 
-          status: 'cancelled' 
-        }, { new: true });
-
-        if (!failedOrder) {
-          console.warn(`Order webhook could not find failed order ${failedOrderId} for payment intent ${failedPaymentIntent.id}.`);
+        const cancellation = await cancelRetryablePaymentIntent(
+          failedPaymentIntent
+        );
+        if (cancellation.status === 'succeeded') {
+          await reconcileSucceededOrderPayment(
+            failedOrderId,
+            cancellation.paymentIntent
+          );
         } else {
-          console.log('Order marked failed from webhook', {
-            orderId: failedOrder._id.toString(),
-            paymentStatus: failedOrder.paymentStatus,
-            status: failedOrder.status,
-          });
+          const failureResult = await failUnpaidOrderAndReleaseReservation(
+            failedOrderId,
+            failedPaymentIntent
+          );
+          if (!failureResult.ignored) {
+            console.log('Order marked failed from webhook', {
+              orderId: failureResult.order._id.toString(),
+              paymentStatus: failureResult.order.paymentStatus,
+              status: failureResult.order.status,
+            });
+          }
         }
       } catch (error) {
         console.error(`Failed to update order ${failedOrderId} after payment failure:`, error);
         return res.status(500).send('Failed to update order status');
+      }
+
+      res.status(200).send({ received: true });
+      break;
+
+    case 'payment_intent.canceled':
+      const canceledPaymentIntent = event.data.object;
+      const canceledOrderId = canceledPaymentIntent.metadata.orderId;
+      try {
+        await failUnpaidOrderAndReleaseReservation(
+          canceledOrderId,
+          canceledPaymentIntent
+        );
+      } catch (error) {
+        console.error(`Failed to release inventory for cancelled order ${canceledOrderId}:`, error);
+        return res.status(500).send('Failed to release order inventory');
       }
 
       res.status(200).send({ received: true });
