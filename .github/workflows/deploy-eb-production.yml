@@ -1,10 +1,15 @@
 name: Deploy to Elastic Beanstalk
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Full 40-character commit SHA from main to deploy
+        required: true
+        type: string
 
 concurrency:
   group: deploy-production
@@ -17,12 +22,67 @@ env:
   PRODUCTION_API_URL: https://api.mosaicbizhub.com
 
 jobs:
+  resolve-release:
+    name: Resolve release commit
+    runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.resolve.outputs.release_sha }}
+    steps:
+      - name: Checkout main history
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve and validate release SHA
+        id: resolve
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.ref }}
+          PUSH_SHA: ${{ github.sha }}
+          REQUESTED_RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$WORKFLOW_REF" != "refs/heads/main" ]; then
+              echo "Production deployment must be dispatched from the main branch"
+              exit 1
+            fi
+            candidate="$REQUESTED_RELEASE_SHA"
+            if [[ ! "$candidate" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "release_sha must be a full 40-character Git commit SHA"
+              exit 1
+            fi
+          else
+            candidate="$PUSH_SHA"
+          fi
+
+          git cat-file -e "${candidate}^{commit}" 2>/dev/null || {
+            echo "Release commit does not exist in this repository"
+            exit 1
+          }
+
+          release_sha=$(git rev-parse "${candidate}^{commit}")
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$release_sha" origin/main || {
+            echo "Release commit is not reachable from origin/main"
+            exit 1
+          }
+
+          echo "Validated release commit: $release_sha"
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
+
   test:
     name: Test
+    needs: resolve-release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout exact release commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -38,7 +98,10 @@ jobs:
 
   deploy:
     name: Deploy
-    needs: test
+    needs:
+      - resolve-release
+      - test
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 45
@@ -47,16 +110,23 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout
+      - name: Checkout exact release commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
+
+      - name: Verify external checkout gate
+        run: bash scripts/release/verify-checkout-gate.sh "$PRODUCTION_API_URL"
 
       - name: Create deployment package
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
         run: |
           cat > release-manifest.json <<EOF
           {
-            "commit": "${{ github.sha }}",
+            "commit": "$RELEASE_SHA",
             "environment": "production",
-            "deploymentVersion": "mosaic-${{ github.sha }}"
+            "deploymentVersion": "mosaic-$RELEASE_SHA"
           }
           EOF
           shopt -s dotglob
@@ -93,16 +163,21 @@ jobs:
           application_name: ${{ env.EB_APPLICATION_NAME }}
           environment_name: ${{ env.EB_ENVIRONMENT_NAME }}
           region: ${{ env.AWS_REGION }}
-          version_label: mosaic-${{ github.sha }}
+          version_label: mosaic-${{ needs.resolve-release.outputs.release_sha }}
           deployment_package: deploy.zip
           use_existing_version_if_available: true
           wait_for_deployment: true
           wait_for_environment_recovery: true
 
+      - name: Verify every EB instance deployment
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+        run: bash scripts/release/verify-eb-instance-versions.sh "$RELEASE_SHA"
+
       - name: Post-deploy health probe
         run: |
-          echo "Deployed commit: ${{ github.sha }}"
-          echo "Version label: mosaic-${{ github.sha }}"
+          echo "Deployed commit: ${{ needs.resolve-release.outputs.release_sha }}"
+          echo "Version label: mosaic-${{ needs.resolve-release.outputs.release_sha }}"
           for i in 1 2 3 4 5; do
             status=$(curl -s -o /tmp/health.json -w "%{http_code}" "${PRODUCTION_API_URL}/")
             echo "Attempt $i: HTTP $status"
@@ -125,6 +200,8 @@ jobs:
           fi
 
       - name: Post-deploy readiness probe
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
         run: |
           for path in /api/health /api/ready /api/build-info; do
             status=$(curl -s -o /dev/null -w "%{http_code}" "${PRODUCTION_API_URL}${path}")
@@ -134,19 +211,35 @@ jobs:
               exit 1
             fi
           done
-          curl -s "${PRODUCTION_API_URL}/api/health" | node -e "
-            const payload = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-            if (!payload.release?.commit || !payload.release?.environment || !payload.release?.deploymentVersion) {
-              console.error('Missing release identity on /api/health');
-              process.exit(1);
+
+          curl -fsS "${PRODUCTION_API_URL}/api/health" > /tmp/api-health.json
+          curl -fsS "${PRODUCTION_API_URL}/api/build-info" > /tmp/api-build-info.json
+          node - "$RELEASE_SHA" <<'NODE'
+          const fs = require('fs');
+          const expectedSha = process.argv[2];
+          const expectedShortSha = expectedSha.slice(0, 7);
+          const expectedVersion = `mosaic-${expectedSha}`;
+
+          for (const file of ['/tmp/api-health.json', '/tmp/api-build-info.json']) {
+            const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const release = payload.release;
+            if (!release?.commit || !release?.environment || !release?.deploymentVersion) {
+              throw new Error(`Missing release identity in ${file}`);
             }
-            const expected = '${{ github.sha }}'.slice(0, 7);
-            if (payload.release.commit !== expected) {
-              console.error(\`Release identity mismatch: expected \${expected}, got \${payload.release.commit}\`);
-              process.exit(1);
+            if (release.commit !== expectedShortSha) {
+              throw new Error(
+                `Release commit mismatch in ${file}: expected ${expectedShortSha}, got ${release.commit}`
+              );
             }
-            console.log(\`Release identity matches deployed commit: \${expected}\`);
-          "
+            if (release.deploymentVersion !== expectedVersion) {
+              throw new Error(
+                `Version mismatch in ${file}: expected ${expectedVersion}, got ${release.deploymentVersion}`
+              );
+            }
+          }
+
+          console.log(`Public release identity matches ${expectedVersion}`);
+          NODE
 
       - name: Post-deploy CORS probe
         env:
@@ -176,14 +269,16 @@ jobs:
           fi
 
       - name: Deployment summary
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
         run: |
           {
             echo "## Production deploy"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Commit | \`${{ github.sha }}\` |"
-            echo "| Version label | \`mosaic-${{ github.sha }}\` |"
+            echo "| Commit | \`$RELEASE_SHA\` |"
+            echo "| Version label | \`mosaic-$RELEASE_SHA\` |"
             echo "| EB application | \`${{ env.EB_APPLICATION_NAME }}\` |"
             echo "| EB environment | \`${{ env.EB_ENVIRONMENT_NAME }}\` |"
             echo "| Region | \`${{ env.AWS_REGION }}\` |"

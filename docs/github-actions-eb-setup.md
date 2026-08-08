@@ -25,7 +25,7 @@ Record before first deploy:
 
 ## GitHub repository configuration
 
-Repository: `DeveloperTWH/backend`
+Repository: `Techware-Hut/mosaic-backend`
 
 ### Variables (Settings → Secrets and variables → Actions → Variables)
 
@@ -39,16 +39,16 @@ Repository: `DeveloperTWH/backend`
 Set via CLI (replace `ACCOUNT_ID` with your 12-digit AWS account ID):
 
 ```bash
-gh variable set AWS_REGION --body "us-east-1" -R DeveloperTWH/backend
-gh variable set EB_APPLICATION_NAME --body "mosaic-biz-hub-backend" -R DeveloperTWH/backend
-gh variable set EB_ENVIRONMENT_NAME --body "mosaic-backend-env" -R DeveloperTWH/backend
-gh variable set AWS_ROLE_TO_ASSUME --body "arn:aws:iam::ACCOUNT_ID:role/github-actions-eb-deploy-production" -R DeveloperTWH/backend
+gh variable set AWS_REGION --body "us-east-1" -R Techware-Hut/mosaic-backend
+gh variable set EB_APPLICATION_NAME --body "mosaic-biz-hub-backend" -R Techware-Hut/mosaic-backend
+gh variable set EB_ENVIRONMENT_NAME --body "mosaic-backend-env" -R Techware-Hut/mosaic-backend
+gh variable set AWS_ROLE_TO_ASSUME --body "arn:aws:iam::ACCOUNT_ID:role/github-actions-eb-deploy-production" -R Techware-Hut/mosaic-backend
 ```
 
 Optional — scope role ARN to the production environment only:
 
 ```bash
-gh variable set AWS_ROLE_TO_ASSUME --env production --body "arn:aws:iam::ACCOUNT_ID:role/github-actions-eb-deploy-production" -R DeveloperTWH/backend
+gh variable set AWS_ROLE_TO_ASSUME --env production --body "arn:aws:iam::ACCOUNT_ID:role/github-actions-eb-deploy-production" -R Techware-Hut/mosaic-backend
 ```
 
 **Do not** add runtime application secrets (`MONGO_URI`, Stripe keys, runtime S3 keys, etc.) to GitHub. Those belong in Elastic Beanstalk environment properties.
@@ -61,7 +61,7 @@ Create environment **`production`** with:
 - **Required reviewers:** release owner + infra owner
 
 ```bash
-gh api -X PUT repos/DeveloperTWH/backend/environments/production \
+gh api -X PUT repos/Techware-Hut/mosaic-backend/environments/production \
   -f wait_timer=0 \
   -f deployment_branch_policy='{"protected_branches":false,"custom_branch_policies":true}' \
   -f custom_branch_policies='[{"name":"main","type":"branch"}]'
@@ -69,7 +69,7 @@ gh api -X PUT repos/DeveloperTWH/backend/environments/production \
 
 Add reviewers in the GitHub UI: Settings → Environments → production → Required reviewers.
 
-The deploy workflow job uses `environment: production`, which scopes the OIDC `sub` claim to `repo:DeveloperTWH/backend:environment:production`.
+The deploy workflow job uses `environment: production`, which scopes the OIDC `sub` claim to `repo:Techware-Hut/mosaic-backend:environment:production`.
 
 ---
 
@@ -101,7 +101,7 @@ Role name suggestion: `github-actions-eb-deploy-production`
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:DeveloperTWH/backend:environment:production"
+          "token.actions.githubusercontent.com:sub": "repo:Techware-Hut/mosaic-backend:environment:production"
         }
       }
     }
@@ -128,7 +128,8 @@ Attach inline policy `GitHubActionsEBDeployProduction` to the role:
         "elasticbeanstalk:DescribeApplications",
         "elasticbeanstalk:DescribeEnvironments",
         "elasticbeanstalk:DescribeEvents",
-        "elasticbeanstalk:DescribeApplicationVersions"
+        "elasticbeanstalk:DescribeApplicationVersions",
+        "elasticbeanstalk:DescribeInstancesHealth"
       ],
       "Resource": [
         "arn:aws:elasticbeanstalk:us-east-1:ACCOUNT_ID:application/mosaic-biz-hub-backend",
@@ -171,6 +172,8 @@ Notes:
 
 - `s3:CreateBucket` is omitted — the regional EB bucket already exists for this application.
 - If deploy fails with `AccessDenied` on `iam:PassRole`, add a narrow `iam:PassRole` statement for the EB service/instance roles only (unlikely for version-only deploys to an existing environment).
+- `elasticbeanstalk:DescribeInstancesHealth` is read-only but requires enhanced health reporting on the environment. The release workflow deliberately fails closed if the permission, enhanced-health service-role support, instance list, or deployment fields are unavailable.
+- The infrastructure owner must enable enhanced health and ensure the EB service role has its normal enhanced-health permissions. This repository change does not modify IAM or Elastic Beanstalk configuration.
 
 After creating the role, copy its ARN into the GitHub variable `AWS_ROLE_TO_ASSUME`.
 
@@ -180,13 +183,16 @@ After creating the role, copy its ARN into the GitHub variable `AWS_ROLE_TO_ASSU
 
 The deploy workflow (`.github/workflows/deploy-eb-production.yml`):
 
-1. Runs tests
-2. Builds a source-only ZIP
-3. Assumes the IAM role via `aws-actions/configure-aws-credentials@v4` using OIDC (`id-token: write`)
-4. Passes temporary credentials to `einaregilsson/beanstalk-deploy@v22`
-5. Runs post-deploy health probes on `https://api.mosaicbizhub.com`
+1. On push to `main`, resolves the pushed commit and runs tests; the production `deploy` job is skipped.
+2. On manual `workflow_dispatch`, requires a full `release_sha`, verifies it exists and is reachable from `origin/main`, and tests that exact commit.
+3. Re-verifies the external checkout gate before packaging or any Elastic Beanstalk mutation.
+4. Builds a source-only ZIP for the exact SHA.
+5. Assumes the IAM role via `aws-actions/configure-aws-credentials@v4` using OIDC (`id-token: write`).
+6. Passes temporary credentials to `einaregilsson/beanstalk-deploy@v22` and deploys `mosaic-<full-release-sha>`.
+7. Calls `DescribeInstancesHealth` and requires every instance to report that exact version with `Deployed` status.
+8. Runs the existing public health, readiness, build-info, auth, CORS, and featured-product probes on `https://api.mosaicbizhub.com`.
 
-Push-to-`main` auto-deploy is **enabled** in the workflow. Push/merge to `main` triggers deploy; `workflow_dispatch` remains for manual redeploys. Deploys are gated by the deploy workflow `test` job and the GitHub **`production`** environment when configured.
+Push-to-`main` automatic production mutation is **disabled**. Production deployment requires a manual dispatch after the operator enables and drains the checkout gate. See [CHECKOUT_GATE_OPERATIONS.md](release/CHECKOUT_GATE_OPERATIONS.md).
 
 ---
 
@@ -197,19 +203,23 @@ Push-to-`main` auto-deploy is **enabled** in the workflow. Push/merge to `main` 
 3. [ ] GitHub variables set (`AWS_REGION`, `EB_*`, `AWS_ROLE_TO_ASSUME`)
 4. [ ] `production` environment created with `main`-only deployment policy
 5. [ ] Required reviewers added on `production` (recommended)
-6. [ ] Record current EB version as rollback baseline
-7. [ ] Run **Deploy to Elastic Beanstalk** via **workflow_dispatch** on `main`
-8. [ ] Confirm workflow health probe: `GET https://api.mosaicbizhub.com/` → 200
-9. [ ] Run [production-smoke-checklist.md](production-smoke-checklist.md) minimum tier
-10. [ ] Update [deploy-verification.md](deploy-verification.md) with deployed SHA
+6. [ ] Grant the deploy role `elasticbeanstalk:DescribeInstancesHealth`
+7. [ ] Enable EB enhanced health and verify per-instance `Deployment` data is returned
+8. [ ] Provision and test the route-specific checkout gate without blocking any Stripe webhook
+9. [ ] Record current EB version, topology, deployment policy, and ALB target health as the rollback baseline
+10. [ ] Follow [CHECKOUT_GATE_OPERATIONS.md](release/CHECKOUT_GATE_OPERATIONS.md), including the drain and read-only active-reservation zero check
+11. [ ] Run **Deploy to Elastic Beanstalk** via **workflow_dispatch** on `main` with the full approved SHA
+12. [ ] Confirm per-instance version proof and every public post-deploy probe
+13. [ ] Run [production-smoke-checklist.md](production-smoke-checklist.md) minimum tier only after the gate is safely removed
+14. [ ] Update [deploy-verification.md](deploy-verification.md) with deployed SHA
 
-Push-to-`main` auto-deploy is enabled; deploys run automatically on push/merge to `main` and are gated by the `production` environment when configured. Use `workflow_dispatch` for manual redeploys.
+Push/merge to `main` runs tests but cannot mutate production. Manual dispatch with an exact main-reachable SHA is the only repository deployment path.
 
 Remove obsolete deploy secrets if they were ever added (not used by OIDC):
 
 ```bash
-gh secret delete AWS_ACCESS_KEY_ID -R DeveloperTWH/backend
-gh secret delete AWS_SECRET_ACCESS_KEY -R DeveloperTWH/backend
+gh secret delete AWS_ACCESS_KEY_ID -R Techware-Hut/mosaic-backend
+gh secret delete AWS_SECRET_ACCESS_KEY -R Techware-Hut/mosaic-backend
 ```
 
 ---
@@ -230,6 +240,8 @@ Workflow run on merge of PR #12 (`main` @ `8b098ad`):
 
 ## Rollback
 
-1. GitHub Actions → **Deploy to Elastic Beanstalk** → **Run workflow** → select previous known-good commit on `main`
-2. Or AWS Console → EB → Application versions → Deploy previous version
-3. Re-run minimum smoke (P0.1, P1.4)
+1. Restore or retain the checkout gate and drain checkout while keeping Stripe webhooks live.
+2. Run the read-only active-reservation diagnostic. Never roll back to pre-reservation code unless it proves zero active reservations after any required Stripe reconciliation.
+3. Run **Deploy to Elastic Beanstalk** manually on `main` with the full known-good commit SHA. The SHA must remain reachable from `main`.
+4. Require per-instance version proof and all public probes for the rollback version before removing the gate.
+5. Re-run minimum smoke (P0.1, P1.4) only after the gate is safely removed.

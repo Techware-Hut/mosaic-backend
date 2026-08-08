@@ -71,14 +71,23 @@ For each aged reservation:
 Do not manually edit stock or reservation markers. Use the existing
 transactional reconciliation paths so multi-line updates remain atomic.
 
-## Rolling deployment from the old implementation
+## Production deployment from the old implementation
 
 The implementation deployed by PR #260 does not understand
 `inventoryReservedAt`. A reservation created by new code must never have its
 success event handled by an old instance.
 
-No current evidence proves that Elastic Beanstalk request draining alone makes
-mixed-version handling impossible. Use this procedure:
+Production topology evidence supplied by the release owner on 2026-08-07 shows
+an ALB-backed Elastic Beanstalk environment with Auto Scaling Min=1, Max=1,
+exactly one current instance/target, and an AllAtOnce deployment policy. That
+topology does not create a simultaneous multi-instance old/new serving window,
+but a request can still be in flight on the old code and the single target can
+be unavailable during deployment. The checkout gate and drain therefore remain
+mandatory. If instance count, Max capacity, target count, or deployment policy
+differs at release time, stop and reassess.
+
+Follow `docs/release/CHECKOUT_GATE_OPERATIONS.md`. The inventory-specific safety
+sequence is:
 
 1. At the load balancer/WAF/maintenance layer, temporarily return `503` for
    authenticated `POST /api/orders/initiate` only. Keep both Stripe webhook
@@ -86,8 +95,8 @@ mixed-version handling impossible. Use this procedure:
 2. Wait at least the maximum application request timeout and confirm there are
    no in-flight checkout-initiation requests.
 3. Confirm no `inventoryReservedAt` marker was created after the gate time.
-4. Start the deployment. Do not reopen checkout during a rolling mixed-version
-   window.
+4. Start the deployment. Do not reopen checkout during the single-instance
+   deployment/recovery interval.
 5. In Elastic Beanstalk, verify every serving instance reports the new
    application version. Repeated `/api/build-info` probes are supporting
    evidence but do not replace the per-instance/version check.
