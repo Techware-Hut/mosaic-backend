@@ -59,9 +59,16 @@ function loadBookingController({ bookings = [] } = {}) {
     if (request.endsWith('utils/bookingMailer')) {
       return {
         sendVendorNewServiceBookingEmail: async () => {},
+        sendVendorNewFoodBookingEmail: async () => {},
         sendCustomerNewServiceBookingConfirmationEmail: async () => {},
         sendCustomerServicePaymentRequestEmail: async () => {},
         sendCustomerServiceBookingDecisionEmail: async () => {},
+      };
+    }
+
+    if (request.endsWith('utils/notificationPreferenceGate')) {
+      return {
+        resolveVendorBookingNotificationRecipients: async () => ['vendor@example.com'],
       };
     }
 
