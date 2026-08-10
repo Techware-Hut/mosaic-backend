@@ -84,6 +84,55 @@ const isVendorProfileReadyForTrustBadgeVerification = (onboarding) => {
   return hasLogo && hasBio;
 };
 
+const VERIFICATION_CHECKLIST_POINTS = Object.freeze({
+  minorityDocs: 10,
+  taxDocs: 10,
+  businessLicense: 10,
+  website: 5,
+  facebook: 5,
+  instagram: 5,
+  linkedin: 5,
+  tiktok: 5,
+  businessProfileImage: 5,
+  businessBio: 5,
+  refundPolicyDocument: 5,
+  termsDocument: 5,
+  googleReviewLink: 5,
+  communityServiceLink: 5,
+});
+
+const calculateVerificationPoints = (checklist) =>
+  Object.entries(VERIFICATION_CHECKLIST_POINTS).reduce(
+    (total, [field, points]) => total + (checklist?.[field] ? points : 0),
+    0
+  );
+
+const resetDocumentVerification = (documents) => {
+  if (!Array.isArray(documents)) return;
+
+  documents.forEach((document) => {
+    if (document) document.verified = false;
+  });
+};
+
+const resetRequiredVerificationForCorrection = (onboarding) => {
+  const checklist = {
+    ...(onboarding.verificationChecklist?.toObject?.() ||
+      onboarding.verificationChecklist ||
+      {}),
+    minorityDocs: false,
+    taxDocs: false,
+    businessLicense: false,
+  };
+
+  onboarding.verificationChecklist = checklist;
+  onboarding.totalVerificationPoints = calculateVerificationPoints(checklist);
+
+  resetDocumentVerification(onboarding.minorityProofDocuments);
+  resetDocumentVerification(onboarding.taxDocuments);
+  resetDocumentVerification(onboarding.businessLicenseDocuments);
+};
+
 /* =====================================================
    SAVE OR UPDATE DRAFT
 
@@ -199,14 +248,7 @@ exports.saveDraft = async (req, res) => {
       onboarding.status = 'draft';
       // Correction after admin reject must be re-verified — checklist flags
       // are protected from vendor writes and would otherwise stay true forever.
-      onboarding.verificationChecklist = {
-        ...(onboarding.verificationChecklist?.toObject?.() ||
-          onboarding.verificationChecklist ||
-          {}),
-        minorityDocs: false,
-        taxDocs: false,
-        businessLicense: false,
-      };
+      resetRequiredVerificationForCorrection(onboarding);
     } else if (!onboarding.status) {
       onboarding.status = 'draft';
     }

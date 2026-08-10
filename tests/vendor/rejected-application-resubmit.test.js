@@ -197,15 +197,24 @@ test('submitForReview explicitly resubmits rejected application', async () => {
   assert.ok(onboarding.submittedAt instanceof Date);
 });
 
-test('saveDraft on rejected application resets required verification checklist flags', async () => {
+test('saveDraft on rejected application resets required verification state and points', async () => {
+  const paidVerification = {
+    status: 'paid',
+    paymentIntentId: 'pi_existing_verification',
+  };
   const onboarding = buildOnboarding({
     status: 'rejected',
+    totalVerificationPoints: 35,
+    verificationPayment: paidVerification,
     verificationChecklist: {
       taxDocs: true,
       businessLicense: true,
       minorityDocs: true,
       website: true,
     },
+    minorityProofDocuments: [{ url: 'minority-proof.pdf', verified: true }],
+    taxDocuments: [{ url: 'tax-proof.pdf', verified: true }],
+    businessLicenseDocuments: [{ url: 'license-proof.pdf', verified: true }],
   });
   const controller = loadController(onboarding);
   const res = mockResponse();
@@ -224,6 +233,29 @@ test('saveDraft on rejected application resets required verification checklist f
   assert.equal(onboarding.verificationChecklist.businessLicense, false);
   assert.equal(onboarding.verificationChecklist.minorityDocs, false);
   assert.equal(onboarding.verificationChecklist.website, true);
+  assert.equal(onboarding.totalVerificationPoints, 5);
+  assert.equal(onboarding.minorityProofDocuments[0].verified, false);
+  assert.equal(onboarding.taxDocuments[0].verified, false);
+  assert.equal(onboarding.businessLicenseDocuments[0].verified, false);
+  assert.strictEqual(onboarding.verificationPayment, paidVerification);
+
+  await controller.saveDraft(
+    {
+      user: { _id: userId },
+      body: { businessName: 'Corrected Biz Again' },
+    },
+    res
+  );
+
+  assert.equal(onboarding.totalVerificationPoints, 5);
+  assert.strictEqual(onboarding.verificationPayment, paidVerification);
+
+  await controller.submitForReview({ user: { _id: userId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(onboarding.status, 'submitted');
+  assert.equal(onboarding.verificationPayment.status, 'paid');
+  assert.strictEqual(onboarding.verificationPayment, paidVerification);
 });
 
 test('submitForReview clears stale rejection metadata when re-entering the queue', async () => {
