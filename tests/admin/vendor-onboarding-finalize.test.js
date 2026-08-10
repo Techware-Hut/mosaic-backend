@@ -55,9 +55,16 @@ function createResponse() {
 
 function buildVendorOnboardingMock(application) {
   return {
-    findOne: () => ({
-      populate: async () => application,
-    }),
+    findOne: () => {
+      const query = {
+        populate: async () => application,
+        then(resolve, reject) {
+          return Promise.resolve(application).then(resolve, reject);
+        },
+      };
+
+      return query;
+    },
   };
 }
 
@@ -151,6 +158,73 @@ test('finalizeVerification approves when required docs verified', async () => {
   assert.ok(mailerCalls.approved);
   assert.ok(mailerCalls.badge);
   assert.equal(businessUpdates.at(-1).update.$set.isApproved, true);
+});
+
+test('corrected required checks reverify once and finalize from the corrected score', async () => {
+  const paidVerification = {
+    status: 'paid',
+    paymentIntentId: 'pi_existing_verification',
+  };
+  const application = buildApplication({
+    isMinorityOwned: true,
+    totalVerificationPoints: 5,
+    verificationPayment: paidVerification,
+    verificationChecklist: {
+      taxDocs: false,
+      businessLicense: false,
+      minorityDocs: false,
+      website: true,
+    },
+    minorityProofDocuments: [{ url: 'minority-proof.pdf', verified: false }],
+    taxDocuments: [{ url: 'tax-proof.pdf', verified: false }],
+    businessLicenseDocuments: [{ url: 'license-proof.pdf', verified: false }],
+  });
+  const { controller } = loadController({ application });
+
+  for (const verificationType of ['minority-proof', 'tax-doc', 'business-license']) {
+    const verifyRes = createResponse();
+    await controller.verifyAndAllocatePoints(
+      {
+        params: { applicationId: application.applicationId },
+        body: { verificationType, documentIndex: 0, isVerified: true },
+      },
+      verifyRes
+    );
+
+    assert.equal(verifyRes.statusCode, 200);
+    assert.equal(application.status, 'submitted');
+    assert.equal(application.verificationPayment.status, 'paid');
+    assert.strictEqual(application.verificationPayment, paidVerification);
+  }
+
+  assert.equal(application.totalVerificationPoints, 35);
+
+  const duplicateVerifyRes = createResponse();
+  await controller.verifyAndAllocatePoints(
+    {
+      params: { applicationId: application.applicationId },
+      body: { verificationType: 'minority-proof', documentIndex: 0, isVerified: true },
+    },
+    duplicateVerifyRes
+  );
+
+  assert.equal(duplicateVerifyRes.statusCode, 400);
+  assert.equal(application.totalVerificationPoints, 35);
+
+  const finalizeRes = createResponse();
+  await controller.finalizeVerification(
+    {
+      params: { applicationId: application.applicationId },
+      body: { decision: 'approve' },
+    },
+    finalizeRes
+  );
+
+  assert.equal(finalizeRes.statusCode, 200);
+  assert.equal(application.status, 'verified');
+  assert.equal(application.badge, 'Silver');
+  assert.equal(application.totalVerificationPoints, 35);
+  assert.strictEqual(application.verificationPayment, paidVerification);
 });
 
 test('finalizeVerification rejects when required docs missing', async () => {
