@@ -139,7 +139,14 @@ function buildFrontendUrl(path = '/', env = process.env) {
 }
 
 function getFrontendLogoUrl(env = process.env) {
-  return buildFrontendUrl('/_next/image?url=%2Flogo.png&w=750&q=75', env);
+  // Prefer a static public asset for mailers/PDF. The Next.js image optimizer
+  // endpoint (`/_next/image?...`) often 404s for server-side fetchers
+  // (nodemailer attachments, invoice renderers) and is unnecessary for email CID.
+  if (typeof env.MAIL_LOGO_URL === 'string' && env.MAIL_LOGO_URL.trim()) {
+    return env.MAIL_LOGO_URL.trim();
+  }
+
+  return buildFrontendUrl('/logo.png', env);
 }
 
 module.exports = {

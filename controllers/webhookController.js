@@ -5,6 +5,9 @@ const {
   decrementInventoryForPaidOrder,
   releaseInventoryReservation,
 } = require('../lib/inventory/orderInventory');
+const {
+  sendOrderPaidConfirmationIfNeeded,
+} = require('../utils/sendOrderPaidConfirmation');
 
 
 const toStripePayloadBuffer = (body) => {
@@ -93,6 +96,27 @@ const reconcileSucceededOrderPayment = async (orderId, paymentIntent) => {
     console.error(
       `Failed to decrement inventory for paid order ${updatedOrder._id}:`,
       inventoryErr
+    );
+  }
+
+  // Primary Stripe order webhook historically only flipped paid/ordered.
+  // Confirmation mail lives here so production `/api/webhooks/stripe` delivers it.
+  try {
+    const emailResult = await sendOrderPaidConfirmationIfNeeded(updatedOrder, {
+      currency: paymentIntent?.currency,
+    });
+    if (emailResult.sent) {
+      console.log(`Order paid confirmation emailed for order ${updatedOrder._id}`);
+    } else if (emailResult.failed) {
+      console.error(
+        `Order paid confirmation email failed for order ${updatedOrder._id}:`,
+        emailResult.error?.message || emailResult.error
+      );
+    }
+  } catch (emailErr) {
+    console.error(
+      `Unexpected error sending paid confirmation for order ${updatedOrder._id}:`,
+      emailErr
     );
   }
 

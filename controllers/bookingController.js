@@ -11,7 +11,7 @@ const {
   sendCustomerServiceBookingDecisionEmail,
 } = require('../utils/bookingMailer');
 const {
-  resolveVendorNotificationRecipients,
+  resolveVendorBookingNotificationRecipients,
 } = require('../utils/notificationPreferenceGate');
 
 const ALLOWED_SEAT_OPTIONS = ['upto 2', 'upto 4', 'upto 8', 'more than 10'];
@@ -51,10 +51,9 @@ const formatBookingDate = (value) => {
 };
 
 const getVendorRecipients = async (business, owner) => {
-  return resolveVendorNotificationRecipients({
+  return resolveVendorBookingNotificationRecipients({
     business,
     owner,
-    preference: 'newBookingOrOrder',
   });
 };
 
@@ -127,36 +126,53 @@ exports.createServiceBooking = async (req, res) => {
 
     try {
       const vendorRecipients = await getVendorRecipients(business, owner);
-      await sendVendorNewServiceBookingEmail({
-        to: vendorRecipients,
-        vendorName: owner?.name || business?.businessName || 'Vendor',
-        serviceTitle: service.title,
-        customerName: name,
-        customerEmail: email,
-        customerPhone: phone,
-        services: normalizedServices,
-        date: formatBookingDate(date),
-        slot,
-        bookingId: newBooking._id.toString(),
-        businessSlug: business?.slug,
-      });
+      if (!vendorRecipients.length) {
+        console.warn('Skipping vendor service booking email: no recipients resolved', {
+          bookingId: newBooking._id.toString(),
+          serviceId: String(service._id),
+        });
+      } else {
+        await sendVendorNewServiceBookingEmail({
+          to: vendorRecipients,
+          vendorName: owner?.name || business?.businessName || 'Vendor',
+          serviceTitle: service.title,
+          customerName: name,
+          customerEmail: email,
+          customerPhone: phone,
+          services: normalizedServices,
+          date: formatBookingDate(date),
+          slot,
+          bookingId: newBooking._id.toString(),
+          businessSlug: business?.slug,
+        });
+      }
     } catch (mailError) {
-      console.error('Failed to send new service booking email to vendor:', mailError);
+      console.error('Failed to send new service booking email to vendor:', mailError?.message || mailError);
     }
 
     try {
-      await sendCustomerNewServiceBookingConfirmationEmail({
-        to: email,
-        customerName: name,
-        serviceTitle: service.title,
-        vendorName: owner?.name || business?.businessName || 'Vendor',
-        date: formatBookingDate(date),
-        slot,
-        services: normalizedServices,
-        bookingId: newBooking._id.toString(),
-      });
+      const customerEmail = String(email || '').trim();
+      if (!customerEmail) {
+        console.warn('Skipping customer service booking confirmation: missing email', {
+          bookingId: newBooking._id.toString(),
+        });
+      } else {
+        await sendCustomerNewServiceBookingConfirmationEmail({
+          to: customerEmail,
+          customerName: name,
+          serviceTitle: service.title,
+          vendorName: owner?.name || business?.businessName || 'Vendor',
+          date: formatBookingDate(date),
+          slot,
+          services: normalizedServices,
+          bookingId: newBooking._id.toString(),
+        });
+      }
     } catch (mailError) {
-      console.error('Failed to send service booking confirmation email to customer:', mailError);
+      console.error(
+        'Failed to send service booking confirmation email to customer:',
+        mailError?.message || mailError
+      );
     }
 
     res.status(201).json({ success: true, booking: newBooking });
@@ -227,21 +243,28 @@ exports.createFoodBooking = async (req, res) => {
 
     try {
       const vendorRecipients = await getVendorRecipients(business, owner);
-      await sendVendorNewFoodBookingEmail({
-        to: vendorRecipients,
-        vendorName: owner?.name || business?.businessName || 'Vendor',
-        foodTitle: food.title,
-        customerName: name,
-        customerEmail: email,
-        customerPhone: phone,
-        date: formatBookingDate(date),
-        slot,
-        seats: normalizedSeats,
-        bookingId: newBooking._id.toString(),
-        businessSlug: business?.slug,
-      });
+      if (!vendorRecipients.length) {
+        console.warn('Skipping vendor food booking email: no recipients resolved', {
+          bookingId: newBooking._id.toString(),
+          foodId: String(food._id),
+        });
+      } else {
+        await sendVendorNewFoodBookingEmail({
+          to: vendorRecipients,
+          vendorName: owner?.name || business?.businessName || 'Vendor',
+          foodTitle: food.title,
+          customerName: name,
+          customerEmail: email,
+          customerPhone: phone,
+          date: formatBookingDate(date),
+          slot,
+          seats: normalizedSeats,
+          bookingId: newBooking._id.toString(),
+          businessSlug: business?.slug,
+        });
+      }
     } catch (mailError) {
-      console.error('Failed to send new food booking email to vendor:', mailError);
+      console.error('Failed to send new food booking email to vendor:', mailError?.message || mailError);
     }
 
     res.status(201).json({ success: true, booking: newBooking });

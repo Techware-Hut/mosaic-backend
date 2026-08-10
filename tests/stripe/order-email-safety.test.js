@@ -131,6 +131,15 @@ function loadPostPaymentWebhook({
         },
       };
     }
+    if (request.endsWith('utils/sendOrderPaidConfirmation')) {
+      return {
+        sendOrderPaidConfirmationIfNeeded: async () => ({
+          sent: false,
+          skipped: true,
+          reason: 'mocked_unused_on_direct_post_payment_path',
+        }),
+      };
+    }
     if (request.endsWith('lib/inventory/orderInventory')) {
       return {
         decrementInventoryForPaidOrder: async () => ({
@@ -268,4 +277,22 @@ test('initiateOrder no longer sends pre-payment customer or vendor emails', () =
 
   assert.ok(!source.includes('sendCustomerOrderPlacedEmail'));
   assert.ok(!source.includes('sendVendorNewOrderEmail'));
+});
+
+test('primary order webhook controller wires paid confirmation helper', () => {
+  const webhookSource = fs.readFileSync(
+    path.resolve(__dirname, '../../controllers/webhookController.js'),
+    'utf8'
+  );
+  assert.ok(webhookSource.includes('sendOrderPaidConfirmationIfNeeded'));
+  assert.ok(webhookSource.includes("payment_intent.succeeded"));
+});
+
+test('retrieveIntent paid reconcile wires paid confirmation helper', () => {
+  const paymentSource = fs.readFileSync(
+    path.resolve(__dirname, '../../controllers/stripePaymentController.js'),
+    'utf8'
+  );
+  assert.ok(paymentSource.includes('sendOrderPaidConfirmationIfNeeded'));
+  assert.ok(paymentSource.includes('reconcileSucceededPaymentIntentOrders'));
 });
