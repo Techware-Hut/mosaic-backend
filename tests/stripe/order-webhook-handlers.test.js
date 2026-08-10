@@ -36,6 +36,7 @@ function createStripeModule(stripeMock) {
 
 function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
   const updates = [];
+  const emailCalls = [];
   const defaultOrder = orderDoc || {
     _id: ORDER_ID,
     paymentStatus: 'pending',
@@ -49,6 +50,7 @@ function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
         data: {
           object: {
             id: PAYMENT_ID,
+            currency: 'usd',
             metadata: { orderId: ORDER_ID },
           },
         },
@@ -89,6 +91,14 @@ function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
         }),
       };
     }
+    if (request.endsWith('utils/sendOrderPaidConfirmation')) {
+      return {
+        sendOrderPaidConfirmationIfNeeded: async (...args) => {
+          emailCalls.push(args);
+          return { sent: true, skipped: false };
+        },
+      };
+    }
     return originalLoad(request, parent, isMain);
   };
 
@@ -96,7 +106,11 @@ function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
   const { handleStripeWebhook } = require(webhookControllerPath);
   Module._load = originalLoad;
 
-  return { handleStripeWebhook, getUpdates: () => updates };
+  return {
+    handleStripeWebhook,
+    getUpdates: () => updates,
+    getEmailCalls: () => emailCalls,
+  };
 }
 
 function loadFailedPaymentWebhook() {
@@ -151,6 +165,15 @@ function loadFailedPaymentWebhook() {
           releaseCalls += 1;
           return { restored: true, lines: [] };
         },
+      };
+    }
+    if (request.endsWith('utils/sendOrderPaidConfirmation')) {
+      return {
+        sendOrderPaidConfirmationIfNeeded: async () => ({
+          sent: false,
+          skipped: true,
+          reason: 'not_invoked_on_failed_path_expected',
+        }),
       };
     }
     return originalLoad(request, parent, isMain);
@@ -240,6 +263,15 @@ function loadPostPaymentWebhook({ orders = [], charge = {} } = {}) {
         sendOrderPaidEmails: async () => {
           emailSendCount += 1;
         },
+      };
+    }
+    if (request.endsWith('utils/sendOrderPaidConfirmation')) {
+      return {
+        sendOrderPaidConfirmationIfNeeded: async () => ({
+          sent: false,
+          skipped: true,
+          reason: 'mocked_unused_on_direct_post_payment_path',
+        }),
       };
     }
     if (request.endsWith('lib/inventory/orderInventory')) {
@@ -388,6 +420,15 @@ function loadOrderWebhookSequence({
         },
       };
     }
+    if (request.endsWith('utils/sendOrderPaidConfirmation')) {
+      return {
+        sendOrderPaidConfirmationIfNeeded: async () => ({
+          sent: false,
+          skipped: true,
+          reason: 'mocked',
+        }),
+      };
+    }
     return originalLoad(request, parent, isMain);
   };
 
@@ -480,6 +521,15 @@ function loadPostPaymentWebhookSequence({
     if (request.endsWith('utils/OrderMail')) {
       return { sendOrderPaidEmails: async () => {} };
     }
+    if (request.endsWith('utils/sendOrderPaidConfirmation')) {
+      return {
+        sendOrderPaidConfirmationIfNeeded: async () => ({
+          sent: false,
+          skipped: true,
+          reason: 'already_sent',
+        }),
+      };
+    }
     if (request.endsWith('lib/inventory/orderInventory')) {
       return {
         decrementInventoryForPaidOrder: async () => {
@@ -525,7 +575,7 @@ function loadPostPaymentWebhookSequence({
 
 test('order status webhook marks order paid and ordered on payment_intent.succeeded', async () => {
   process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
-  const { handleStripeWebhook, getUpdates } = loadOrderStatusWebhook();
+  const { handleStripeWebhook, getUpdates, getEmailCalls } = loadOrderStatusWebhook();
   const res = mockResponse();
 
   await handleStripeWebhook(
@@ -540,6 +590,9 @@ test('order status webhook marks order paid and ordered on payment_intent.succee
   assert.equal(getUpdates().length, 1);
   assert.equal(getUpdates()[0].update.paymentStatus, 'paid');
   assert.equal(getUpdates()[0].update.status, 'ordered');
+  assert.equal(getEmailCalls().length, 1);
+  assert.equal(String(getEmailCalls()[0][0]._id || getEmailCalls()[0][0]), ORDER_ID);
+  assert.equal(getEmailCalls()[0][1]?.currency, 'usd');
 });
 
 test('order status webhook duplicate succeed is idempotent', async () => {

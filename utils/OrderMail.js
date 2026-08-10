@@ -8,6 +8,10 @@ const {
   formatMosaicFromHeader,
 } = require("./smtpTransport");
 const { filterOrderPaidVendorEmails } = require("./notificationPreferenceGate");
+const {
+  resolvePlatformLogoAttachment,
+  withOptionalLogoAttachment,
+} = require("./emailLogoAttachment");
 
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || process.env.MAIL_USER;
 const LOGO_URL = getFrontendLogoUrl();
@@ -273,14 +277,14 @@ async function buildInvoicePdf({ order }) {
   return done;
 }
 
-function baseLayout({ heading, introHtml, ctaHref, ctaText }) {
+function baseLayout({ heading, introHtml, ctaHref, ctaText, logoSrc = "cid:platformLogo" }) {
   return `
   <div style="margin:0;padding:0;background:#f6f8fa;">
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f6f8fa;">
       <tr><td align="center" style="padding:24px;">
         <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:640px;background:#ffffff;border-radius:12px;overflow:hidden;">
           <tr><td align="center" style="padding:24px 24px 8px;">
-            <img src="cid:platformLogo" alt="Mosaic Biz Hub" width="120" style="display:block;margin:0 auto 8px;" />
+            <img src="${logoSrc}" alt="Mosaic Biz Hub" width="120" style="display:block;margin:0 auto 8px;" />
             <h1 style="font-family:Arial,Helvetica,sans-serif;font-size:22px;line-height:28px;margin:12px 0 0;color:#111827;">${heading}</h1>
             ${introHtml || ""}
             ${ctaHref ? `<div style="height:8px;"></div><a href="${ctaHref}" style="display:inline-block;background:#0d6efd;color:#fff;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;padding:10px 16px;border-radius:8px;">${escapeHtml(ctaText || "Open Dashboard")}</a>` : ""}
@@ -345,10 +349,21 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
   const pdf = await renderInvoicePdfBufferForOrder(order);
   const invoiceFileName = `invoice-${order.groupOrderId || order._id}.pdf`;
 
-  const attachments = [
-    { filename: "logo.png", path: LOGO_URL, cid: "platformLogo" },
-    { filename: invoiceFileName, content: pdf, contentType: "application/pdf" },
-  ];
+  // Never attach logo via remote `path:` — nodemailer throws "Invalid status code 404"
+  // when the frontend/_next image URL is unavailable (common in local QA).
+  const { attachment: logoAttachment, logoSrcForHtml } =
+    await resolvePlatformLogoAttachment();
+
+  const attachments = withOptionalLogoAttachment(
+    [
+      {
+        filename: invoiceFileName,
+        content: pdf,
+        contentType: "application/pdf",
+      },
+    ],
+    logoAttachment
+  );
 
   // CUSTOMER EMAIL
   if (customerEmails.length) {
@@ -357,6 +372,7 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
       introHtml: customerIntro({ order, businessName }),
       ctaHref: customerOrdersUrl,
       ctaText: "View Your Order",
+      logoSrc: logoSrcForHtml,
     });
     const orderNo = order.groupOrderId || order._id?.toString();
     const customerText = [
@@ -389,6 +405,7 @@ exports.sendOrderPaidEmails = async ({ order, currency, customerEmails = [], ven
       introHtml: vendorIntro({ order, businessName }),
       ctaHref: partnerOrdersUrl,
       ctaText: "Open Partners Dashboard",
+      logoSrc: logoSrcForHtml,
     });
     const orderNo = order.groupOrderId || order._id?.toString();
     const vendorText = [

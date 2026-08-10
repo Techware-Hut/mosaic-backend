@@ -74,6 +74,22 @@ function loadOrderMailerWithMocks({ createdConfigs, sentMessages }) {
           [...new Set((vendorEmails || []).map((e) => String(e || '').trim()).filter(Boolean))],
       };
     }
+    if (request === './emailLogoAttachment') {
+      return {
+        resolvePlatformLogoAttachment: async () => ({
+          attachment: {
+            filename: 'logo.png',
+            content: Buffer.from('logo'),
+            cid: 'platformLogo',
+            contentType: 'image/png',
+          },
+          logoSrcForHtml: 'cid:platformLogo',
+          logoUrl: 'https://mosaicbizhub.com/logo.png',
+        }),
+        withOptionalLogoAttachment: (attachments = [], logoAttachment) =>
+          logoAttachment ? [logoAttachment, ...attachments] : attachments,
+      };
+    }
     return originalLoad.call(this, request, parent, isMain);
   };
 
