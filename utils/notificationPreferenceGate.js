@@ -70,8 +70,48 @@ async function filterOrderPaidVendorEmails(order, vendorEmails = []) {
   });
 }
 
+/**
+ * Booking requests are actionable notifications. Prefer preference-gated recipients,
+ * but never drop the vendor alert entirely when a business/owner email exists.
+ */
+async function resolveVendorBookingNotificationRecipients({ business, owner }) {
+  const preferred = await resolveVendorNotificationRecipients({
+    business,
+    owner,
+    preference: 'newBookingOrOrder',
+  });
+
+  if (preferred.length) {
+    return preferred;
+  }
+
+  const fallback = [
+    ...new Set(
+      [business?.email, owner?.email]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    ),
+  ];
+
+  if (fallback.length) {
+    console.warn('Vendor booking recipients empty after preference gate; using business/owner fallback', {
+      businessId: business?._id ? String(business._id) : null,
+      ownerId: owner?._id ? String(owner._id) : owner?.id || null,
+      fallbackCount: fallback.length,
+    });
+  } else {
+    console.warn('Vendor booking recipients unavailable: no business or owner email on file', {
+      businessId: business?._id ? String(business._id) : null,
+      ownerId: owner?._id ? String(owner._id) : owner?.id || null,
+    });
+  }
+
+  return fallback;
+}
+
 module.exports = {
   shouldSendVendorNotification,
   resolveVendorNotificationRecipients,
+  resolveVendorBookingNotificationRecipients,
   filterOrderPaidVendorEmails,
 };
