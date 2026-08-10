@@ -144,10 +144,17 @@ test('buildFrontendUrl keeps non-legacy preview origins', () => {
   );
 });
 
-test('getFrontendLogoUrl points at the app frontend asset host', () => {
+test('getFrontendLogoUrl points at the static public logo asset', () => {
   assert.equal(
     getFrontendLogoUrl({ FRONTEND_URL: 'https://mosaicbizhub.com' }),
-    'https://mosaicbizhub.com/_next/image?url=%2Flogo.png&w=750&q=75'
+    'https://mosaicbizhub.com/logo.png'
+  );
+  assert.equal(
+    getFrontendLogoUrl({
+      FRONTEND_URL: 'https://mosaicbizhub.com',
+      MAIL_LOGO_URL: 'https://cdn.example.com/brand.png',
+    }),
+    'https://cdn.example.com/brand.png'
   );
 });
 

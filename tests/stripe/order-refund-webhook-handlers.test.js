@@ -57,6 +57,14 @@ function loadChargeRefundedWebhook({ orderIdInMetadata } = {}) {
     if (request.endsWith('models/Subscription')) {
       return {};
     }
+    if (request.endsWith('utils/sendOrderPaidConfirmation')) {
+      return {
+        sendOrderPaidConfirmationIfNeeded: async () => ({
+          sent: false,
+          skipped: true,
+        }),
+      };
+    }
     return originalLoad(request, parent, isMain);
   };
 

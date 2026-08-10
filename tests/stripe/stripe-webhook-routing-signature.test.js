@@ -18,6 +18,9 @@ const WEBHOOK_ENDPOINTS = [
     modelMocks: {
       '../models/Order': {},
       '../models/Subscription': {},
+      '../utils/sendOrderPaidConfirmation': {
+        sendOrderPaidConfirmationIfNeeded: async () => ({ sent: false, skipped: true }),
+      },
     },
     expectsRawBodyCheck: true,
   },
@@ -45,6 +48,9 @@ const WEBHOOK_ENDPOINTS = [
     modelMocks: {
       '../models/Order': {},
       '../models/Subscription': {},
+      '../utils/sendOrderPaidConfirmation': {
+        sendOrderPaidConfirmationIfNeeded: async () => ({ sent: false, skipped: true }),
+      },
     },
   },
   {
@@ -78,6 +84,9 @@ const WEBHOOK_ENDPOINTS = [
     modelMocks: {
       '../models/Order': { find: async () => [] },
       '../utils/OrderMail': { sendOrderPaidEmails: async () => {} },
+      '../utils/sendOrderPaidConfirmation': {
+        sendOrderPaidConfirmationIfNeeded: async () => ({ sent: false, skipped: true }),
+      },
     },
   },
 ];
