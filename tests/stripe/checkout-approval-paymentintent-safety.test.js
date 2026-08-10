@@ -91,6 +91,15 @@ function loadRetrieveIntent({
           inventoryCalls += 1;
           return { decremented: true, lines: [] };
         },
+        releaseInventoryReservation: async () => ({ restored: true, lines: [] }),
+      };
+    }
+    if (request.endsWith('utils/sendOrderPaidConfirmation')) {
+      return {
+        sendOrderPaidConfirmationIfNeeded: async () => ({
+          sent: true,
+          skipped: false,
+        }),
       };
     }
     return originalLoad(request, parent, isMain);

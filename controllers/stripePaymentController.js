@@ -13,6 +13,9 @@ const {
   decrementInventoryForPaidOrder,
   releaseInventoryReservation,
 } = require("../lib/inventory/orderInventory");
+const {
+  sendOrderPaidConfirmationIfNeeded,
+} = require("../utils/sendOrderPaidConfirmation");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 async function cancelRetryablePaymentIntent(paymentIntent) {
@@ -94,6 +97,19 @@ async function reconcileSucceededPaymentIntentOrders(orders, paymentIntent) {
       console.error(
         `Failed to decrement inventory via retrieveIntent for order ${order._id}:`,
         inventoryErr
+      );
+    }
+
+    // Local/test Mode often never receives Stripe webhook delivery. Mirror the
+    // post-payment confirmation send when retrieveIntent reconciles success.
+    try {
+      await sendOrderPaidConfirmationIfNeeded(order, {
+        currency: paymentIntent.currency,
+      });
+    } catch (emailErr) {
+      console.error(
+        `Failed to send paid confirmation via retrieveIntent for order ${order._id}:`,
+        emailErr
       );
     }
   }
