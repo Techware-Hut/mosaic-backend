@@ -65,7 +65,6 @@ Node 18 reached end-of-life for active LTS — **do not downgrade CI**.
 |---------|---------|-------|
 | `stripe` | 18.x | Webhook + Connect regression tests required |
 | `mongoose` | 9.x (future) | Schema/index review |
-| `puppeteer` | 24.x | Heavy; only if PDF generation path changes |
 
 **Rule:** No blind major upgrades. Run `npm test` + `npm run test:integration` + smoke scripts after any dependency PR.
 

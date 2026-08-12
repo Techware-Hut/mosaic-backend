@@ -218,6 +218,32 @@ test('getUserOrders applies optional status filter while keeping customer scope'
   ]);
 });
 
+test('getUserOrders does not expose paid-email claims or provider evidence', async () => {
+  const order = makeOrder({
+    lifecycleEmailLog: [{ event: 'order_paid_confirmation' }],
+    paidConfirmationEmailSentAt: new Date('2026-08-12T12:00:00.000Z'),
+    paidOrderEmailDelivery: {
+      version: 1,
+      customer: {
+        status: 'processing',
+        claimToken: 'private-claim-token',
+        provider: 'smtp',
+        messageId: 'private-provider-id',
+      },
+    },
+  });
+  const { controller } = loadOrderController({ orders: [order] });
+  const res = mockResponse();
+
+  await controller.getUserOrders({ user: { _id: 'customer-1' }, query: {} }, res);
+
+  assert.equal(res.body.orders.length, 1);
+  assert.equal(res.body.orders[0].lifecycleEmailLog, undefined);
+  assert.equal(res.body.orders[0].paidOrderEmailDelivery, undefined);
+  assert.equal(res.body.orders[0].paidConfirmationEmailSentAt, undefined);
+  assert.doesNotMatch(JSON.stringify(res.body), /private-claim-token|private-provider-id/);
+});
+
 test('cancelOrderByUser does not restore accepted-order stock when refund fails', async () => {
   const order = makeOrder({
     status: 'accepted',

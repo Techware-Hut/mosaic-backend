@@ -4,10 +4,26 @@ const Subscription = require('../models/Subscription'); // ← ADD THIS LINE
 const {
   decrementInventoryForPaidOrder,
   releaseInventoryReservation,
+  restoreInventoryForRefundedOrder,
 } = require('../lib/inventory/orderInventory');
 const {
+  publicPaidOrderEmailDelivery,
   sendOrderPaidConfirmationIfNeeded,
 } = require('../utils/sendOrderPaidConfirmation');
+const {
+  buildSucceededPaymentReconciliationFilter,
+  buildSucceededPaymentReconciliationPipeline,
+} = require('../utils/orderPaidEmailEligibility');
+
+const toPublicEmailDelivery = (result) =>
+  typeof publicPaidOrderEmailDelivery === 'function'
+    ? publicPaidOrderEmailDelivery(result)
+    : {
+        emailSent: Boolean(result?.emailSent),
+        emailSkipped: Boolean(result?.emailSkipped),
+        emailFailed: Boolean(result?.emailFailed),
+        ...(result?.emailWarning ? { emailWarning: result.emailWarning } : {}),
+      };
 
 
 const toStripePayloadBuffer = (body) => {
@@ -58,18 +74,19 @@ const cancelRetryablePaymentIntent = async (paymentIntent) => {
 };
 
 const reconcileSucceededOrderPayment = async (orderId, paymentIntent) => {
-  const updatedOrder = await Order.findByIdAndUpdate(
-    orderId,
-    {
-      paymentStatus: 'paid',
-      status: 'ordered',
-    },
+  if (!orderId || !paymentIntent?.id) {
+    console.warn('Order webhook succeeded event is missing correlation metadata');
+    return { reconciled: false };
+  }
+  const updatedOrder = await Order.findOneAndUpdate(
+    buildSucceededPaymentReconciliationFilter(orderId, paymentIntent.id),
+    buildSucceededPaymentReconciliationPipeline(),
     { new: true }
   );
 
   if (!updatedOrder) {
     console.warn(
-      `Order webhook could not find order ${orderId} for payment intent ${paymentIntent.id}.`
+      `Order webhook could not correlate order ${orderId} with the succeeded payment intent.`
     );
     return { reconciled: false };
   }
@@ -101,33 +118,47 @@ const reconcileSucceededOrderPayment = async (orderId, paymentIntent) => {
 
   // Primary Stripe order webhook historically only flipped paid/ordered.
   // Confirmation mail lives here so production `/api/webhooks/stripe` delivers it.
+  let emailResult;
   try {
-    const emailResult = await sendOrderPaidConfirmationIfNeeded(updatedOrder, {
+    emailResult = await sendOrderPaidConfirmationIfNeeded(updatedOrder, {
       currency: paymentIntent?.currency,
     });
     if (emailResult.sent) {
       console.log(`Order paid confirmation emailed for order ${updatedOrder._id}`);
-    } else if (emailResult.failed) {
-      console.error(
-        `Order paid confirmation email failed for order ${updatedOrder._id}:`,
-        emailResult.error?.message || emailResult.error
-      );
+    } else if (emailResult.emailWarning) {
+      console.error('Order paid confirmation email delivery incomplete', {
+        orderId: String(updatedOrder._id),
+      });
     }
   } catch (emailErr) {
-    console.error(
-      `Unexpected error sending paid confirmation for order ${updatedOrder._id}:`,
-      emailErr
-    );
+    emailResult = {
+      emailSent: false,
+      emailSkipped: false,
+      emailFailed: true,
+      emailWarning: 'paid_order_email_delivery_incomplete',
+    };
+    console.error('Unexpected paid-confirmation orchestration failure', {
+      orderId: String(updatedOrder._id),
+    });
   }
 
-  return { reconciled: true, order: updatedOrder };
+  return {
+    reconciled: true,
+    order: updatedOrder,
+    emailDelivery: toPublicEmailDelivery(emailResult),
+  };
 };
 
 const failUnpaidOrderAndReleaseReservation = async (orderId, paymentIntent) => {
+  if (!orderId || !paymentIntent?.id) {
+    console.warn('Order payment failure event is missing correlation metadata');
+    return { ignored: true };
+  }
   const failedOrder = await Order.findOneAndUpdate(
     {
       _id: orderId,
-      paymentStatus: { $ne: 'paid' },
+      paymentId: paymentIntent.id,
+      paymentStatus: { $nin: ['paid', 'refunded'] },
       inventoryDecrementedAt: null,
     },
     {
@@ -200,7 +231,7 @@ const handleStripeWebhook = async (req, res) => {
   switch (event.type) {
     case 'payment_intent.succeeded':
       const paymentIntent = event.data.object;
-      const orderId = paymentIntent.metadata.orderId;
+      const orderId = paymentIntent.metadata?.orderId;
       console.log('Order payment succeeded event', {
         paymentIntentId: paymentIntent.id,
         orderId,
@@ -218,7 +249,7 @@ const handleStripeWebhook = async (req, res) => {
 
     case 'payment_intent.payment_failed':
       const failedPaymentIntent = event.data.object;
-      const failedOrderId = failedPaymentIntent.metadata.orderId;
+      const failedOrderId = failedPaymentIntent.metadata?.orderId;
       console.log('Order payment failed event', {
         paymentIntentId: failedPaymentIntent.id,
         orderId: failedOrderId,
@@ -258,7 +289,7 @@ const handleStripeWebhook = async (req, res) => {
 
     case 'payment_intent.canceled':
       const canceledPaymentIntent = event.data.object;
-      const canceledOrderId = canceledPaymentIntent.metadata.orderId;
+      const canceledOrderId = canceledPaymentIntent.metadata?.orderId;
       try {
         await failUnpaidOrderAndReleaseReservation(
           canceledOrderId,
@@ -275,7 +306,7 @@ const handleStripeWebhook = async (req, res) => {
     // Handle additional events, for example, 'payment_intent.requires_action'
     case 'payment_intent.requires_action':
       const requiresActionPaymentIntent = event.data.object;
-      const actionOrderId = requiresActionPaymentIntent.metadata.orderId;
+      const actionOrderId = requiresActionPaymentIntent.metadata?.orderId;
 
       console.log(`Payment intent requires further action for order ${actionOrderId}.`);
       res.status(200).send({ received: true });
@@ -284,7 +315,17 @@ const handleStripeWebhook = async (req, res) => {
     // Handle charge refunded event
     case 'charge.refunded':
       const chargeRefunded = event.data.object;
-      const refundedOrderId = chargeRefunded.metadata.orderId;
+      const refundedOrderId = chargeRefunded.metadata?.orderId;
+      const refundedPaymentId = typeof chargeRefunded.payment_intent === 'string'
+        ? chargeRefunded.payment_intent
+        : chargeRefunded.payment_intent?.id;
+      const refundedAmount = Number(chargeRefunded.amount_refunded);
+      const chargeAmount = Number(chargeRefunded.amount);
+      const isFullRefund = chargeRefunded.refunded === true &&
+        Number.isFinite(refundedAmount) &&
+        Number.isFinite(chargeAmount) &&
+        chargeAmount > 0 &&
+        refundedAmount >= chargeAmount;
       console.log('Order refund event', {
         chargeId: chargeRefunded.id,
         orderId: refundedOrderId,
@@ -292,18 +333,40 @@ const handleStripeWebhook = async (req, res) => {
 
       // Update order status to refunded
       try {
-        const refundedOrder = await Order.findByIdAndUpdate(refundedOrderId, { 
-          paymentStatus: 'refunded', 
-          status: 'refunded' 
-        }, { new: true });
+        if (!refundedOrderId || !refundedPaymentId) {
+          console.warn('Order refund event is missing authoritative correlation fields');
+          return res.status(200).send({ received: true });
+        }
+        if (!isFullRefund) {
+          console.warn('Partial charge refund does not close the whole order', {
+            orderId: refundedOrderId,
+            chargeId: chargeRefunded.id,
+          });
+          return res.status(200).send({ received: true });
+        }
+        const refundedOrder = await Order.findOneAndUpdate(
+          {
+            _id: refundedOrderId,
+            paymentId: refundedPaymentId,
+          },
+          {
+            $set: {
+              paymentStatus: 'refunded',
+              status: 'refunded',
+            },
+          },
+          { new: true }
+        );
 
         if (!refundedOrder) {
           console.warn(`Order webhook could not find refunded order ${refundedOrderId} for charge ${chargeRefunded.id}.`);
         } else {
+          const inventoryResult = await restoreInventoryForRefundedOrder(refundedOrder);
           console.log('Order marked refunded from webhook', {
             orderId: refundedOrder._id.toString(),
             paymentStatus: refundedOrder.paymentStatus,
             status: refundedOrder.status,
+            inventoryRestored: inventoryResult.restored,
           });
         }
       } catch (error) {

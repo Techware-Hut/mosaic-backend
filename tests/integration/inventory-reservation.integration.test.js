@@ -54,6 +54,8 @@ async function insertOrderItems(items) {
   await Order.collection.insertOne({
     _id,
     items,
+    paymentStatus: 'paid',
+    status: 'ordered',
     inventoryReservedAt: null,
     inventoryDecrementedAt: null,
     inventoryRestoredAt: null,
@@ -183,6 +185,81 @@ test('real Mongo concurrent paid-cancellation restore is idempotent', async () =
 
   assert.equal(results.filter((result) => result.restored).length, 1);
   assert.equal((await ProductVariant.findById(variantId)).stock, 1);
+});
+
+test('real Mongo stale paid copy cannot finalize after authoritative refund and refund release is idempotent', async () => {
+  const variantId = await insertVariant(1, 'INV-REFUND-RESERVED');
+  const order = await insertOrder(variantId, 1);
+
+  assert.equal((await inventory.reserveInventoryForOrder(order)).reserved, true);
+  const stalePaidCopy = await Order.findById(order._id);
+  await Order.updateOne(
+    { _id: order._id },
+    { $set: { paymentStatus: 'refunded', status: 'refunded' } }
+  );
+
+  const staleSuccess = await inventory.decrementInventoryForPaidOrder(stalePaidCopy);
+  const refundedOrder = await Order.findById(order._id);
+  const restored = await inventory.restoreInventoryForRefundedOrder(refundedOrder);
+  const replay = await inventory.restoreInventoryForRefundedOrder(refundedOrder);
+  const storedOrder = await Order.findById(order._id).lean();
+
+  assert.equal(staleSuccess.decremented, false);
+  assert.equal(restored.restored, true);
+  assert.equal(restored.reason, 'reservation_released');
+  assert.equal(replay.restored, false);
+  assert.equal((await ProductVariant.findById(variantId)).stock, 1);
+  assert.equal(storedOrder.paymentStatus, 'refunded');
+  assert.equal(storedOrder.status, 'refunded');
+  assert.equal(storedOrder.inventoryReservedAt, undefined);
+  assert.equal(storedOrder.inventoryDecrementedAt, null);
+  assert.ok(storedOrder.inventoryRestoredAt);
+  assert.equal(storedOrder.paidConfirmationEmailSentAt, undefined);
+  assert.equal(storedOrder.paidOrderEmailDelivery, undefined);
+});
+
+test('real Mongo success/refund interleaving converges to refunded order and original stock exactly once', async () => {
+  const variantId = await insertVariant(1, 'INV-SUCCESS-REFUND-RACE');
+  const order = await insertOrder(variantId, 1);
+
+  assert.equal((await inventory.reserveInventoryForOrder(order)).reserved, true);
+  assert.equal((await ProductVariant.findById(variantId)).stock, 0);
+  const stalePaidCopy = await Order.findById(order._id);
+
+  const [successResult, refundResult] = await Promise.all([
+    inventory.decrementInventoryForPaidOrder(stalePaidCopy),
+    (async () => {
+      await Order.updateOne(
+        { _id: order._id },
+        { $set: { paymentStatus: 'refunded', status: 'refunded' } }
+      );
+      const authoritativeRefund = await Order.findById(order._id);
+      return inventory.restoreInventoryForRefundedOrder(authoritativeRefund);
+    })(),
+  ]);
+
+  const authoritativeRefund = await Order.findById(order._id);
+  const replay = await inventory.restoreInventoryForRefundedOrder(authoritativeRefund);
+  const storedOrder = await Order.findById(order._id).lean();
+
+  assert.ok(
+    successResult.reason === 'reservation_finalized' ||
+      successResult.reason === 'already_decremented'
+  );
+  assert.equal(refundResult.restored, true);
+  assert.ok(
+    refundResult.reason === 'reservation_released' ||
+      refundResult.reason === 'paid_inventory_restored'
+  );
+  assert.equal(replay.restored, false);
+  assert.equal((await ProductVariant.findById(variantId)).stock, 1);
+  assert.equal(storedOrder.paymentStatus, 'refunded');
+  assert.equal(storedOrder.status, 'refunded');
+  assert.ok(storedOrder.inventoryRestoredAt);
+  assert.equal(storedOrder.inventoryReservedAt, undefined);
+  assert.equal(storedOrder.inventoryDecrementedAt, null);
+  assert.equal(storedOrder.paidConfirmationEmailSentAt, undefined);
+  assert.equal(storedOrder.paidOrderEmailDelivery, undefined);
 });
 
 test('guest cart variant mini exposes authoritative top-level stock without sizes', async () => {

@@ -131,6 +131,33 @@ test('getVendorOrders applies optional status and businessId filters', async () 
   assert.equal(filter.businessId, 'biz-1');
 });
 
+test('getVendorOrders does not expose paid-email claims or provider evidence', async () => {
+  const order = {
+    _id: 'order-1',
+    lifecycleEmailLog: [{ event: 'order_paid_confirmation' }],
+    paidConfirmationEmailSentAt: new Date('2026-08-12T12:00:00.000Z'),
+    paidOrderEmailDelivery: {
+      version: 1,
+      vendor: {
+        status: 'processing',
+        claimToken: 'private-vendor-token',
+        provider: 'smtp',
+        messageId: 'private-vendor-provider-id',
+      },
+    },
+  };
+  const { controller } = loadOrderController({ orders: [order] });
+  const res = mockResponse();
+
+  await controller.getVendorOrders({ user: { _id: vendorId }, query: {} }, res);
+
+  assert.equal(res.body.orders.length, 1);
+  assert.equal(res.body.orders[0].lifecycleEmailLog, undefined);
+  assert.equal(res.body.orders[0].paidOrderEmailDelivery, undefined);
+  assert.equal(res.body.orders[0].paidConfirmationEmailSentAt, undefined);
+  assert.doesNotMatch(JSON.stringify(res.body), /private-vendor-token|private-vendor-provider-id/);
+});
+
 test('acceptOrder returns 404 when order belongs to another vendor', async () => {
   const { controller } = loadOrderController({ order: null });
   const res = mockResponse();
