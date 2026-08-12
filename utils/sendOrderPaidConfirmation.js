@@ -105,8 +105,7 @@ function publicPaidOrderEmailDelivery(result) {
   };
 }
 
-async function claimRole(orderId, role) {
-  const token = crypto.randomUUID();
+async function claimRole(orderId, role, token = crypto.randomUUID()) {
   const statusPath = rolePath(role, "status");
   const update = {
     $set: {
@@ -313,10 +312,55 @@ async function sendOrderPaidConfirmationIfNeeded(orderOrId, { currency } = {}) {
   }
 
   const claims = {};
+  const claimAttempts = {};
+  let claimFailed = false;
   for (const role of ["customer", "vendor"]) {
     if (!NON_CLAIMABLE_STATUSES.has(deliveryFor(order, role).status)) {
-      claims[role] = await claimRole(order._id, role);
+      const token = crypto.randomUUID();
+      claimAttempts[role] = token;
+      try {
+        claims[role] = await claimRole(order._id, role, token);
+      } catch {
+        claimFailed = true;
+        break;
+      }
     }
+  }
+
+  if (claimFailed) {
+    const result = safeFailure("email_delivery_claim_failed");
+    let failureOrder = order;
+    for (const [role, token] of Object.entries(claimAttempts)) {
+      try {
+        const finalized = await finalizeRole(order._id, role, token, result);
+        if (finalized) {
+          failureOrder = finalized;
+          await logRoleResult(finalized, role, result);
+        }
+      } catch {
+        console.error("Paid-order email claim cleanup failed", {
+          orderId: String(order._id),
+          recipientRole: role,
+        });
+      }
+    }
+
+    try {
+      order = await loadOrderForPaidConfirmation(order._id);
+    } catch {
+      order = failureOrder;
+    }
+    const summary = {
+      ...summarize(order, { failed: true }),
+      emailFailed: true,
+      emailWarning: "paid_order_email_delivery_incomplete",
+    };
+    console.error("Paid-order email delivery claim failed", {
+      orderId: String(order._id),
+      customerStatus: summary.customer?.status,
+      vendorStatus: summary.vendor?.status,
+    });
+    return { ...summary, order };
   }
 
   if (!claims.customer && !claims.vendor) {

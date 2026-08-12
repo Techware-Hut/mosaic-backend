@@ -124,6 +124,8 @@ function loadHelper({
   mailPlan = [],
   preferencePlan = [],
   staleFinalizeRole = null,
+  throwOnClaimRole = null,
+  throwAfterClaimRole = null,
   closeBeforeFirstClaim = false,
   orderExists = true,
 } = {}) {
@@ -132,6 +134,7 @@ function loadHelper({
   const lifecycleEntries = [];
   let staleInjected = false;
   let closeInjected = false;
+  let claimThrowInjected = false;
 
   const order = {
     _id: "507f1f77bcf86cd799439099",
@@ -167,6 +170,27 @@ function loadHelper({
     },
     async findOneAndUpdate(query, update) {
       updateCalls.push({ query, update });
+
+      const claimRole = ["customer", "vendor"].find((role) =>
+        query.$or?.some((branch) =>
+          Object.hasOwn(branch, `paidOrderEmailDelivery.${role}.status`)
+        )
+      );
+      if (
+        throwOnClaimRole === claimRole &&
+        !claimThrowInjected
+      ) {
+        claimThrowInjected = true;
+        throw new Error("raw claim database details must not escape");
+      }
+      if (
+        throwAfterClaimRole === claimRole &&
+        !claimThrowInjected
+      ) {
+        claimThrowInjected = true;
+        if (matchesQuery(order, query)) applyUpdate(order, update);
+        throw new Error("ambiguous claim write details must not escape");
+      }
 
       if (
         closeBeforeFirstClaim &&
@@ -515,6 +539,54 @@ test("an unexpected mailer exception finalizes both owned claims as failed", asy
   assert.equal(harness.order.paidOrderEmailDelivery.customer.error, "email_orchestration_failed");
   assert.equal(harness.order.paidOrderEmailDelivery.vendor.error, "email_orchestration_failed");
   assert.doesNotMatch(JSON.stringify(harness.order), /raw SMTP secret/);
+});
+
+test("vendor claim failure releases the definitely-unsent customer claim for retry", async () => {
+  const harness = loadHelper({ throwOnClaimRole: "vendor" });
+
+  const result = await harness.helper.sendOrderPaidConfirmationIfNeeded(harness.order._id);
+
+  assert.equal(harness.mailCalls.length, 0);
+  assert.equal(result.failed, true);
+  assert.equal(result.emailFailed, true);
+  assert.equal(result.emailWarning, "paid_order_email_delivery_incomplete");
+  assert.equal(harness.order.paidOrderEmailDelivery.customer.status, "failed");
+  assert.equal(harness.order.paidOrderEmailDelivery.customer.claimToken, undefined);
+  assert.equal(harness.order.paidOrderEmailDelivery.customer.attemptCount, 1);
+  assert.equal(harness.order.paidOrderEmailDelivery.vendor, undefined);
+  assert.doesNotMatch(JSON.stringify(result), /raw claim database details/);
+});
+
+test("customer claim failure before any write returns an explicit safe failure summary", async () => {
+  const harness = loadHelper({ throwOnClaimRole: "customer" });
+
+  const result = await harness.helper.sendOrderPaidConfirmationIfNeeded(harness.order._id);
+
+  assert.equal(harness.mailCalls.length, 0);
+  assert.equal(result.failed, true);
+  assert.equal(result.emailFailed, true);
+  assert.equal(result.emailWarning, "paid_order_email_delivery_incomplete");
+  assert.equal(harness.order.paidOrderEmailDelivery.customer, undefined);
+  assert.equal(harness.order.paidOrderEmailDelivery.vendor, undefined);
+  assert.doesNotMatch(JSON.stringify(result), /raw claim database details/);
+});
+
+test("ambiguous vendor claim response cleans up both token-owned claims for retry", async () => {
+  const harness = loadHelper({ throwAfterClaimRole: "vendor" });
+
+  const result = await harness.helper.sendOrderPaidConfirmationIfNeeded(harness.order._id);
+
+  assert.equal(harness.mailCalls.length, 0);
+  assert.equal(result.failed, true);
+  assert.equal(result.emailFailed, true);
+  assert.equal(result.emailWarning, "paid_order_email_delivery_incomplete");
+  assert.equal(harness.order.paidOrderEmailDelivery.customer.status, "failed");
+  assert.equal(harness.order.paidOrderEmailDelivery.customer.claimToken, undefined);
+  assert.equal(harness.order.paidOrderEmailDelivery.customer.attemptCount, 1);
+  assert.equal(harness.order.paidOrderEmailDelivery.vendor.status, "failed");
+  assert.equal(harness.order.paidOrderEmailDelivery.vendor.claimToken, undefined);
+  assert.equal(harness.order.paidOrderEmailDelivery.vendor.attemptCount, 1);
+  assert.doesNotMatch(JSON.stringify(result), /ambiguous claim write details/);
 });
 
 test("a preference lookup exception fails vendor but does not block customer", async () => {
