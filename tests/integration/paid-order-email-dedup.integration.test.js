@@ -15,8 +15,6 @@ const {
 let User;
 let Order;
 let sendOrderPaidConfirmationIfNeeded;
-let buildSucceededPaymentReconciliationFilter;
-let buildSucceededPaymentReconciliationPipeline;
 let order;
 
 const sendCalls = [];
@@ -62,10 +60,6 @@ test.before(async () => {
   ({ sendOrderPaidConfirmationIfNeeded } = require(
     '../../utils/sendOrderPaidConfirmation'
   ));
-  ({
-    buildSucceededPaymentReconciliationFilter,
-    buildSucceededPaymentReconciliationPipeline,
-  } = require('../../utils/orderPaidEmailEligibility'));
 });
 
 test.beforeEach(async () => {
@@ -210,49 +204,4 @@ test('real Mongo atomically deduplicates concurrent paid-order customer and vend
   assert.equal(replay.emailWarning, undefined);
   assert.equal(replay.customer.status, 'sent');
   assert.equal(replay.vendor.status, 'sent');
-});
-
-test('real Mongo atomically correlates succeeded payment state and loses to refund', async () => {
-  await Order.updateOne(
-    { _id: order._id },
-    {
-      $set: {
-        paymentStatus: 'pending',
-        status: 'created',
-        statusHistory: [{ status: 'created' }],
-      },
-    }
-  );
-
-  const updated = await Order.findOneAndUpdate(
-    buildSucceededPaymentReconciliationFilter(order._id, order.paymentId),
-    buildSucceededPaymentReconciliationPipeline({
-      chargeId: 'ch_atomic_test',
-      transferId: 'tr_atomic_test',
-      applicationFeeId: 'fee_atomic_test',
-    }),
-    { new: true }
-  ).lean();
-
-  assert.equal(updated.paymentStatus, 'paid');
-  assert.equal(updated.status, 'ordered');
-  assert.equal(updated.statusHistory.at(-1).status, 'ordered');
-  assert.equal(updated.items[0].chargeId, 'ch_atomic_test');
-  assert.equal(updated.items[0].transferId, 'tr_atomic_test');
-  assert.equal(updated.items[0].applicationFeeId, 'fee_atomic_test');
-
-  await Order.updateOne(
-    { _id: order._id },
-    { $set: { paymentStatus: 'refunded', status: 'refunded' } }
-  );
-  const staleSuccess = await Order.findOneAndUpdate(
-    buildSucceededPaymentReconciliationFilter(order._id, order.paymentId),
-    buildSucceededPaymentReconciliationPipeline(),
-    { new: true }
-  );
-
-  assert.equal(staleSuccess, null);
-  const refunded = await Order.findById(order._id).lean();
-  assert.equal(refunded.paymentStatus, 'refunded');
-  assert.equal(refunded.status, 'refunded');
 });

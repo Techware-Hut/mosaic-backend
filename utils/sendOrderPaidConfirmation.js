@@ -224,6 +224,59 @@ async function markAggregateCompleteIfReady(orderId) {
   );
 }
 
+async function persistInvoiceAttachmentEvidence(orderId, invoiceAttachment) {
+  if (!invoiceAttachment?.status) return;
+  try {
+    await Order.updateOne(
+      { _id: orderId },
+      {
+        $set: {
+          "paidOrderEmailDelivery.invoiceAttachment": {
+            status: invoiceAttachment.status,
+            ...(invoiceAttachment.error
+              ? { error: truncate(invoiceAttachment.error, 180) }
+              : {}),
+            attemptedAt: new Date(),
+          },
+        },
+      }
+    );
+  } catch {
+    console.error("Paid-order invoice attachment evidence persistence failed", {
+      orderId: String(orderId),
+    });
+  }
+}
+
+async function logInvoiceAttachmentFailure(order, invoiceAttachment) {
+  if (!invoiceAttachment || invoiceAttachment.status === "attached") return;
+  const fingerprint = buildOrderLifecycleEmailFingerprint(
+    order,
+    "order_paid_invoice_attachment",
+    { recipientRole: "system" }
+  );
+  const entry = {
+    event: "order_paid_invoice_attachment",
+    fingerprint,
+    orderStatus: order.status,
+    paymentStatus: order.paymentStatus,
+    deliveryStatus: "failed",
+    recipientRole: "system",
+    error: truncate(invoiceAttachment.error || "invoice_generation_failed", 180),
+    attemptedAt: new Date(),
+  };
+  try {
+    await Order.updateOne(
+      { _id: order._id },
+      { $push: { lifecycleEmailLog: entry } }
+    );
+  } catch {
+    console.error("Paid-order invoice attachment audit log persistence failed", {
+      orderId: String(order._id),
+    });
+  }
+}
+
 async function logRoleResult(order, role, result) {
   const fingerprint = buildOrderLifecycleEmailFingerprint(
     order,
@@ -392,6 +445,16 @@ async function sendOrderPaidConfirmationIfNeeded(orderOrId, { currency } = {}) {
     providerResults = {};
     for (const role of ["customer", "vendor"]) {
       if (claims[role]) providerResults[role] = safeFailure("email_orchestration_failed");
+    }
+  }
+
+  if (providerResults.invoiceAttachment) {
+    await persistInvoiceAttachmentEvidence(
+      order._id,
+      providerResults.invoiceAttachment
+    );
+    if (providerResults.invoiceAttachment.status === "failed") {
+      await logInvoiceAttachmentFailure(order, providerResults.invoiceAttachment);
     }
   }
 

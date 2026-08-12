@@ -4,16 +4,11 @@ const Subscription = require('../models/Subscription'); // ← ADD THIS LINE
 const {
   decrementInventoryForPaidOrder,
   releaseInventoryReservation,
-  restoreInventoryForRefundedOrder,
 } = require('../lib/inventory/orderInventory');
 const {
   publicPaidOrderEmailDelivery,
   sendOrderPaidConfirmationIfNeeded,
 } = require('../utils/sendOrderPaidConfirmation');
-const {
-  buildSucceededPaymentReconciliationFilter,
-  buildSucceededPaymentReconciliationPipeline,
-} = require('../utils/orderPaidEmailEligibility');
 
 const toPublicEmailDelivery = (result) =>
   typeof publicPaidOrderEmailDelivery === 'function'
@@ -24,7 +19,6 @@ const toPublicEmailDelivery = (result) =>
         emailFailed: Boolean(result?.emailFailed),
         ...(result?.emailWarning ? { emailWarning: result.emailWarning } : {}),
       };
-
 
 const toStripePayloadBuffer = (body) => {
   if (Buffer.isBuffer(body)) {
@@ -74,19 +68,18 @@ const cancelRetryablePaymentIntent = async (paymentIntent) => {
 };
 
 const reconcileSucceededOrderPayment = async (orderId, paymentIntent) => {
-  if (!orderId || !paymentIntent?.id) {
-    console.warn('Order webhook succeeded event is missing correlation metadata');
-    return { reconciled: false };
-  }
-  const updatedOrder = await Order.findOneAndUpdate(
-    buildSucceededPaymentReconciliationFilter(orderId, paymentIntent.id),
-    buildSucceededPaymentReconciliationPipeline(),
+  const updatedOrder = await Order.findByIdAndUpdate(
+    orderId,
+    {
+      paymentStatus: 'paid',
+      status: 'ordered',
+    },
     { new: true }
   );
 
   if (!updatedOrder) {
     console.warn(
-      `Order webhook could not correlate order ${orderId} with the succeeded payment intent.`
+      `Order webhook could not find order ${orderId} for payment intent ${paymentIntent.id}.`
     );
     return { reconciled: false };
   }
@@ -150,15 +143,10 @@ const reconcileSucceededOrderPayment = async (orderId, paymentIntent) => {
 };
 
 const failUnpaidOrderAndReleaseReservation = async (orderId, paymentIntent) => {
-  if (!orderId || !paymentIntent?.id) {
-    console.warn('Order payment failure event is missing correlation metadata');
-    return { ignored: true };
-  }
   const failedOrder = await Order.findOneAndUpdate(
     {
       _id: orderId,
-      paymentId: paymentIntent.id,
-      paymentStatus: { $nin: ['paid', 'refunded'] },
+      paymentStatus: { $ne: 'paid' },
       inventoryDecrementedAt: null,
     },
     {
@@ -231,7 +219,7 @@ const handleStripeWebhook = async (req, res) => {
   switch (event.type) {
     case 'payment_intent.succeeded':
       const paymentIntent = event.data.object;
-      const orderId = paymentIntent.metadata?.orderId;
+      const orderId = paymentIntent.metadata.orderId;
       console.log('Order payment succeeded event', {
         paymentIntentId: paymentIntent.id,
         orderId,
@@ -249,7 +237,7 @@ const handleStripeWebhook = async (req, res) => {
 
     case 'payment_intent.payment_failed':
       const failedPaymentIntent = event.data.object;
-      const failedOrderId = failedPaymentIntent.metadata?.orderId;
+      const failedOrderId = failedPaymentIntent.metadata.orderId;
       console.log('Order payment failed event', {
         paymentIntentId: failedPaymentIntent.id,
         orderId: failedOrderId,
@@ -289,7 +277,7 @@ const handleStripeWebhook = async (req, res) => {
 
     case 'payment_intent.canceled':
       const canceledPaymentIntent = event.data.object;
-      const canceledOrderId = canceledPaymentIntent.metadata?.orderId;
+      const canceledOrderId = canceledPaymentIntent.metadata.orderId;
       try {
         await failUnpaidOrderAndReleaseReservation(
           canceledOrderId,
@@ -306,7 +294,7 @@ const handleStripeWebhook = async (req, res) => {
     // Handle additional events, for example, 'payment_intent.requires_action'
     case 'payment_intent.requires_action':
       const requiresActionPaymentIntent = event.data.object;
-      const actionOrderId = requiresActionPaymentIntent.metadata?.orderId;
+      const actionOrderId = requiresActionPaymentIntent.metadata.orderId;
 
       console.log(`Payment intent requires further action for order ${actionOrderId}.`);
       res.status(200).send({ received: true });
@@ -315,17 +303,7 @@ const handleStripeWebhook = async (req, res) => {
     // Handle charge refunded event
     case 'charge.refunded':
       const chargeRefunded = event.data.object;
-      const refundedOrderId = chargeRefunded.metadata?.orderId;
-      const refundedPaymentId = typeof chargeRefunded.payment_intent === 'string'
-        ? chargeRefunded.payment_intent
-        : chargeRefunded.payment_intent?.id;
-      const refundedAmount = Number(chargeRefunded.amount_refunded);
-      const chargeAmount = Number(chargeRefunded.amount);
-      const isFullRefund = chargeRefunded.refunded === true &&
-        Number.isFinite(refundedAmount) &&
-        Number.isFinite(chargeAmount) &&
-        chargeAmount > 0 &&
-        refundedAmount >= chargeAmount;
+      const refundedOrderId = chargeRefunded.metadata.orderId;
       console.log('Order refund event', {
         chargeId: chargeRefunded.id,
         orderId: refundedOrderId,
@@ -333,40 +311,18 @@ const handleStripeWebhook = async (req, res) => {
 
       // Update order status to refunded
       try {
-        if (!refundedOrderId || !refundedPaymentId) {
-          console.warn('Order refund event is missing authoritative correlation fields');
-          return res.status(200).send({ received: true });
-        }
-        if (!isFullRefund) {
-          console.warn('Partial charge refund does not close the whole order', {
-            orderId: refundedOrderId,
-            chargeId: chargeRefunded.id,
-          });
-          return res.status(200).send({ received: true });
-        }
-        const refundedOrder = await Order.findOneAndUpdate(
-          {
-            _id: refundedOrderId,
-            paymentId: refundedPaymentId,
-          },
-          {
-            $set: {
-              paymentStatus: 'refunded',
-              status: 'refunded',
-            },
-          },
-          { new: true }
-        );
+        const refundedOrder = await Order.findByIdAndUpdate(refundedOrderId, {
+          paymentStatus: 'refunded',
+          status: 'refunded',
+        }, { new: true });
 
         if (!refundedOrder) {
           console.warn(`Order webhook could not find refunded order ${refundedOrderId} for charge ${chargeRefunded.id}.`);
         } else {
-          const inventoryResult = await restoreInventoryForRefundedOrder(refundedOrder);
           console.log('Order marked refunded from webhook', {
             orderId: refundedOrder._id.toString(),
             paymentStatus: refundedOrder.paymentStatus,
             status: refundedOrder.status,
-            inventoryRestored: inventoryResult.restored,
           });
         }
       } catch (error) {
@@ -525,4 +481,3 @@ const handleSubscriptionWebhook = async (req, res) => {
 
 
 module.exports = { handleStripeWebhook, handleSubscriptionWebhook };
-

@@ -73,6 +73,12 @@ function applyUpdate(document, update) {
   for (const [key, value] of Object.entries(update.$inc || {})) {
     setPath(document, key, Number(getPath(document, key) || 0) + Number(value));
   }
+  if (update.$push?.lifecycleEmailLog) {
+    if (!Array.isArray(document.lifecycleEmailLog)) {
+      document.lifecycleEmailLog = [];
+    }
+    document.lifecycleEmailLog.push(update.$push.lifecycleEmailLog);
+  }
 }
 
 function sentResult(role, overrides = {}) {
@@ -168,6 +174,13 @@ function loadHelper({
         populate: async () => (orderExists ? order : null),
       };
     },
+    async updateOne(query, update) {
+      updateCalls.push({ query, update });
+      if (matchesQuery(order, query)) {
+        applyUpdate(order, update);
+      }
+      return { acknowledged: true };
+    },
     async findOneAndUpdate(query, update) {
       updateCalls.push({ query, update });
 
@@ -215,13 +228,14 @@ function loadHelper({
       return order;
     },
     async updateOne(query, update) {
+      updateCalls.push({ query, update });
       if (!matchesQuery(order, query)) return { matchedCount: 0, modifiedCount: 0 };
+      applyUpdate(order, update);
       const entry = update?.$push?.lifecycleEmailLog;
       if (entry) {
-        order.lifecycleEmailLog.push(entry);
         lifecycleEntries.push(entry);
       }
-      return { matchedCount: 1, modifiedCount: entry ? 1 : 0 };
+      return { matchedCount: 1, modifiedCount: 1 };
     },
   };
 
@@ -645,4 +659,36 @@ test("stale claim token cannot overwrite a newer customer claim", async () => {
   );
   assert.equal(result.emailWarning, "paid_order_email_delivery_incomplete");
   assert.equal(harness.order.paidConfirmationEmailSentAt, null);
+});
+
+test("records invoice attachment failure without marking successful email delivery as failed", async () => {
+  const harness = loadHelper({
+    mailPlan: [() => ({
+      invoiceAttachment: {
+        status: "failed",
+        error: "invoice_generation_failed",
+      },
+      customer: sentResult("customer"),
+      vendor: sentResult("vendor"),
+    })],
+  });
+
+  const result = await harness.helper.sendOrderPaidConfirmationIfNeeded(harness.order._id);
+
+  assert.equal(result.emailSent, true);
+  assert.equal(result.emailFailed, false);
+  assert.equal(result.emailWarning, undefined);
+  assert.equal(harness.order.paidOrderEmailDelivery.customer.status, "sent");
+  assert.equal(harness.order.paidOrderEmailDelivery.vendor.status, "sent");
+  assert.equal(harness.order.paidOrderEmailDelivery.invoiceAttachment.status, "failed");
+  assert.equal(
+    harness.order.paidOrderEmailDelivery.invoiceAttachment.error,
+    "invoice_generation_failed"
+  );
+  assert.equal(
+    harness.lifecycleEntries.some(
+      (entry) => entry.event === "order_paid_invoice_attachment"
+    ),
+    true
+  );
 });

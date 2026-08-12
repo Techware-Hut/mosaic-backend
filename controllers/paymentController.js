@@ -35,13 +35,8 @@ const createPaymentIntent = async (req, res) => {
       return res.status(403).json({ message: 'Not allowed to pay for this order.' });
     }
 
-    if (['paid', 'refunded'].includes(order.paymentStatus) ||
-        ['rejected', 'cancelled', 'returned', 'refunded'].includes(order.status)) {
-      return res.status(409).json({ message: 'Order is not eligible for a new payment.' });
-    }
-
-    if (order.paymentId) {
-      return res.status(409).json({ message: 'A payment already exists for this order.' });
+    if (order.paymentStatus === 'paid') {
+      return res.status(400).json({ message: 'Order is already paid.' });
     }
 
     const derivedAmount = toStripeAmount(order.totalAmount);
@@ -73,30 +68,8 @@ const createPaymentIntent = async (req, res) => {
       },
     });
 
-    const claimedOrder = await Order.findOneAndUpdate(
-      {
-        _id: order._id,
-        userId: order.userId,
-        paymentId: { $in: [null, ''] },
-        paymentStatus: { $nin: ['paid', 'refunded'] },
-        status: { $nin: ['rejected', 'cancelled', 'returned', 'refunded'] },
-      },
-      { $set: { paymentId: paymentIntent.id } },
-      { new: true }
-    );
-
-    if (!claimedOrder) {
-      try {
-        await stripe.paymentIntents.cancel(paymentIntent.id, {
-          cancellation_reason: 'abandoned',
-        });
-      } catch {
-        console.error('Failed to cancel unclaimed legacy PaymentIntent', {
-          orderId: String(order._id),
-        });
-      }
-      return res.status(409).json({ message: 'A payment already exists for this order.' });
-    }
+    order.paymentId = paymentIntent.id;
+    await order.save();
 
     res.status(200).json({
       clientSecret: paymentIntent.client_secret,

@@ -325,7 +325,7 @@ test("sanitizes a raw SMTP error and still attempts the other role", async () =>
   assert.doesNotMatch(JSON.stringify(results), /super-secret-value|bad password/);
 });
 
-test("sanitizes invoice-render failure and makes no provider call", async () => {
+test("still sends customer and vendor email when invoice rendering fails", async () => {
   const harness = loadOrderMailerWithMocks({
     renderInvoice: async () => {
       throw new Error("/private/runtime/path/lib-secret.so missing");
@@ -339,10 +339,22 @@ test("sanitizes invoice-render failure and makes no provider call", async () => 
   });
 
   assert.equal(harness.getRenderCount(), 1);
-  assert.equal(harness.sentMessages.length, 0);
-  assert.equal(results.customer.error, "invoice_generation_failed");
-  assert.equal(results.vendor.error, "invoice_generation_failed");
+  assert.equal(harness.sentMessages.length, 2);
+  assert.equal(results.invoiceAttachment.status, "failed");
+  assert.equal(results.invoiceAttachment.error, "invoice_generation_failed");
+  assert.equal(results.customer.status, "sent");
+  assert.equal(results.vendor.status, "sent");
+  for (const message of harness.sentMessages) {
+    const pdfAttachments = (message.attachments || []).filter(
+      (part) => part.contentType === "application/pdf"
+    );
+    assert.equal(pdfAttachments.length, 0);
+  }
   assert.doesNotMatch(JSON.stringify(results), /private|lib-secret/);
+  assert.doesNotMatch(
+    harness.sentMessages[0].text,
+    /Invoice attached \(PDF\)/i
+  );
 });
 
 test("missing recipients fail without rendering an invoice", async () => {

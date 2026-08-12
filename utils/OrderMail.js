@@ -41,33 +41,43 @@ function baseLayout({ heading, introHtml, ctaHref, ctaText, logoSrc = "cid:platf
   </div>`;
 }
 
-function customerIntro({ order, businessName }) {
+function customerIntro({ order, businessName, invoiceAttached }) {
   const orderNo = order.groupOrderId || order._id?.toString();
+  const invoiceLine = invoiceAttached
+    ? `<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b7280;margin:10px 0 0;">
+    We've attached your invoice (PDF). You can view your order any time from your account.
+  </p>`
+    : `<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b7280;margin:10px 0 0;">
+    You can view your order any time from your account.
+  </p>`;
   return `
   <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#374151;margin:8px 0 0;">
     Hi ${escapeHtml(order.userId?.name || "there")},<br/>
     Your payment to <strong>${escapeHtml(businessName)}</strong> is confirmed. Order <strong>#${escapeHtml(orderNo)}</strong> is now placed.
   </p>
-  <p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b7280;margin:10px 0 0;">
-    We've attached your invoice (PDF). You can view your order any time from your account.
-  </p>`;
+  ${invoiceLine}`;
 }
 
-function vendorIntro({ order, businessName }) {
+function vendorIntro({ order, businessName, invoiceAttached }) {
   const orderNo = order.groupOrderId || order._id?.toString();
   const itemCount = (order.items || []).reduce((n, it) => n + Number(it.quantity || 1), 0);
+  const invoiceLine = invoiceAttached
+    ? `<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b7280;margin:10px 0 0;">
+    The customer invoice is attached. Manage this order in your Partners dashboard.
+  </p>`
+    : `<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b7280;margin:10px 0 0;">
+    Manage this order in your Partners dashboard.
+  </p>`;
   return `
   <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#374151;margin:8px 0 0;">
     Hi ${escapeHtml(businessName)},<br/>
     You received a <strong>paid order</strong> <strong>#${escapeHtml(orderNo)}</strong> with ${itemCount} item${itemCount === 1 ? "" : "s"}.
   </p>
-  <p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b7280;margin:10px 0 0;">
-    The customer invoice is attached. Manage this order in your Partners dashboard.
-  </p>`;
+  ${invoiceLine}`;
 }
 
 /**
- * Send order-paid emails to customer + vendor with a PDF invoice.
+ * Send order-paid emails to customer + vendor with an optional PDF invoice.
  * Expects order populated with: userId{name,email}, vendorId{name,email}, businessId{businessName,slug,email,owner{email}}, items.productId{name|title}
  */
 const normalizeRecipients = (recipients = []) => [
@@ -186,6 +196,28 @@ async function sendRoleEmail(message, recipientCount) {
   }
 }
 
+async function resolveInvoiceAttachment(order) {
+  try {
+    const pdf = await renderInvoicePdfBufferForOrder(order);
+    return {
+      status: "attached",
+      pdf,
+      fileName: `invoice-${order.groupOrderId || order._id}.pdf`,
+    };
+  } catch {
+    console.error("Paid-order invoice attachment unavailable", {
+      orderId: order?._id?.toString?.() || null,
+      error: "invoice_generation_failed",
+    });
+    return {
+      status: "failed",
+      error: "invoice_generation_failed",
+      pdf: null,
+      fileName: null,
+    };
+  }
+}
+
 exports.sendOrderPaidEmails = async ({
   order,
   currency,
@@ -210,6 +242,7 @@ exports.sendOrderPaidEmails = async ({
             recipientCount: 0,
           }
       : null,
+    invoiceAttachment: null,
   };
 
   console.log("Preparing order-paid emails", {
@@ -231,29 +264,12 @@ exports.sendOrderPaidEmails = async ({
   const needsVendorSend = roles.vendor && filteredVendorEmails.length > 0;
   if (!needsCustomerSend && !needsVendorSend) return results;
 
-  // Use the pure-Node PDFKit renderer. Hosted Chromium is not part of the
-  // Elastic Beanstalk runtime contract and previously blocked every SMTP call.
-  let pdf;
-  try {
-    pdf = await renderInvoicePdfBufferForOrder(order);
-  } catch (error) {
-    if (needsCustomerSend) {
-      results.customer = failedDelivery(
-        error,
-        normalizedCustomerEmails.length,
-        "invoice_generation_failed"
-      );
-    }
-    if (needsVendorSend) {
-      results.vendor = failedDelivery(
-        error,
-        filteredVendorEmails.length,
-        "invoice_generation_failed"
-      );
-    }
-    return results;
-  }
-  const invoiceFileName = `invoice-${order.groupOrderId || order._id}.pdf`;
+  const invoiceAttachment = await resolveInvoiceAttachment(order);
+  results.invoiceAttachment = {
+    status: invoiceAttachment.status,
+    ...(invoiceAttachment.error ? { error: invoiceAttachment.error } : {}),
+  };
+  const invoiceAttached = invoiceAttachment.status === "attached";
 
   // Never attach logo via remote `path:` — nodemailer throws "Invalid status code 404"
   // when the frontend/_next image URL is unavailable (common in local QA).
@@ -261,13 +277,15 @@ exports.sendOrderPaidEmails = async ({
     await resolvePlatformLogoAttachment();
 
   const attachments = withOptionalLogoAttachment(
-    [
-      {
-        filename: invoiceFileName,
-        content: pdf,
-        contentType: "application/pdf",
-      },
-    ],
+    invoiceAttached
+      ? [
+          {
+            filename: invoiceAttachment.fileName,
+            content: invoiceAttachment.pdf,
+            contentType: "application/pdf",
+          },
+        ]
+      : [],
     logoAttachment
   );
 
@@ -275,7 +293,7 @@ exports.sendOrderPaidEmails = async ({
   if (needsCustomerSend) {
     const customerHtml = baseLayout({
       heading: "🧾 Payment received — your order is confirmed",
-      introHtml: customerIntro({ order, businessName }),
+      introHtml: customerIntro({ order, businessName, invoiceAttached }),
       ctaHref: customerOrdersUrl,
       ctaText: "View Your Order",
       logoSrc: logoSrcForHtml,
@@ -288,8 +306,7 @@ exports.sendOrderPaidEmails = async ({
       `Order #${orderNo} is placed.`,
       `View your order: ${customerOrdersUrl}`,
       ``,
-      `Invoice attached (PDF).`,
-      ``,
+      ...(invoiceAttached ? [`Invoice attached (PDF).`, ``] : []),
       `— Mosaic Biz Hub Team`,
     ].join("\n");
 
@@ -308,7 +325,7 @@ exports.sendOrderPaidEmails = async ({
   if (needsVendorSend) {
     const vendorHtml = baseLayout({
       heading: "💸 You’ve received a paid order",
-      introHtml: vendorIntro({ order, businessName }),
+      introHtml: vendorIntro({ order, businessName, invoiceAttached }),
       ctaHref: partnerOrdersUrl,
       ctaText: "Open Partners Dashboard",
       logoSrc: logoSrcForHtml,
@@ -320,8 +337,7 @@ exports.sendOrderPaidEmails = async ({
       `You received a paid order #${orderNo}.`,
       `Manage: ${partnerOrdersUrl}`,
       ``,
-      `Customer invoice attached (PDF).`,
-      ``,
+      ...(invoiceAttached ? [`Customer invoice attached (PDF).`, ``] : []),
       `— Mosaic Biz Hub Team`,
     ].join("\n");
 

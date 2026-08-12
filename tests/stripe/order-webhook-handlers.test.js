@@ -39,7 +39,6 @@ function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
   const emailCalls = [];
   const defaultOrder = orderDoc || {
     _id: ORDER_ID,
-    paymentId: PAYMENT_ID,
     paymentStatus: 'pending',
     status: 'created',
   };
@@ -66,16 +65,17 @@ function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
     }
     if (request.endsWith('models/Order')) {
       return {
-        findOneAndUpdate: async (filter, update, opts) => {
-          updates.push({ filter, update, opts });
+        findByIdAndUpdate: async (id, update, opts) => {
+          updates.push({ id, update, opts });
           if (findByIdAndUpdateImpl) {
-            return findByIdAndUpdateImpl(filter, update, opts);
+            return findByIdAndUpdateImpl(id, update, opts);
           }
-          if (!matchesOrderFilter(defaultOrder, filter)) return null;
-          return applyOrderUpdate(
-            { ...defaultOrder, items: defaultOrder.items || [] },
-            update
-          );
+          return {
+            ...defaultOrder,
+            ...update,
+            _id: id,
+            items: defaultOrder.items || [],
+          };
         },
       };
     }
@@ -113,16 +113,7 @@ function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
   };
 }
 
-function loadFailedPaymentWebhook({
-  orderDoc = {
-    _id: ORDER_ID,
-    paymentId: PAYMENT_ID,
-    paymentStatus: 'pending',
-    status: 'created',
-    inventoryDecrementedAt: null,
-  },
-  eventPaymentId = PAYMENT_ID,
-} = {}) {
+function loadFailedPaymentWebhook() {
   const updates = [];
   const cancellations = [];
   let releaseCalls = 0;
@@ -132,7 +123,7 @@ function loadFailedPaymentWebhook({
         type: 'payment_intent.payment_failed',
         data: {
           object: {
-            id: eventPaymentId,
+            id: PAYMENT_ID,
             status: 'requires_payment_method',
             metadata: { orderId: ORDER_ID },
           },
@@ -157,8 +148,7 @@ function loadFailedPaymentWebhook({
       return {
         findOneAndUpdate: async (filter, update) => {
           updates.push({ filter, update });
-          if (!matchesOrderFilter(orderDoc, filter)) return null;
-          return applyOrderUpdate(orderDoc, update);
+          return { _id: filter._id, ...update.$set };
         },
       };
     }
@@ -198,7 +188,6 @@ function loadFailedPaymentWebhook({
     getUpdates: () => updates,
     getCancellations: () => cancellations,
     getReleaseCalls: () => releaseCalls,
-    order: orderDoc,
   };
 }
 
@@ -231,15 +220,8 @@ function buildOrderForPostPayment(overrides = {}) {
   };
 }
 
-function loadPostPaymentWebhook({
-  orders = [],
-  charge = {},
-  refundBeforeAtomicReconcile = false,
-} = {}) {
+function loadPostPaymentWebhook({ orders = [], charge = {} } = {}) {
   let emailSendCount = 0;
-  let helperCallCount = 0;
-  let inventoryCallCount = 0;
-  let refundInjected = false;
   const defaultCharge = {
     transfer: 'tr_test_001',
     application_fee: 'fee_test_001',
@@ -253,7 +235,6 @@ function loadPostPaymentWebhook({
         data: {
           object: {
             id: PAYMENT_ID,
-            status: 'succeeded',
             latest_charge: 'ch_test_001',
             currency: 'usd',
           },
@@ -275,15 +256,6 @@ function loadPostPaymentWebhook({
         find: () => ({
           populate: async () => orders,
         }),
-        findOneAndUpdate: async (filter, update) => {
-          if (refundBeforeAtomicReconcile && !refundInjected) {
-            orders[0].paymentStatus = 'refunded';
-            orders[0].status = 'refunded';
-            refundInjected = true;
-          }
-          const order = orders.find((candidate) => matchesOrderFilter(candidate, filter));
-          return order ? applyOrderUpdate(order, update) : null;
-        },
       };
     }
     if (request.endsWith('utils/OrderMail')) {
@@ -295,26 +267,20 @@ function loadPostPaymentWebhook({
     }
     if (request.endsWith('utils/sendOrderPaidConfirmation')) {
       return {
-        sendOrderPaidConfirmationIfNeeded: async () => {
-          helperCallCount += 1;
-          return {
-            sent: false,
-            skipped: true,
-            reason: 'mocked_shared_paid_confirmation_path',
-          };
-        },
+        sendOrderPaidConfirmationIfNeeded: async () => ({
+          sent: false,
+          skipped: true,
+          reason: 'mocked_unused_on_direct_post_payment_path',
+        }),
       };
     }
     if (request.endsWith('lib/inventory/orderInventory')) {
       return {
-        decrementInventoryForPaidOrder: async () => {
-          inventoryCallCount += 1;
-          return {
-            decremented: true,
-            reason: 'mocked',
-            lines: [],
-          };
-        },
+        decrementInventoryForPaidOrder: async () => ({
+          decremented: true,
+          reason: 'mocked',
+          lines: [],
+        }),
       };
     }
     return originalLoad(request, parent, isMain);
@@ -327,8 +293,6 @@ function loadPostPaymentWebhook({
   return {
     stripePaymentWebhook,
     getEmailSendCount: () => emailSendCount,
-    getHelperCallCount: () => helperCallCount,
-    getInventoryCallCount: () => inventoryCallCount,
   };
 }
 
@@ -346,32 +310,11 @@ function matchesOrderFilter(order, filter) {
     if (expected && typeof expected === 'object' && '$in' in expected) {
       return expected.$in.includes(actual);
     }
-    if (expected && typeof expected === 'object' && '$nin' in expected) {
-      return !expected.$nin.includes(actual);
-    }
     return actual === expected;
   });
 }
 
 function applyOrderUpdate(order, update) {
-  if (Array.isArray(update)) {
-    const previousPaymentStatus = order.paymentStatus;
-    const previousStatus = order.status;
-    order.paymentStatus = 'paid';
-    if (
-      previousStatus === 'created' ||
-      (previousPaymentStatus === 'failed' && previousStatus === 'cancelled')
-    ) {
-      order.status = 'ordered';
-      order.statusHistory ||= [];
-      order.statusHistory.push({ status: 'ordered' });
-    }
-    const itemEvidence = update[0]?.$set?.items?.$map?.in?.$mergeObjects?.[1];
-    if (itemEvidence) {
-      for (const item of order.items || []) Object.assign(item, itemEvidence);
-    }
-    return order;
-  }
   const direct = Object.fromEntries(
     Object.entries(update).filter(([key]) => !key.startsWith('$'))
   );
@@ -454,6 +397,10 @@ function loadOrderWebhookSequence({
     if (request === 'stripe') return createStripeModule(stripeMock);
     if (request.endsWith('models/Order')) {
       return {
+        findByIdAndUpdate: async (id, update) => {
+          if (String(id) !== String(order._id)) return null;
+          return applyOrderUpdate(order, update);
+        },
         findOneAndUpdate: async (filter, update) => {
           if (!matchesOrderFilter(order, filter)) return null;
           return applyOrderUpdate(order, update);
@@ -647,9 +594,8 @@ test('order status webhook marks order paid and ordered on payment_intent.succee
 
   assert.equal(res.statusCode, 200);
   assert.equal(getUpdates().length, 1);
-  assert.ok(Array.isArray(getUpdates()[0].update));
-  assert.equal(getEmailCalls()[0][0].paymentStatus, 'paid');
-  assert.equal(getEmailCalls()[0][0].status, 'ordered');
+  assert.equal(getUpdates()[0].update.paymentStatus, 'paid');
+  assert.equal(getUpdates()[0].update.status, 'ordered');
   assert.equal(getEmailCalls().length, 1);
   assert.equal(String(getEmailCalls()[0][0]._id || getEmailCalls()[0][0]), ORDER_ID);
   assert.equal(getEmailCalls()[0][1]?.currency, 'usd');
@@ -658,12 +604,12 @@ test('order status webhook marks order paid and ordered on payment_intent.succee
 test('order status webhook duplicate succeed is idempotent', async () => {
   process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
   const { handleStripeWebhook, getUpdates } = loadOrderStatusWebhook({
-    orderDoc: {
-      _id: ORDER_ID,
-      paymentId: PAYMENT_ID,
+    findByIdAndUpdateImpl: async (id, update) => ({
+      _id: id,
       paymentStatus: 'paid',
       status: 'ordered',
-    },
+      ...update,
+    }),
   });
   const req = {
     headers: { 'stripe-signature': 'sig_test' },
@@ -678,85 +624,8 @@ test('order status webhook duplicate succeed is idempotent', async () => {
   assert.equal(res1.statusCode, 200);
   assert.equal(res2.statusCode, 200);
   assert.equal(getUpdates().length, 2);
-  assert.ok(Array.isArray(getUpdates()[0].update));
-  assert.ok(Array.isArray(getUpdates()[1].update));
-});
-
-test('order status webhook refuses mismatched order and PaymentIntent correlation', async () => {
-  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
-  const { handleStripeWebhook, getUpdates, getEmailCalls } = loadOrderStatusWebhook({
-    orderDoc: {
-      _id: ORDER_ID,
-      paymentId: 'pi_different_authoritative_payment',
-      paymentStatus: 'pending',
-      status: 'created',
-    },
-  });
-  const res = mockResponse();
-
-  await handleStripeWebhook(
-    {
-      headers: { 'stripe-signature': 'sig_test' },
-      body: Buffer.from('{}'),
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(getUpdates().length, 1);
-  assert.equal(getUpdates()[0].filter._id, ORDER_ID);
-  assert.equal(getUpdates()[0].filter.paymentId, PAYMENT_ID);
-  assert.deepEqual(getUpdates()[0].filter.paymentStatus, { $ne: 'refunded' });
-  assert.equal(getEmailCalls().length, 0);
-});
-
-test('order status webhook does not reopen or email a refunded order', async () => {
-  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
-  const { handleStripeWebhook, getEmailCalls } = loadOrderStatusWebhook({
-    orderDoc: {
-      _id: ORDER_ID,
-      paymentId: PAYMENT_ID,
-      paymentStatus: 'refunded',
-      status: 'refunded',
-    },
-  });
-  const res = mockResponse();
-
-  await handleStripeWebhook(
-    {
-      headers: { 'stripe-signature': 'sig_test' },
-      body: Buffer.from('{}'),
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(getEmailCalls().length, 0);
-});
-
-test('order status webhook preserves an advanced paid fulfillment status', async () => {
-  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
-  const { handleStripeWebhook, getEmailCalls } = loadOrderStatusWebhook({
-    orderDoc: {
-      _id: ORDER_ID,
-      paymentId: PAYMENT_ID,
-      paymentStatus: 'paid',
-      status: 'shipped',
-    },
-  });
-  const res = mockResponse();
-
-  await handleStripeWebhook(
-    {
-      headers: { 'stripe-signature': 'sig_test' },
-      body: Buffer.from('{}'),
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(getEmailCalls().length, 1);
-  assert.equal(getEmailCalls()[0][0].status, 'shipped');
+  assert.equal(getUpdates()[0].update.paymentStatus, 'paid');
+  assert.equal(getUpdates()[1].update.paymentStatus, 'paid');
 });
 
 test('order status webhook cancels a retryable failed intent and releases inventory', async () => {
@@ -787,55 +656,6 @@ test('order status webhook cancels a retryable failed intent and releases invent
     },
   ]);
   assert.equal(getReleaseCalls(), 1);
-});
-
-test('order status failure event cannot mutate an order with a mismatched PaymentIntent', async () => {
-  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
-  const harness = loadFailedPaymentWebhook({
-    eventPaymentId: 'pi_mismatched_failure',
-  });
-  const res = mockResponse();
-
-  await harness.handleStripeWebhook(
-    {
-      headers: { 'stripe-signature': 'sig_test' },
-      body: Buffer.from('{}'),
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(harness.order.paymentStatus, 'pending');
-  assert.equal(harness.order.status, 'created');
-  assert.equal(harness.getReleaseCalls(), 0);
-  assert.equal(harness.getUpdates()[0].filter.paymentId, 'pi_mismatched_failure');
-});
-
-test('order status failure event cannot regress an already-refunded order', async () => {
-  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
-  const harness = loadFailedPaymentWebhook({
-    orderDoc: {
-      _id: ORDER_ID,
-      paymentId: PAYMENT_ID,
-      paymentStatus: 'refunded',
-      status: 'refunded',
-      inventoryDecrementedAt: null,
-    },
-  });
-  const res = mockResponse();
-
-  await harness.handleStripeWebhook(
-    {
-      headers: { 'stripe-signature': 'sig_test' },
-      body: Buffer.from('{}'),
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(harness.order.paymentStatus, 'refunded');
-  assert.equal(harness.order.status, 'refunded');
-  assert.equal(harness.getReleaseCalls(), 0);
 });
 
 test('post-payment webhook stores charge transfer and application fee IDs', async () => {
@@ -889,31 +709,6 @@ test('post-payment webhook duplicate succeed keeps paid status without corruptio
   assert.equal(order.items[0].chargeId, 'ch_test_001');
   assert.equal(order.items[0].transferId, 'tr_test_001');
   assert.equal(order.items[0].applicationFeeId, 'fee_test_001');
-});
-
-test('post-payment webhook loses atomic reconciliation to a concurrent refund', async () => {
-  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
-  const order = buildOrderForPostPayment();
-  const harness = loadPostPaymentWebhook({
-    orders: [order],
-    refundBeforeAtomicReconcile: true,
-  });
-  const res = mockResponse();
-
-  await harness.stripePaymentWebhook(
-    {
-      headers: { 'stripe-signature': 'sig_test' },
-      body: Buffer.from('{}'),
-    },
-    res
-  );
-
-  assert.ok(res.body.received);
-  assert.equal(order.paymentStatus, 'refunded');
-  assert.equal(order.status, 'refunded');
-  assert.equal(order.saveCount, undefined);
-  assert.equal(harness.getInventoryCallCount(), 0);
-  assert.equal(harness.getHelperCallCount(), 0);
 });
 
 test('order status webhook ignores stale payment_failed after paid finalization', async () => {

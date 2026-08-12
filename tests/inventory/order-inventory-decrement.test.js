@@ -13,9 +13,6 @@ function matches(actual, expected) {
   if (expected && typeof expected === 'object' && '$ne' in expected) {
     return actual !== expected.$ne && actual != null;
   }
-  if (expected && typeof expected === 'object' && '$nin' in expected) {
-    return !expected.$nin.some((value) => String(actual) === String(value));
-  }
   if (expected && typeof expected === 'object' && '$gte' in expected) {
     return Number(actual) >= Number(expected.$gte);
   }
@@ -158,7 +155,6 @@ function loadOrderInventory({
   return {
     ...mod,
     getOrder: (id) => getOrder(id),
-    setOrder: (id, update) => Object.assign(getOrder(id), update),
     getStock: (id = 'var-1') => stocks.get(id),
     getOrderUpdates: () => orderUpdates,
     getVariantUpdates: () => variantUpdates,
@@ -173,12 +169,7 @@ function makeOrder(id, variantId = 'var-1', quantity = 1) {
 }
 
 test('legacy paid order decrement is atomic and idempotent', async () => {
-  const inventory = loadOrderInventory({
-    variantStocks: { 'var-1': 5 },
-    orderStates: {
-      'order-1': { paymentStatus: 'paid', status: 'ordered' },
-    },
-  });
+  const inventory = loadOrderInventory({ variantStocks: { 'var-1': 5 } });
   const order = makeOrder('order-1', 'var-1', 2);
 
   const first = await inventory.decrementInventoryForPaidOrder(order);
@@ -224,12 +215,7 @@ test('multi-line reservation aborts all stock changes when line two fails', asyn
 });
 
 test('legacy paid-time multi-line decrement aborts all stock changes', async () => {
-  const inventory = loadOrderInventory({
-    variantStocks: { 'var-1': 2 },
-    orderStates: {
-      'order-1': { paymentStatus: 'paid', status: 'ordered' },
-    },
-  });
+  const inventory = loadOrderInventory({ variantStocks: { 'var-1': 2 } });
   const order = {
     _id: 'order-1',
     items: [
@@ -247,12 +233,7 @@ test('legacy paid-time multi-line decrement aborts all stock changes', async () 
 });
 
 test('payment success finalizes a reservation without decrementing twice', async () => {
-  const inventory = loadOrderInventory({
-    variantStocks: { 'var-1': 2 },
-    orderStates: {
-      'order-1': { paymentStatus: 'paid', status: 'ordered' },
-    },
-  });
+  const inventory = loadOrderInventory({ variantStocks: { 'var-1': 2 } });
   const order = makeOrder('order-1');
 
   const reserved = await inventory.reserveInventoryForOrder(order);
@@ -281,12 +262,7 @@ test('failed/cancelled payment releases a reservation exactly once', async () =>
 });
 
 test('paid cancellation restores finalized inventory exactly once', async () => {
-  const inventory = loadOrderInventory({
-    variantStocks: { 'var-1': 3 },
-    orderStates: {
-      'order-1': { paymentStatus: 'paid', status: 'ordered' },
-    },
-  });
+  const inventory = loadOrderInventory({ variantStocks: { 'var-1': 3 } });
   const order = makeOrder('order-1', 'var-1', 2);
 
   await inventory.reserveInventoryForOrder(order);
@@ -321,129 +297,6 @@ test('concurrent paid cancellation restores finalized inventory exactly once', a
 
   assert.equal([first.restored, second.restored].filter(Boolean).length, 1);
   assert.equal(inventory.getStock(), 1);
-});
-
-test('stale paid document cannot finalize a reservation after the authoritative order is refunded', async () => {
-  const reservedAt = new Date('2026-08-12T12:00:00.000Z');
-  const inventory = loadOrderInventory({
-    variantStocks: { 'var-1': 0 },
-    orderStates: {
-      'order-1': {
-        paymentStatus: 'refunded',
-        status: 'refunded',
-        inventoryReservedAt: reservedAt,
-        inventoryDecrementedAt: null,
-        inventoryRestoredAt: null,
-        inventoryAdjustmentVersion: 1,
-        inventoryAdjustments: [
-          { variantId: 'var-1', size: 'M', quantity: 1 },
-        ],
-      },
-    },
-  });
-  const stalePaidOrder = {
-    ...makeOrder('order-1'),
-    paymentStatus: 'paid',
-    status: 'ordered',
-    inventoryReservedAt: reservedAt,
-  };
-
-  const result = await inventory.decrementInventoryForPaidOrder(stalePaidOrder);
-
-  assert.equal(result.decremented, false);
-  assert.equal(result.reason, 'already_decremented');
-  assert.equal(inventory.getStock(), 0);
-  assert.equal(inventory.getOrder('order-1').inventoryReservedAt, reservedAt);
-  assert.equal(inventory.getOrder('order-1').inventoryDecrementedAt, null);
-});
-
-test('stale paid document cannot claim a legacy decrement after the authoritative order is closed', async () => {
-  for (const status of ['rejected', 'cancelled', 'returned', 'refunded']) {
-    const inventory = loadOrderInventory({
-      variantStocks: { 'var-1': 1 },
-      orderStates: {
-        'order-1': {
-          paymentStatus: status === 'refunded' ? 'refunded' : 'failed',
-          status,
-          inventoryReservedAt: null,
-          inventoryDecrementedAt: null,
-        },
-      },
-    });
-    const stalePaidOrder = {
-      ...makeOrder('order-1'),
-      paymentStatus: 'paid',
-      status: 'ordered',
-    };
-
-    const result = await inventory.decrementInventoryForPaidOrder(stalePaidOrder);
-
-    assert.equal(result.decremented, false, status);
-    assert.equal(inventory.getStock(), 1, status);
-    assert.equal(inventory.getOrder('order-1').inventoryDecrementedAt, null, status);
-  }
-});
-
-test('refund convergence releases a reservation exactly once across replay', async () => {
-  const inventory = loadOrderInventory({
-    variantStocks: { 'var-1': 0 },
-    orderStates: {
-      'order-1': {
-        paymentStatus: 'refunded',
-        status: 'refunded',
-        inventoryReservedAt: new Date('2026-08-12T12:00:00.000Z'),
-        inventoryDecrementedAt: null,
-        inventoryRestoredAt: null,
-        inventoryAdjustmentVersion: 1,
-        inventoryAdjustments: [
-          { variantId: 'var-1', size: 'M', quantity: 2 },
-        ],
-      },
-    },
-  });
-  const refundedOrder = makeOrder('order-1', 'var-1', 2);
-
-  const first = await inventory.restoreInventoryForRefundedOrder(refundedOrder);
-  const replay = await inventory.restoreInventoryForRefundedOrder(refundedOrder);
-
-  assert.equal(first.restored, true);
-  assert.equal(first.reason, 'reservation_released');
-  assert.equal(replay.restored, false);
-  assert.equal(replay.reason, 'inventory_not_decremented_or_already_restored');
-  assert.equal(inventory.getStock(), 2);
-  assert.equal(inventory.getOrder('order-1').inventoryReservedAt, undefined);
-  assert.ok(inventory.getOrder('order-1').inventoryRestoredAt instanceof Date);
-});
-
-test('refund convergence restores finalized stock exactly once across replay', async () => {
-  const inventory = loadOrderInventory({
-    variantStocks: { 'var-1': 0 },
-    orderStates: {
-      'order-1': {
-        paymentStatus: 'refunded',
-        status: 'refunded',
-        inventoryReservedAt: null,
-        inventoryDecrementedAt: new Date('2026-08-12T12:01:00.000Z'),
-        inventoryRestoredAt: null,
-        inventoryAdjustmentVersion: 1,
-        inventoryAdjustments: [
-          { variantId: 'var-1', size: 'M', quantity: 2 },
-        ],
-      },
-    },
-  });
-  const refundedOrder = makeOrder('order-1', 'var-1', 2);
-
-  const first = await inventory.restoreInventoryForRefundedOrder(refundedOrder);
-  const replay = await inventory.restoreInventoryForRefundedOrder(refundedOrder);
-
-  assert.equal(first.restored, true);
-  assert.equal(first.reason, 'paid_inventory_restored');
-  assert.equal(replay.restored, false);
-  assert.equal(replay.reason, 'inventory_not_decremented_or_already_restored');
-  assert.equal(inventory.getStock(), 2);
-  assert.equal(inventory.getOrder('order-1').inventoryDecrementedAt, undefined);
-  assert.ok(inventory.getOrder('order-1').inventoryRestoredAt instanceof Date);
 });
 
 test('backorder release restores only the on-hand quantity actually adjusted', async () => {

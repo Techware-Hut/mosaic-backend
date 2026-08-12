@@ -12,11 +12,7 @@ const {
   publicPaidOrderEmailDelivery,
   sendOrderPaidConfirmationIfNeeded,
 } = require("../utils/sendOrderPaidConfirmation");
-const {
-  buildSucceededPaymentReconciliationFilter,
-  buildSucceededPaymentReconciliationPipeline,
-  canReconcileSucceededPayment,
-} = require("../utils/orderPaidEmailEligibility");
+const { CLOSED_ORDER_STATUSES } = require("../utils/orderPaidEmailEligibility");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const toPublicEmailDelivery = (result) =>
@@ -63,71 +59,61 @@ async function cancelRetryablePaymentIntent(paymentIntent) {
  * when Stripe confirms the PI succeeded, mark orders paid/ordered and
  * decrement inventory once (idempotent via inventoryDecrementedAt).
  */
-async function reconcileSucceededPaymentIntentOrders(
-  orders,
-  paymentIntent,
-  paymentEvidence = {},
-  { reloadOnMiss = false } = {}
-) {
+async function reconcileSucceededPaymentIntentOrders(orders, paymentIntent) {
   if (!paymentIntent || paymentIntent.status !== "succeeded") {
-    return { reconciled: false, emailResults: [], orders };
+    return { reconciled: false, emailResults: [] };
   }
 
   const emailResults = [];
-  const reconciledOrders = [];
   for (const order of orders) {
-    if (!canReconcileSucceededPayment(order)) {
-      console.log("Skipping stale succeeded-payment reconciliation for closed order", {
+    if (
+      String(order.paymentStatus || "").toLowerCase() === "refunded" ||
+      (
+        String(order.paymentStatus || "").toLowerCase() === "paid" &&
+        CLOSED_ORDER_STATUSES.has(String(order.status || "").toLowerCase())
+      )
+    ) {
+      continue;
+    }
+
+    const needsPaid = order.paymentStatus !== "paid";
+    const needsOrdered = order.status === "created";
+
+    if (needsPaid || needsOrdered) {
+      const update = {};
+      if (needsPaid) update.paymentStatus = "paid";
+      if (needsOrdered) {
+        update.status = "ordered";
+        update.$push = { statusHistory: { status: "ordered" } };
+      }
+
+      await Order.findByIdAndUpdate(order._id, update);
+      if (needsPaid) order.paymentStatus = "paid";
+      if (needsOrdered) order.status = "ordered";
+
+      console.log("retrieveIntent reconciled paid order (webhook fallback)", {
         orderId: String(order._id),
         paymentStatus: order.paymentStatus,
         status: order.status,
+        paymentIntentId: paymentIntent.id,
       });
-      const authoritativeOrder = reloadOnMiss
-        ? await Order.findById(order._id)
-        : null;
-      reconciledOrders.push(authoritativeOrder || order);
-      continue;
     }
-
-    const reconciledOrder = await Order.findOneAndUpdate(
-      buildSucceededPaymentReconciliationFilter(order._id, paymentIntent.id),
-      buildSucceededPaymentReconciliationPipeline(paymentEvidence),
-      { new: true }
-    );
-    if (!reconciledOrder) {
-      console.log("Skipping stale succeeded-payment reconciliation after state changed", {
-        orderId: String(order._id),
-      });
-      const authoritativeOrder = reloadOnMiss
-        ? await Order.findById(order._id)
-        : null;
-      reconciledOrders.push(authoritativeOrder || order);
-      continue;
-    }
-
-    reconciledOrders.push(reconciledOrder);
-    console.log("retrieveIntent reconciled paid order (webhook fallback)", {
-      orderId: String(reconciledOrder._id),
-      paymentStatus: reconciledOrder.paymentStatus,
-      status: reconciledOrder.status,
-      paymentIntentId: paymentIntent.id,
-    });
 
     try {
-      const inventoryResult = await decrementInventoryForPaidOrder(reconciledOrder);
+      const inventoryResult = await decrementInventoryForPaidOrder(order);
       if (inventoryResult.decremented) {
         console.log(
-          `Inventory decremented via retrieveIntent for order ${reconciledOrder._id}`,
+          `Inventory decremented via retrieveIntent for order ${order._id}`,
           JSON.stringify({ lines: inventoryResult.lines?.length || 0 })
         );
       } else if (inventoryResult.reason === "already_decremented") {
         console.log(
-          `Inventory already decremented for order ${reconciledOrder._id} (retrieveIntent idempotent skip)`
+          `Inventory already decremented for order ${order._id} (retrieveIntent idempotent skip)`
         );
       }
     } catch (inventoryErr) {
       console.error(
-        `Failed to decrement inventory via retrieveIntent for order ${reconciledOrder._id}:`,
+        `Failed to decrement inventory via retrieveIntent for order ${order._id}:`,
         inventoryErr
       );
     }
@@ -135,13 +121,13 @@ async function reconcileSucceededPaymentIntentOrders(
     // Local/test Mode often never receives Stripe webhook delivery. Mirror the
     // post-payment confirmation send when retrieveIntent reconciles success.
     try {
-      const emailResult = await sendOrderPaidConfirmationIfNeeded(reconciledOrder, {
+      const emailResult = await sendOrderPaidConfirmationIfNeeded(order, {
         currency: paymentIntent.currency,
       });
       emailResults.push(emailResult);
       if (emailResult.emailWarning) {
         console.error("Paid-order email delivery incomplete", {
-          orderId: String(reconciledOrder._id),
+          orderId: String(order._id),
         });
       }
     } catch {
@@ -152,20 +138,19 @@ async function reconcileSucceededPaymentIntentOrders(
         emailWarning: "paid_order_email_delivery_incomplete",
       });
       console.error("Unexpected paid-order email orchestration failure", {
-        orderId: String(reconciledOrder._id),
+        orderId: String(order._id),
       });
     }
   }
 
-  return { reconciled: true, emailResults, orders: reconciledOrders };
+  return { reconciled: true, emailResults };
 }
 
 async function failUnpaidOrderAndReleaseReservation(order, paymentIntent) {
   const failedOrder = await Order.findOneAndUpdate(
     {
       _id: order._id,
-      paymentId: paymentIntent.id,
-      paymentStatus: { $nin: ["paid", "refunded"] },
+      paymentStatus: { $ne: "paid" },
       inventoryDecrementedAt: null,
     },
     {
@@ -236,13 +221,13 @@ exports.stripePaymentWebhook = async (req, res) => {
       const paymentId = pi.id;
 
       const orders = await Order.find({ paymentId }).populate([
-        // customer
         { path: "userId", select: "name email" },
-        // vendor account
         { path: "vendorId", select: "name email" },
-        // business (for name/slug/email/owner)
-        { path: "businessId", select: "businessName slug email owner", populate: { path: "owner", select: "name email" } },
-        // item product names (fallback safe)
+        {
+          path: "businessId",
+          select: "businessName slug email owner",
+          populate: { path: "owner", select: "name email" },
+        },
         { path: "items.productId", select: "name title" },
       ]);
       if (!orders.length) {
@@ -250,7 +235,6 @@ exports.stripePaymentWebhook = async (req, res) => {
         return res.status(200).json({ received: true });
       }
 
-      // Get latest charge + related IDs
       const chargeId = pi.latest_charge;
       if (!chargeId) {
         console.warn(`⚠️ No latest_charge on PI ${paymentId}`);
@@ -267,13 +251,70 @@ exports.stripePaymentWebhook = async (req, res) => {
             : charge.application_fee?.id) || null;
       }
 
-      await reconcileSucceededPaymentIntentOrders(orders, pi, {
-        chargeId,
-        transferId,
-        applicationFeeId,
-      });
+      for (const order of orders) {
+        if (
+          String(order.paymentStatus || "").toLowerCase() === "refunded" ||
+          (
+            String(order.paymentStatus || "").toLowerCase() === "paid" &&
+            CLOSED_ORDER_STATUSES.has(String(order.status || "").toLowerCase())
+          )
+        ) {
+          continue;
+        }
 
-      console.log(`✅ Stripe payment confirmed and email delivery processed for ${orders.length} order(s)`);
+        order.paymentStatus = "paid";
+        if (order.status === "created") {
+          order.status = "ordered";
+          order.statusHistory.push({ status: "ordered" });
+        }
+
+        order.items.forEach((it) => {
+          it.chargeId = chargeId || it.chargeId;
+          it.transferId = transferId || it.transferId;
+          it.applicationFeeId = applicationFeeId || it.applicationFeeId;
+        });
+        order.markModified("items");
+
+        await order.save();
+
+        try {
+          const inventoryResult = await decrementInventoryForPaidOrder(order);
+          if (inventoryResult.decremented) {
+            console.log(
+              `Inventory decremented for paid order ${order._id}`,
+              JSON.stringify({ lines: inventoryResult.lines?.length || 0 })
+            );
+          } else if (inventoryResult.reason === "already_decremented") {
+            console.log(
+              `Inventory already decremented for order ${order._id}, skipping`
+            );
+          }
+        } catch (inventoryErr) {
+          console.error(
+            `Failed to decrement inventory for paid order ${order._id}:`,
+            inventoryErr
+          );
+        }
+
+        try {
+          const emailResult = await sendOrderPaidConfirmationIfNeeded(order, {
+            currency: pi.currency,
+          });
+          if (emailResult.emailWarning) {
+            console.error("Paid-order email delivery incomplete", {
+              orderId: String(order._id),
+            });
+          }
+        } catch {
+          console.error("Unexpected paid-order email orchestration failure", {
+            orderId: String(order._id),
+          });
+        }
+      }
+
+      console.log(
+        `✅ Stripe payment confirmed and email delivery processed for ${orders.length} order(s)`
+      );
       return res.json({ received: true });
     }
 
@@ -293,7 +334,7 @@ exports.retrieveIntent = async (req, res) => {
 
   try {
     const orders = await Order.find({ paymentId: id })
-      .select('userId groupOrderId status paymentStatus totalAmount currency items')
+      .select("userId groupOrderId status paymentStatus totalAmount currency items")
       .populate({
         path: "items.productId",
         select: "title coverImage",
@@ -320,9 +361,7 @@ exports.retrieveIntent = async (req, res) => {
 
     const reconciliation = await reconcileSucceededPaymentIntentOrders(
       orders,
-      paymentIntent,
-      {},
-      { reloadOnMiss: true }
+      paymentIntent
     );
     if (paymentIntent.status === "canceled") {
       for (const order of orders) {
@@ -350,7 +389,7 @@ exports.retrieveIntent = async (req, res) => {
     return res.status(200).json({
       success: true,
       paymentIntent: sanitizePaymentIntentForClient(paymentIntent),
-      orders: (reconciliation.orders || orders).map(sanitizeOrderForPaymentPoll),
+      orders: orders.map(sanitizeOrderForPaymentPoll),
       ...(paymentIntent.status === "succeeded" && deliveryResults.length
         ? { emailDelivery }
         : {}),

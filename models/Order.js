@@ -203,6 +203,14 @@ const orderSchema = new Schema(
     },
     paidOrderEmailDelivery: {
       version: Number,
+      invoiceAttachment: {
+        status: {
+          type: String,
+          enum: ["attached", "failed"],
+        },
+        error: { type: String, maxlength: 180 },
+        attemptedAt: Date,
+      },
       customer: {
         status: {
           type: String,
