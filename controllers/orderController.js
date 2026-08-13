@@ -137,6 +137,8 @@ function serializeOrderForResponse(order) {
   if (!order) return order;
   const payload = typeof order.toObject === "function" ? order.toObject() : { ...order };
   delete payload.lifecycleEmailLog;
+  delete payload.paidOrderEmailDelivery;
+  delete payload.paidConfirmationEmailSentAt;
   return payload;
 }
 
@@ -1100,7 +1102,7 @@ exports.getUserOrders = async (req, res) => {
     res.json({
       success: true,
       count: orders.length,
-      orders,
+      orders: orders.map(serializeOrderForResponse),
     });
   } catch (err) {
     console.error("Failed to fetch user orders:", err);
@@ -1127,7 +1129,7 @@ exports.getVendorOrders = async (req, res) => {
     res.json({
       success: true,
       count: orders.length,
-      orders,
+      orders: orders.map(serializeOrderForResponse),
     });
   } catch (err) {
     console.error("Error fetching vendor orders:", err);

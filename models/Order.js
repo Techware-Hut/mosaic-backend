@@ -93,7 +93,7 @@ const orderSchema = new Schema(
       required: true,
     },
     totalAmount: {
-      type: Number, // stored in smallest currency unit (e.g. paise if INR)
+      type: Number, // stored in major currency units; Stripe conversion happens at checkout
       required: true,
     },
     subtotalAmount: {
@@ -201,6 +201,55 @@ const orderSchema = new Schema(
       type: Date,
       default: null,
     },
+    paidOrderEmailDelivery: {
+      version: Number,
+      invoiceAttachment: {
+        status: {
+          type: String,
+          enum: ["attached", "failed"],
+        },
+        error: { type: String, maxlength: 180 },
+        attemptedAt: Date,
+      },
+      customer: {
+        status: {
+          type: String,
+          enum: ["processing", "sent", "partial", "skipped", "failed"],
+        },
+        claimToken: { type: String, maxlength: 64 },
+        attemptCount: { type: Number, default: 0 },
+        attemptedAt: Date,
+        completedAt: Date,
+        sentAt: Date,
+        provider: { type: String, maxlength: 40 },
+        messageId: { type: String, maxlength: 180 },
+        reason: { type: String, maxlength: 180 },
+        error: { type: String, maxlength: 180 },
+        recipientCount: Number,
+        acceptedCount: Number,
+        rejectedCount: Number,
+      },
+      vendor: {
+        status: {
+          type: String,
+          enum: ["processing", "sent", "partial", "skipped", "failed"],
+        },
+        claimToken: { type: String, maxlength: 64 },
+        attemptCount: { type: Number, default: 0 },
+        attemptedAt: Date,
+        completedAt: Date,
+        sentAt: Date,
+        provider: { type: String, maxlength: 40 },
+        messageId: { type: String, maxlength: 180 },
+        reason: { type: String, maxlength: 180 },
+        error: { type: String, maxlength: 180 },
+        recipientCount: Number,
+        acceptedCount: Number,
+        rejectedCount: Number,
+        preferenceAllowed: Boolean,
+        ownerSuppressed: Boolean,
+      },
+    },
     /** Set while checkout holds stock for an unpaid PaymentIntent. */
     inventoryReservedAt: {
       type: Date,
@@ -233,9 +282,12 @@ const orderSchema = new Schema(
         paymentStatus: String,
         deliveryStatus: {
           type: String,
-          enum: ["sent", "skipped", "failed"],
+          enum: ["sent", "partial", "skipped", "failed"],
         },
         recipientRole: String,
+        provider: { type: String, maxlength: 40 },
+        messageId: { type: String, maxlength: 180 },
+        reason: { type: String, maxlength: 180 },
         attemptedAt: {
           type: Date,
           default: Date.now,

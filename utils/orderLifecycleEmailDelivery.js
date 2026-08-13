@@ -13,6 +13,7 @@ function buildOrderLifecycleEmailFingerprint(order, event, details = {}) {
     event,
     status: order?.status || null,
     paymentStatus: order?.paymentStatus || null,
+    recipientRole: details.recipientRole || null,
     trackingId: details.trackingId || order?.trackingInfo?.trackingId || null,
     trackingUrl: details.trackingUrl || order?.trackingInfo?.trackingUrl || null,
   };
@@ -46,6 +47,9 @@ async function appendOrderLifecycleEmailLog(order, entry) {
     paymentStatus: order.paymentStatus,
     deliveryStatus: entry.deliveryStatus,
     recipientRole: entry.recipientRole || "customer",
+    provider: entry.provider ? truncate(entry.provider, 40) : undefined,
+    messageId: entry.messageId ? truncate(entry.messageId) : undefined,
+    reason: entry.reason ? truncate(entry.reason) : undefined,
     attemptedAt: new Date(),
     error: entry.error ? truncate(entry.error) : undefined,
   });

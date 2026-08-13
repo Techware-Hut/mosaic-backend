@@ -64,10 +64,19 @@ function buildOrderForPostPayment(overrides = {}) {
 
 function loadPostPaymentWebhook({
   orders = [],
-  mailShouldFail = false,
+  helperResult = {
+    sent: true,
+    skipped: false,
+    failed: false,
+    emailSent: true,
+    emailSkipped: false,
+    emailFailed: false,
+  },
+  helperShouldThrow = false,
   eventType = 'payment_intent.succeeded',
 } = {}) {
-  let emailSendCount = 0;
+  const helperCalls = [];
+  let directMailerCallCount = 0;
   let inventoryReleaseCount = 0;
 
   const stripeMock = {
@@ -79,7 +88,9 @@ function loadPostPaymentWebhook({
             id: PAYMENT_ID,
             status: eventType === 'payment_intent.payment_failed'
               ? 'requires_payment_method'
-              : 'succeeded',
+              : eventType === 'payment_intent.canceled'
+                ? 'canceled'
+                : 'succeeded',
             latest_charge: 'ch_test_001',
             currency: 'usd',
           },
@@ -124,20 +135,26 @@ function loadPostPaymentWebhook({
     if (request.endsWith('utils/OrderMail')) {
       return {
         sendOrderPaidEmails: async () => {
-          emailSendCount += 1;
-          if (mailShouldFail) {
-            throw new Error('SMTP unavailable');
-          }
+          directMailerCallCount += 1;
+          throw new Error('controller must not call the provider mailer directly');
         },
       };
     }
     if (request.endsWith('utils/sendOrderPaidConfirmation')) {
       return {
-        sendOrderPaidConfirmationIfNeeded: async () => ({
-          sent: false,
-          skipped: true,
-          reason: 'mocked_unused_on_direct_post_payment_path',
+        publicPaidOrderEmailDelivery: (result) => ({
+          emailSent: Boolean(result?.emailSent),
+          emailSkipped: Boolean(result?.emailSkipped),
+          emailFailed: Boolean(result?.emailFailed),
+          ...(result?.emailWarning ? { emailWarning: result.emailWarning } : {}),
         }),
+        sendOrderPaidConfirmationIfNeeded: async (...args) => {
+          helperCalls.push(args);
+          if (helperShouldThrow) {
+            throw new Error('sensitive SMTP failure detail');
+          }
+          return helperResult;
+        },
       };
     }
     if (request.endsWith('lib/inventory/orderInventory')) {
@@ -161,15 +178,20 @@ function loadPostPaymentWebhook({
 
   return {
     stripePaymentWebhook,
-    getEmailSendCount: () => emailSendCount,
+    getHelperCalls: () => helperCalls,
+    getDirectMailerCallCount: () => directMailerCallCount,
     getInventoryReleaseCount: () => inventoryReleaseCount,
   };
 }
 
-test('post-payment webhook calls sendOrderPaidEmails on success', async () => {
+test('post-payment webhook delegates successful delivery to the paid-confirmation helper', async () => {
   process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
   const order = buildOrderForPostPayment();
-  const { stripePaymentWebhook, getEmailSendCount } = loadPostPaymentWebhook({ orders: [order] });
+  const {
+    stripePaymentWebhook,
+    getHelperCalls,
+    getDirectMailerCallCount,
+  } = loadPostPaymentWebhook({ orders: [order] });
   const res = mockResponse();
 
   await stripePaymentWebhook(
@@ -181,52 +203,119 @@ test('post-payment webhook calls sendOrderPaidEmails on success', async () => {
   );
 
   assert.ok(res.body.received);
-  assert.equal(getEmailSendCount(), 1);
-  assert.ok(order.paidConfirmationEmailSentAt instanceof Date);
-  assert.equal(order.lifecycleEmailLog.length, 1);
-  assert.equal(order.lifecycleEmailLog[0].event, 'order_paid_confirmation');
-  assert.equal(order.lifecycleEmailLog[0].deliveryStatus, 'sent');
+  assert.equal(getHelperCalls().length, 1);
+  assert.equal(getHelperCalls()[0][0], order);
+  assert.deepEqual(getHelperCalls()[0][1], { currency: 'usd' });
+  assert.equal(getDirectMailerCallCount(), 0);
 });
 
-test('post-payment webhook still returns received when email send fails', async () => {
+test('post-payment webhook acknowledges payment when helper reports delivery failure', async () => {
   process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
   const order = buildOrderForPostPayment();
   const errorLogs = [];
   const originalError = console.error;
   console.error = (...args) => errorLogs.push(args.join(' '));
 
-  const { stripePaymentWebhook, getEmailSendCount } = loadPostPaymentWebhook({
+  const {
+    stripePaymentWebhook,
+    getHelperCalls,
+    getDirectMailerCallCount,
+  } = loadPostPaymentWebhook({
     orders: [order],
-    mailShouldFail: true,
+    helperResult: {
+      sent: false,
+      skipped: false,
+      failed: true,
+      emailSent: false,
+      emailSkipped: false,
+      emailFailed: true,
+      emailWarning: 'paid_order_email_delivery_incomplete',
+      error: 'sensitive SMTP failure detail',
+    },
   });
   const res = mockResponse();
 
-  await stripePaymentWebhook(
-    {
-      headers: { 'stripe-signature': 'sig_test' },
-      body: Buffer.from('{}'),
-    },
-    res
-  );
-
-  console.error = originalError;
+  try {
+    await stripePaymentWebhook(
+      {
+        headers: { 'stripe-signature': 'sig_test' },
+        body: Buffer.from('{}'),
+      },
+      res
+    );
+  } finally {
+    console.error = originalError;
+  }
 
   assert.ok(res.body.received);
-  assert.equal(getEmailSendCount(), 1);
-  assert.equal(order.paidConfirmationEmailSentAt, null);
-  assert.equal(order.lifecycleEmailLog.length, 1);
-  assert.equal(order.lifecycleEmailLog[0].deliveryStatus, 'failed');
-  assert.ok(order.lifecycleEmailLog[0].error.includes('SMTP unavailable'));
-  assert.ok(errorLogs.some((line) => line.includes('SMTP unavailable')));
+  assert.equal(getHelperCalls().length, 1);
+  assert.equal(getDirectMailerCallCount(), 0);
+  assert.ok(errorLogs.some((line) => line.includes('delivery incomplete')));
+  assert.ok(!errorLogs.some((line) => line.includes('sensitive SMTP failure detail')));
   assert.ok(!errorLogs.some((line) => line.includes('whsec_')));
 });
 
-test('post-payment webhook skips duplicate paid confirmation emails', async () => {
+test('post-payment webhook acknowledges payment and redacts an unexpected helper exception', async () => {
   process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
-  const order = buildOrderForPostPayment({
-    paidConfirmationEmailSentAt: new Date('2026-06-18T00:00:00.000Z'),
+  const order = buildOrderForPostPayment();
+  const errorLogs = [];
+  const originalError = console.error;
+  console.error = (...args) => errorLogs.push(args.join(' '));
+
+  const {
+    stripePaymentWebhook,
+    getHelperCalls,
+    getDirectMailerCallCount,
+  } = loadPostPaymentWebhook({
+    orders: [order],
+    helperShouldThrow: true,
   });
-  const { stripePaymentWebhook, getEmailSendCount } = loadPostPaymentWebhook({ orders: [order] });
+  const res = mockResponse();
+
+  try {
+    await stripePaymentWebhook(
+      {
+        headers: { 'stripe-signature': 'sig_test' },
+        body: Buffer.from('{}'),
+      },
+      res
+    );
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.ok(res.body.received);
+  assert.equal(getHelperCalls().length, 1);
+  assert.equal(getDirectMailerCallCount(), 0);
+  assert.ok(errorLogs.some((line) => line.includes('orchestration failure')));
+  assert.ok(!errorLogs.some((line) => line.includes('sensitive SMTP failure detail')));
+  assert.ok(!errorLogs.some((line) => line.includes('whsec_')));
+});
+
+test('post-payment webhook delegates legacy replay idempotency to the shared helper', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const sentAt = new Date('2026-06-18T00:00:00.000Z');
+  const order = buildOrderForPostPayment({
+    paymentStatus: 'paid',
+    status: 'ordered',
+    paidConfirmationEmailSentAt: sentAt,
+  });
+  const {
+    stripePaymentWebhook,
+    getHelperCalls,
+    getDirectMailerCallCount,
+  } = loadPostPaymentWebhook({
+    orders: [order],
+    helperResult: {
+      sent: false,
+      skipped: true,
+      failed: false,
+      emailSent: true,
+      emailSkipped: false,
+      emailFailed: false,
+      reason: 'already_sent_legacy',
+    },
+  });
   const res = mockResponse();
 
   await stripePaymentWebhook(
@@ -238,8 +327,37 @@ test('post-payment webhook skips duplicate paid confirmation emails', async () =
   );
 
   assert.ok(res.body.received);
-  assert.equal(getEmailSendCount(), 0);
-  assert.equal(order.lifecycleEmailLog.length, 0);
+  assert.equal(getHelperCalls().length, 1);
+  assert.equal(getDirectMailerCallCount(), 0);
+  assert.equal(order.paidConfirmationEmailSentAt, sentAt);
+});
+
+test('post-payment webhook does not reopen or email a refunded order', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const order = buildOrderForPostPayment({
+    paymentStatus: 'refunded',
+    status: 'refunded',
+  });
+  const {
+    stripePaymentWebhook,
+    getHelperCalls,
+    getDirectMailerCallCount,
+  } = loadPostPaymentWebhook({ orders: [order] });
+  const res = mockResponse();
+
+  await stripePaymentWebhook(
+    {
+      headers: { 'stripe-signature': 'sig_test' },
+      body: Buffer.from('{}'),
+    },
+    res
+  );
+
+  assert.ok(res.body.received);
+  assert.equal(getHelperCalls().length, 0);
+  assert.equal(getDirectMailerCallCount(), 0);
+  assert.equal(order.paymentStatus, 'refunded');
+  assert.equal(order.status, 'refunded');
 });
 
 test('post-payment webhook does not send confirmation on failed payment event', async () => {
@@ -247,7 +365,8 @@ test('post-payment webhook does not send confirmation on failed payment event', 
   const order = buildOrderForPostPayment();
   const {
     stripePaymentWebhook,
-    getEmailSendCount,
+    getHelperCalls,
+    getDirectMailerCallCount,
     getInventoryReleaseCount,
   } = loadPostPaymentWebhook({
     orders: [order],
@@ -264,9 +383,40 @@ test('post-payment webhook does not send confirmation on failed payment event', 
   );
 
   assert.ok(res.body.received);
-  assert.equal(getEmailSendCount(), 0);
+  assert.equal(getHelperCalls().length, 0);
+  assert.equal(getDirectMailerCallCount(), 0);
   assert.equal(order.paidConfirmationEmailSentAt, null);
   assert.equal(order.lifecycleEmailLog.length, 0);
+  assert.equal(getInventoryReleaseCount(), 1);
+  assert.equal(order.paymentStatus, 'failed');
+  assert.equal(order.status, 'cancelled');
+});
+
+test('post-payment webhook does not send confirmation on canceled payment event', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const order = buildOrderForPostPayment();
+  const {
+    stripePaymentWebhook,
+    getHelperCalls,
+    getDirectMailerCallCount,
+    getInventoryReleaseCount,
+  } = loadPostPaymentWebhook({
+    orders: [order],
+    eventType: 'payment_intent.canceled',
+  });
+  const res = mockResponse();
+
+  await stripePaymentWebhook(
+    {
+      headers: { 'stripe-signature': 'sig_test' },
+      body: Buffer.from('{}'),
+    },
+    res
+  );
+
+  assert.ok(res.body.received);
+  assert.equal(getHelperCalls().length, 0);
+  assert.equal(getDirectMailerCallCount(), 0);
   assert.equal(getInventoryReleaseCount(), 1);
   assert.equal(order.paymentStatus, 'failed');
   assert.equal(order.status, 'cancelled');

@@ -6,6 +6,7 @@ const {
   resolveVendorNotificationRecipients,
   resolveVendorBookingNotificationRecipients,
   filterOrderPaidVendorEmails,
+  resolveOrderPaidVendorEmailDelivery,
 } = require('../../utils/notificationPreferenceGate');
 
 test('resolveVendorNotificationRecipients includes business email and owner when prefs allow', async () => {
@@ -81,6 +82,80 @@ test('filterOrderPaidVendorEmails removes owner email when payment prefs block',
     );
 
     assert.deepEqual(filtered, ['shop@example.com']);
+  } finally {
+    User.findById = originalFindById;
+  }
+});
+
+test('paid-order resolver suppresses an owner alias stored as the business email', async () => {
+  const User = require('../../models/User');
+  const originalFindById = User.findById;
+  User.findById = () => ({
+    select: () => ({
+      lean: async () => ({
+      notificationPreferences: {
+        paymentReceived: false,
+        newBookingOrOrder: true,
+      },
+      }),
+    }),
+  });
+
+  try {
+    const result = await resolveOrderPaidVendorEmailDelivery({
+      vendorId: {
+        _id: '507f1f77bcf86cd799439098',
+        email: 'owner@example.com',
+      },
+      businessId: {
+        email: 'owner@example.com',
+        owner: {
+          _id: '507f1f77bcf86cd799439098',
+          email: 'owner@example.com',
+        },
+      },
+    });
+
+    assert.deepEqual(result.recipients, []);
+    assert.equal(result.reason, 'vendor_preference_disabled');
+    assert.equal(result.ownerSuppressed, true);
+  } finally {
+    User.findById = originalFindById;
+  }
+});
+
+test('paid-order preference disables the complete vendor notification role', async () => {
+  const User = require('../../models/User');
+  const originalFindById = User.findById;
+  User.findById = () => ({
+    select: () => ({
+      lean: async () => ({
+        notificationPreferences: {
+          paymentReceived: false,
+          newBookingOrOrder: true,
+        },
+      }),
+    }),
+  });
+
+  try {
+    const result = await resolveOrderPaidVendorEmailDelivery({
+      vendorId: {
+        _id: '507f1f77bcf86cd799439098',
+        email: 'owner@example.com',
+      },
+      businessId: {
+        email: 'orders@shop.example',
+        owner: {
+          _id: '507f1f77bcf86cd799439098',
+          email: 'owner@example.com',
+        },
+      },
+    });
+
+    assert.deepEqual(result.recipients, []);
+    assert.equal(result.preferenceAllowed, false);
+    assert.equal(result.reason, 'vendor_preference_disabled');
   } finally {
     User.findById = originalFindById;
   }
