@@ -298,11 +298,17 @@ function loadPostPaymentWebhook({ orders = [], charge = {} } = {}) {
 
 function matchesOrderFilter(order, filter) {
   return Object.entries(filter).every(([key, expected]) => {
+    if (key === '$nor') {
+      return expected.every((branch) => !matchesOrderFilter(order, branch));
+    }
     const actual = order[key];
     if (key === '_id') return String(actual) === String(expected);
     if (expected === null) return actual == null;
     if (expected && typeof expected === 'object' && '$ne' in expected) {
       return actual !== expected.$ne;
+    }
+    if (expected && typeof expected === 'object' && '$in' in expected) {
+      return expected.$in.includes(actual);
     }
     return actual === expected;
   });

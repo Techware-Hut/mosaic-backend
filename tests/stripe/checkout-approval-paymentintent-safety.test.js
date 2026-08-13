@@ -35,6 +35,14 @@ function loadRetrieveIntent({
   orders = [],
   stripeError = null,
   paymentIntentStatus = 'succeeded',
+  emailResult = {
+    sent: true,
+    skipped: false,
+    failed: false,
+    emailSent: true,
+    emailSkipped: false,
+    emailFailed: false,
+  },
 } = {}) {
   const orderUpdates = [];
   let inventoryCalls = 0;
@@ -96,10 +104,13 @@ function loadRetrieveIntent({
     }
     if (request.endsWith('utils/sendOrderPaidConfirmation')) {
       return {
-        sendOrderPaidConfirmationIfNeeded: async () => ({
-          sent: true,
-          skipped: false,
+        publicPaidOrderEmailDelivery: (result) => ({
+          emailSent: Boolean(result?.emailSent),
+          emailSkipped: Boolean(result?.emailSkipped),
+          emailFailed: Boolean(result?.emailFailed),
+          ...(result?.emailWarning ? { emailWarning: result.emailWarning } : {}),
         }),
+        sendOrderPaidConfirmationIfNeeded: async () => emailResult,
       };
     }
     return originalLoad(request, parent, isMain);
@@ -152,6 +163,45 @@ test('retrieveIntent returns sanitized paymentIntent without Stripe internals', 
   assert.equal(res.body.orders[0].status, 'ordered');
   assert.equal(res.body.orders[0].items[0].title, 'Test Product');
   assert.equal(res.body.orders[0].userId, undefined);
+});
+
+test('retrieveIntent exposes only frontend-safe email delivery flags and warning', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const orders = [{
+    _id: orderId,
+    userId: { toString: () => userId },
+    groupOrderId: 'grp-001',
+    status: 'created',
+    paymentStatus: 'pending',
+    totalAmount: 30,
+    currency: 'USD',
+    items: [],
+  }];
+
+  const { retrieveIntent } = loadRetrieveIntent({
+    orders,
+    emailResult: {
+      sent: false,
+      skipped: false,
+      failed: true,
+      emailSent: false,
+      emailSkipped: false,
+      emailFailed: true,
+      emailWarning: 'paid_order_email_delivery_incomplete',
+    },
+  });
+  const res = mockResponse();
+
+  await retrieveIntent({ params: { id: paymentId }, user: { id: userId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.emailDelivery, {
+    emailSent: false,
+    emailSkipped: false,
+    emailFailed: true,
+    emailWarning: 'paid_order_email_delivery_incomplete',
+  });
+  assert.doesNotMatch(JSON.stringify(res.body), /smtp|claimToken|messageId/i);
 });
 
 test('retrieveIntent blocks access when order belongs to different customer', async () => {

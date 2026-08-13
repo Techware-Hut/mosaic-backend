@@ -360,7 +360,7 @@ All schemas are Mongoose models in [`models/`](../models/). Open the file for fi
 
 ### Utils (`utils/`)
 
-Cross-cutting helpers: mail (`mailer.js`, `OrderMail.js`, `bookingMailer.js`, etc.), cookies (`cookieHelper.js`), tax/shipping (`vendorTax.js`, `vendorShipping.js`), onboarding sync (`syncBusinessFromOnboarding.js`), upload (`uploadFile.js`), DTOs (`toPublicAuthUser.js`, `toAdminUser.js`), PDF (`pdfFromHtml.js`, `invoiceHtml.js`).
+Cross-cutting helpers: mail (`mailer.js`, `OrderMail.js`, `bookingMailer.js`, etc.), cookies (`cookieHelper.js`), tax/shipping (`vendorTax.js`, `vendorShipping.js`), onboarding sync (`syncBusinessFromOnboarding.js`), upload (`uploadFile.js`), and DTOs (`toPublicAuthUser.js`). Invoice PDFs are rendered with PDFKit in `services/invoiceService.js` without a browser runtime.
 
 ### Validators (`validators/`)
 

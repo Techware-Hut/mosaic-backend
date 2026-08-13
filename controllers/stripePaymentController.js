@@ -1,10 +1,5 @@
 const Stripe = require("stripe");
 const Order = require("../models/Order");
-const { sendOrderPaidEmails } = require("../utils/OrderMail");
-const {
-  appendOrderLifecycleEmailLog,
-  buildOrderLifecycleEmailFingerprint,
-} = require("../utils/orderLifecycleEmailDelivery");
 const {
   sanitizePaymentIntentForClient,
   sanitizeOrderForPaymentPoll,
@@ -14,9 +9,21 @@ const {
   releaseInventoryReservation,
 } = require("../lib/inventory/orderInventory");
 const {
+  publicPaidOrderEmailDelivery,
   sendOrderPaidConfirmationIfNeeded,
 } = require("../utils/sendOrderPaidConfirmation");
+const { CLOSED_ORDER_STATUSES } = require("../utils/orderPaidEmailEligibility");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+const toPublicEmailDelivery = (result) =>
+  typeof publicPaidOrderEmailDelivery === "function"
+    ? publicPaidOrderEmailDelivery(result)
+    : {
+        emailSent: Boolean(result?.emailSent),
+        emailSkipped: Boolean(result?.emailSkipped),
+        emailFailed: Boolean(result?.emailFailed),
+        ...(result?.emailWarning ? { emailWarning: result.emailWarning } : {}),
+      };
 
 async function cancelRetryablePaymentIntent(paymentIntent) {
   if (!paymentIntent?.id) {
@@ -54,10 +61,21 @@ async function cancelRetryablePaymentIntent(paymentIntent) {
  */
 async function reconcileSucceededPaymentIntentOrders(orders, paymentIntent) {
   if (!paymentIntent || paymentIntent.status !== "succeeded") {
-    return { reconciled: false };
+    return { reconciled: false, emailResults: [] };
   }
 
+  const emailResults = [];
   for (const order of orders) {
+    if (
+      String(order.paymentStatus || "").toLowerCase() === "refunded" ||
+      (
+        String(order.paymentStatus || "").toLowerCase() === "paid" &&
+        CLOSED_ORDER_STATUSES.has(String(order.status || "").toLowerCase())
+      )
+    ) {
+      continue;
+    }
+
     const needsPaid = order.paymentStatus !== "paid";
     const needsOrdered = order.status === "created";
 
@@ -103,18 +121,29 @@ async function reconcileSucceededPaymentIntentOrders(orders, paymentIntent) {
     // Local/test Mode often never receives Stripe webhook delivery. Mirror the
     // post-payment confirmation send when retrieveIntent reconciles success.
     try {
-      await sendOrderPaidConfirmationIfNeeded(order, {
+      const emailResult = await sendOrderPaidConfirmationIfNeeded(order, {
         currency: paymentIntent.currency,
       });
-    } catch (emailErr) {
-      console.error(
-        `Failed to send paid confirmation via retrieveIntent for order ${order._id}:`,
-        emailErr
-      );
+      emailResults.push(emailResult);
+      if (emailResult.emailWarning) {
+        console.error("Paid-order email delivery incomplete", {
+          orderId: String(order._id),
+        });
+      }
+    } catch {
+      emailResults.push({
+        emailSent: false,
+        emailSkipped: false,
+        emailFailed: true,
+        emailWarning: "paid_order_email_delivery_incomplete",
+      });
+      console.error("Unexpected paid-order email orchestration failure", {
+        orderId: String(order._id),
+      });
     }
   }
 
-  return { reconciled: true };
+  return { reconciled: true, emailResults };
 }
 
 async function failUnpaidOrderAndReleaseReservation(order, paymentIntent) {
@@ -192,13 +221,13 @@ exports.stripePaymentWebhook = async (req, res) => {
       const paymentId = pi.id;
 
       const orders = await Order.find({ paymentId }).populate([
-        // customer
         { path: "userId", select: "name email" },
-        // vendor account
         { path: "vendorId", select: "name email" },
-        // business (for name/slug/email/owner)
-        { path: "businessId", select: "businessName slug email owner", populate: { path: "owner", select: "name email" } },
-        // item product names (fallback safe)
+        {
+          path: "businessId",
+          select: "businessName slug email owner",
+          populate: { path: "owner", select: "name email" },
+        },
         { path: "items.productId", select: "name title" },
       ]);
       if (!orders.length) {
@@ -206,7 +235,6 @@ exports.stripePaymentWebhook = async (req, res) => {
         return res.status(200).json({ received: true });
       }
 
-      // Get latest charge + related IDs
       const chargeId = pi.latest_charge;
       if (!chargeId) {
         console.warn(`⚠️ No latest_charge on PI ${paymentId}`);
@@ -224,16 +252,21 @@ exports.stripePaymentWebhook = async (req, res) => {
       }
 
       for (const order of orders) {
-        const shouldSendPaidEmail = !order.paidConfirmationEmailSentAt;
+        if (
+          String(order.paymentStatus || "").toLowerCase() === "refunded" ||
+          (
+            String(order.paymentStatus || "").toLowerCase() === "paid" &&
+            CLOSED_ORDER_STATUSES.has(String(order.status || "").toLowerCase())
+          )
+        ) {
+          continue;
+        }
 
-        // status updates
         order.paymentStatus = "paid";
         if (order.status === "created") {
           order.status = "ordered";
           order.statusHistory.push({ status: "ordered" });
         }
-
-        // store IDs on each item (matches your current schema)
 
         order.items.forEach((it) => {
           it.chargeId = chargeId || it.chargeId;
@@ -241,11 +274,6 @@ exports.stripePaymentWebhook = async (req, res) => {
           it.applicationFeeId = applicationFeeId || it.applicationFeeId;
         });
         order.markModified("items");
-
-        // If you later add top-level fields on the order, you can also set:
-        // order.chargeId = chargeId;
-        // order.transferId = transferId;
-        // order.applicationFeeId = applicationFeeId;
 
         await order.save();
 
@@ -266,59 +294,27 @@ exports.stripePaymentWebhook = async (req, res) => {
             `Failed to decrement inventory for paid order ${order._id}:`,
             inventoryErr
           );
-          // Payment is already succeeded — do not fail the webhook; ops can reconcile.
         }
 
-        if (!shouldSendPaidEmail) {
-          console.log(
-            `Paid confirmation email already sent for order ${order._id}, skipping duplicate send`
-          );
-          continue;
-        }
-
-        // ✅ recipients (deduped)
-        const customerEmails = [...new Set([order.userId?.email].filter(Boolean))];
-
-        const vendorEmails = [
-          order.vendorId?.email,
-          order.businessId?.email,
-          order.businessId?.owner?.email,
-        ].filter(Boolean);
-        const uniqueVendorEmails = [...new Set(vendorEmails)];
-        const paidEmailFingerprint = buildOrderLifecycleEmailFingerprint(
-          order,
-          "order_paid_confirmation"
-        );
-
-        // ✅ send emails (best-effort)
         try {
-          await sendOrderPaidEmails({
-            order,                           // hydrated order (with userId, vendorId, businessId, items.productId)
-            currency: pi.currency,           // e.g. 'usd' or 'inr'
-            customerEmails,
-            vendorEmails: uniqueVendorEmails,
+          const emailResult = await sendOrderPaidConfirmationIfNeeded(order, {
+            currency: pi.currency,
           });
-          order.paidConfirmationEmailSentAt = new Date();
-          await order.save();
-          await appendOrderLifecycleEmailLog(order, {
-            event: "order_paid_confirmation",
-            fingerprint: paidEmailFingerprint,
-            deliveryStatus: "sent",
-            recipientRole: "customer",
+          if (emailResult.emailWarning) {
+            console.error("Paid-order email delivery incomplete", {
+              orderId: String(order._id),
+            });
+          }
+        } catch {
+          console.error("Unexpected paid-order email orchestration failure", {
+            orderId: String(order._id),
           });
-        } catch (mailErr) {
-          await appendOrderLifecycleEmailLog(order, {
-            event: "order_paid_confirmation",
-            fingerprint: paidEmailFingerprint,
-            deliveryStatus: "failed",
-            recipientRole: "customer",
-            error: mailErr?.message || "Unknown email error",
-          });
-          console.error("✉️ Failed to send order-paid emails:", mailErr?.message || mailErr);
         }
       }
 
-      console.log(`✅ Stripe payment confirmed and emails sent for ${orders.length} order(s)`);
+      console.log(
+        `✅ Stripe payment confirmed and email delivery processed for ${orders.length} order(s)`
+      );
       return res.json({ received: true });
     }
 
@@ -338,7 +334,7 @@ exports.retrieveIntent = async (req, res) => {
 
   try {
     const orders = await Order.find({ paymentId: id })
-      .select('userId groupOrderId status paymentStatus totalAmount currency items')
+      .select("userId groupOrderId status paymentStatus totalAmount currency items")
       .populate({
         path: "items.productId",
         select: "title coverImage",
@@ -363,7 +359,10 @@ exports.retrieveIntent = async (req, res) => {
 
     const paymentIntent = await stripe.paymentIntents.retrieve(id);
 
-    await reconcileSucceededPaymentIntentOrders(orders, paymentIntent);
+    const reconciliation = await reconcileSucceededPaymentIntentOrders(
+      orders,
+      paymentIntent
+    );
     if (paymentIntent.status === "canceled") {
       for (const order of orders) {
         const failureResult = await failUnpaidOrderAndReleaseReservation(
@@ -377,10 +376,23 @@ exports.retrieveIntent = async (req, res) => {
       }
     }
 
+    const deliveryResults = reconciliation.emailResults || [];
+    const emailDelivery = toPublicEmailDelivery({
+      emailSent: deliveryResults.some((result) => result?.emailSent),
+      emailSkipped: deliveryResults.some((result) => result?.emailSkipped),
+      emailFailed: deliveryResults.some((result) => result?.emailFailed),
+      emailWarning: deliveryResults.some((result) => result?.emailWarning)
+        ? "paid_order_email_delivery_incomplete"
+        : undefined,
+    });
+
     return res.status(200).json({
       success: true,
       paymentIntent: sanitizePaymentIntentForClient(paymentIntent),
       orders: orders.map(sanitizeOrderForPaymentPoll),
+      ...(paymentIntent.status === "succeeded" && deliveryResults.length
+        ? { emailDelivery }
+        : {}),
     });
   } catch (error) {
     console.error("❌ Failed to retrieve payment intent:", error.message);

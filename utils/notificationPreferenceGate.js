@@ -71,6 +71,76 @@ async function filterOrderPaidVendorEmails(order, vendorEmails = []) {
 }
 
 /**
+ * Resolve paid-order recipients together with the preference decision so the
+ * orchestrator can persist an intentional skip separately from missing data.
+ * The paid-order preference gates the complete vendor-role notification. A
+ * disabled preference must not be bypassed by a second business-profile alias.
+ */
+async function resolveOrderPaidVendorEmailDelivery(order) {
+  const vendor = order?.vendorId || {};
+  const business = order?.businessId || {};
+  const businessOwner = business?.owner || {};
+  const vendorId = String(vendor?._id || vendor?.id || vendor || "");
+  const businessOwnerId = String(
+    businessOwner?._id || businessOwner?.id || businessOwner || ""
+  );
+  const ownerMatches = !businessOwnerId || !vendorId || businessOwnerId === vendorId;
+  const vendorEmail = String(vendor?.email || "").trim();
+  const ownerAlias = ownerMatches ? String(businessOwner?.email || "").trim() : "";
+  const dedupeEmails = (values) => {
+    const byLowerCase = new Map();
+    for (const value of values) {
+      const email = String(value || "").trim();
+      if (email && !byLowerCase.has(email.toLowerCase())) {
+        byLowerCase.set(email.toLowerCase(), email);
+      }
+    }
+    return [...byLowerCase.values()];
+  };
+  const ownerEmails = dedupeEmails([vendorEmail, ownerAlias]);
+  const rawBusinessEmail = String(business?.email || "").trim();
+  const businessEmail = ownerEmails.some(
+    (email) => email.toLowerCase() === rawBusinessEmail.toLowerCase()
+  )
+    ? ""
+    : rawBusinessEmail;
+  const ownerAllowed = await shouldSendVendorNotification(
+    vendor?._id || vendor?.id || vendor,
+    "paymentReceived"
+  );
+
+  if (!ownerAllowed) {
+    return {
+      recipients: [],
+      preferenceAllowed: false,
+      ownerSuppressed: ownerEmails.length > 0,
+      reason: "vendor_preference_disabled",
+    };
+  }
+
+  const recipients = dedupeEmails([
+    businessEmail,
+    ...ownerEmails,
+  ]);
+
+  if (recipients.length) {
+    return {
+      recipients,
+      preferenceAllowed: true,
+      ownerSuppressed: false,
+      reason: null,
+    };
+  }
+
+  return {
+    recipients: [],
+    preferenceAllowed: true,
+    ownerSuppressed: false,
+    reason: "missing_recipient",
+  };
+}
+
+/**
  * Booking requests are actionable notifications. Prefer preference-gated recipients,
  * but never drop the vendor alert entirely when a business/owner email exists.
  */
@@ -114,4 +184,5 @@ module.exports = {
   resolveVendorNotificationRecipients,
   resolveVendorBookingNotificationRecipients,
   filterOrderPaidVendorEmails,
+  resolveOrderPaidVendorEmailDelivery,
 };

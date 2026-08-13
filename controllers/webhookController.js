@@ -6,9 +6,19 @@ const {
   releaseInventoryReservation,
 } = require('../lib/inventory/orderInventory');
 const {
+  publicPaidOrderEmailDelivery,
   sendOrderPaidConfirmationIfNeeded,
 } = require('../utils/sendOrderPaidConfirmation');
 
+const toPublicEmailDelivery = (result) =>
+  typeof publicPaidOrderEmailDelivery === 'function'
+    ? publicPaidOrderEmailDelivery(result)
+    : {
+        emailSent: Boolean(result?.emailSent),
+        emailSkipped: Boolean(result?.emailSkipped),
+        emailFailed: Boolean(result?.emailFailed),
+        ...(result?.emailWarning ? { emailWarning: result.emailWarning } : {}),
+      };
 
 const toStripePayloadBuffer = (body) => {
   if (Buffer.isBuffer(body)) {
@@ -101,26 +111,35 @@ const reconcileSucceededOrderPayment = async (orderId, paymentIntent) => {
 
   // Primary Stripe order webhook historically only flipped paid/ordered.
   // Confirmation mail lives here so production `/api/webhooks/stripe` delivers it.
+  let emailResult;
   try {
-    const emailResult = await sendOrderPaidConfirmationIfNeeded(updatedOrder, {
+    emailResult = await sendOrderPaidConfirmationIfNeeded(updatedOrder, {
       currency: paymentIntent?.currency,
     });
     if (emailResult.sent) {
       console.log(`Order paid confirmation emailed for order ${updatedOrder._id}`);
-    } else if (emailResult.failed) {
-      console.error(
-        `Order paid confirmation email failed for order ${updatedOrder._id}:`,
-        emailResult.error?.message || emailResult.error
-      );
+    } else if (emailResult.emailWarning) {
+      console.error('Order paid confirmation email delivery incomplete', {
+        orderId: String(updatedOrder._id),
+      });
     }
   } catch (emailErr) {
-    console.error(
-      `Unexpected error sending paid confirmation for order ${updatedOrder._id}:`,
-      emailErr
-    );
+    emailResult = {
+      emailSent: false,
+      emailSkipped: false,
+      emailFailed: true,
+      emailWarning: 'paid_order_email_delivery_incomplete',
+    };
+    console.error('Unexpected paid-confirmation orchestration failure', {
+      orderId: String(updatedOrder._id),
+    });
   }
 
-  return { reconciled: true, order: updatedOrder };
+  return {
+    reconciled: true,
+    order: updatedOrder,
+    emailDelivery: toPublicEmailDelivery(emailResult),
+  };
 };
 
 const failUnpaidOrderAndReleaseReservation = async (orderId, paymentIntent) => {
@@ -292,9 +311,9 @@ const handleStripeWebhook = async (req, res) => {
 
       // Update order status to refunded
       try {
-        const refundedOrder = await Order.findByIdAndUpdate(refundedOrderId, { 
-          paymentStatus: 'refunded', 
-          status: 'refunded' 
+        const refundedOrder = await Order.findByIdAndUpdate(refundedOrderId, {
+          paymentStatus: 'refunded',
+          status: 'refunded',
         }, { new: true });
 
         if (!refundedOrder) {
@@ -462,4 +481,3 @@ const handleSubscriptionWebhook = async (req, res) => {
 
 
 module.exports = { handleStripeWebhook, handleSubscriptionWebhook };
-
