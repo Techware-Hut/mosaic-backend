@@ -1,0 +1,153 @@
+name: Trusted staging status publisher
+
+on:
+  workflow_run:
+    workflows:
+      - Staging release PR controller
+    types:
+      - completed
+
+concurrency:
+  group: mosaic-trusted-staging-status
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  publish-trusted-status:
+    name: Publish trusted staging certification
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: release-pr-controller
+    steps:
+      - name: Reject non-canonical completed controller
+        env:
+          TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
+          TRIGGER_REPOSITORY: ${{ github.event.workflow_run.repository.full_name }}
+          TRIGGER_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          TRIGGER_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          TRIGGER_WORKFLOW_PATH: ${{ github.event.workflow_run.path }}
+          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          if [ "$TRIGGER_EVENT" != "workflow_run" ] \
+            || [ "$TRIGGER_REPOSITORY" != "$GITHUB_REPOSITORY" ] \
+            || [ "$TRIGGER_HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ] \
+            || [ "$TRIGGER_BRANCH" != "main" ] \
+            || [ "$TRIGGER_WORKFLOW_PATH" != ".github/workflows/staging-release-pr-controller.yml" ] \
+            || [ "$TRIGGER_CONCLUSION" != "success" ]; then
+            echo "::error::Trusted status publisher rejected a non-canonical controller run."
+            exit 1
+          fi
+
+      - name: Checkout trusted current-main publisher
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+          path: release-control
+
+      - name: Download trusted controller artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: validated-staging-release-*
+          path: validated-certification
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Validate one exact trusted manifest
+        id: manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const root = path.resolve('validated-certification');
+          const entries = fs.readdirSync(root, { recursive: true, withFileTypes: true });
+          const files = entries.filter((entry) => entry.isFile());
+          if (files.length !== 1 || entries.some((entry) => entry.isSymbolicLink())) {
+            throw new Error('Trusted controller must publish exactly one regular manifest');
+          }
+          const file = path.join(files[0].parentPath || files[0].path, files[0].name);
+          const match = /^staging-certification-([0-9a-f]{40})\.json$/.exec(files[0].name);
+          if (!match || path.dirname(path.resolve(file)) !== root) {
+            throw new Error('Trusted manifest path or candidate identity is invalid');
+          }
+          const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (manifest.schemaVersion !== 1
+            || manifest.repository !== process.env.GITHUB_REPOSITORY
+            || manifest.sourceBranch !== 'staging'
+            || manifest.targetBranch !== 'main'
+            || manifest.candidateSha !== match[1]
+            || !/^[0-9a-f]{40}$/.test(manifest.mainSha || '')
+            || manifest.ci?.conclusion !== 'success') {
+            throw new Error('Trusted controller manifest identity is invalid');
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `candidate_sha=${match[1]}\nmain_sha=${manifest.mainSha}\nmanifest_path=${file}\n`);
+          NODE
+
+      - name: Validate current main and staging refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_MAIN_SHA: ${{ steps.manifest.outputs.main_sha }}
+          EXPECTED_STAGING_SHA: ${{ steps.manifest.outputs.candidate_sha }}
+          UPSTREAM_CONTROLLER_SHA: ${{ github.event.workflow_run.head_sha }}
+          PUBLISHER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          current_main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          current_staging=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/staging" --jq '.object.sha')
+          test "$current_main" = "$EXPECTED_MAIN_SHA"
+          test "$current_staging" = "$EXPECTED_STAGING_SHA"
+          test "$(git -C release-control rev-parse HEAD)" = "$current_main"
+          test "$UPSTREAM_CONTROLLER_SHA" = "$current_main"
+          test "$PUBLISHER_WORKFLOW_SHA" = "$current_main"
+
+      - name: Setup trusted Node.js runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Create status-only release App token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RELEASE_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-statuses: write
+
+      - name: Publish App-owned status only after controller success
+        env:
+          RELEASE_PR_TOKEN: ${{ steps.app-token.outputs.token }}
+          CANDIDATE_SHA: ${{ steps.manifest.outputs.candidate_sha }}
+          MANIFEST_PATH: ${{ steps.manifest.outputs.manifest_path }}
+          CONTROLLER_RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          node release-control/scripts/release/publish-trusted-staging-status.js \
+            --repository "$GITHUB_REPOSITORY" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --manifest "$MANIFEST_PATH" \
+            --target-url "$CONTROLLER_RUN_URL"
+
+      - name: Failure summary
+        if: ${{ always() && (failure() || cancelled()) }}
+        run: |
+          {
+            echo "## TRUSTED STAGING STATUS BLOCKED"
+            echo ""
+            echo "- Production mutation: **NO**"
+            echo "- Release PR merge eligibility: **BLOCKED**"
+            echo "- Next action: correct the trusted status prerequisite and rerun only for the current staging candidate."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,16 @@
+{
+  "name": "@mosaic/release-reservation-tool",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Immutable count-only production reservation diagnostic",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "ncc build index.js --minify --out dist"
+  },
+  "dependencies": {
+    "mongodb": "6.20.0"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "0.38.4"
+  }
+}

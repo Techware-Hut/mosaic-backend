@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "2.2",
+  "description": "Mosaic production release: return only active-reservation, incomplete-paid-order, and unresolved-payment-intent counts.",
+  "parameters": {},
+  "mainSteps": [
+    {
+      "action": "aws:runShellScript",
+      "name": "countActiveReservations",
+      "precondition": {
+        "StringEquals": [
+          "platformType",
+          "Linux"
+        ]
+      },
+      "inputs": {
+        "timeoutSeconds": "120",
+        "runCommand": [
+          "#!/usr/bin/env bash",
+          "set -euo pipefail",
+          "set +x",
+          "NODE_BIN=/usr/bin/node",
+          "TOOL=/opt/mosaic-release-control/reservation-check.cjs",
+          "GET_CONFIG=/opt/elasticbeanstalk/bin/get-config",
+          "EXPECTED_NODE_REALPATH='__PINNED_SYSTEM_NODE_REALPATH__'",
+          "EXPECTED_NODE_SHA256=__PINNED_SYSTEM_NODE_SHA256__",
+          "EXPECTED_TOOL_SHA256=__PINNED_RESERVATION_TOOL_SHA256__",
+          "EXPECTED_GET_CONFIG_SHA256=__PINNED_GET_CONFIG_SHA256__",
+          "if ! [[ \"$EXPECTED_NODE_REALPATH\" =~ ^/usr/bin/[A-Za-z0-9._+-]+$ ]] || ! [[ \"$EXPECTED_NODE_SHA256\" =~ ^[0-9a-f]{64}$ ]] || ! [[ \"$EXPECTED_TOOL_SHA256\" =~ ^[0-9a-f]{64}$ ]] || ! [[ \"$EXPECTED_GET_CONFIG_SHA256\" =~ ^[0-9a-f]{64}$ ]]; then exit 20; fi",
+          "NODE_REALPATH=$(/usr/bin/readlink -f \"$NODE_BIN\")",
+          "if [ \"$NODE_REALPATH\" != \"$EXPECTED_NODE_REALPATH\" ] || [ \"$(/usr/bin/readlink -f \"$TOOL\")\" != \"$TOOL\" ] || [ \"$(/usr/bin/readlink -f \"$GET_CONFIG\")\" != \"$GET_CONFIG\" ]; then exit 21; fi",
+          "secure_path() { local mode; [ \"$(/usr/bin/stat -Lc '%U:%G' \"$1\")\" = 'root:root' ] || return 1; mode=$(/usr/bin/stat -Lc '%a' \"$1\"); (( (8#$mode & 022) == 0 )); }",
+          "for trusted_dir in / /usr /usr/bin /opt /opt/mosaic-release-control /opt/elasticbeanstalk /opt/elasticbeanstalk/bin; do [ -d \"$trusted_dir\" ] && secure_path \"$trusted_dir\" || exit 22; done",
+          "[ -x \"$NODE_REALPATH\" ] && [ -f \"$TOOL\" ] && [ -x \"$GET_CONFIG\" ] || exit 21",
+          "secure_path \"$NODE_REALPATH\" && secure_path \"$TOOL\" && secure_path \"$GET_CONFIG\" || exit 22",
+          "read -r actual_node_hash _ < <(/usr/bin/sha256sum \"$NODE_REALPATH\"); [ \"$actual_node_hash\" = \"$EXPECTED_NODE_SHA256\" ] || exit 23",
+          "read -r actual_tool_hash _ < <(/usr/bin/sha256sum \"$TOOL\"); [ \"$actual_tool_hash\" = \"$EXPECTED_TOOL_SHA256\" ] || exit 24",
+          "read -r actual_get_config_hash _ < <(/usr/bin/sha256sum \"$GET_CONFIG\"); [ \"$actual_get_config_hash\" = \"$EXPECTED_GET_CONFIG_SHA256\" ] || exit 25",
+          "config_file=$(mktemp)",
+          "cleanup() { unset MONGODB_URI; rm -f \"$config_file\"; }",
+          "trap cleanup EXIT HUP INT TERM",
+          "chmod 600 \"$config_file\"",
+          "\"$GET_CONFIG\" environment > \"$config_file\"",
+          "MONGODB_URI=$(\"$NODE_REALPATH\" -e 'const fs=require(\"fs\");const value=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\")).MONGODB_URI;if(typeof value!==\"string\"||value.length===0)process.exit(26);process.stdout.write(value)' \"$config_file\")",
+          "env -i MONGODB_URI=\"$MONGODB_URI\" HOME=/root PATH=/usr/bin:/bin \"$NODE_REALPATH\" \"$TOOL\""
+        ]
+      }
+    }
+  ]
+}
