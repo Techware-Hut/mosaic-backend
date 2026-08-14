@@ -1,4 +1,4 @@
-name: Deploy to Elastic Beanstalk
+name: Mosaic Production Release
 
 on:
   push:
@@ -6,14 +6,32 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      release_sha:
-        description: Full 40-character commit SHA from main to deploy
+      mode:
+        description: Normal exact-main release or break-glass rollback
         required: true
+        type: choice
+        options:
+          - release
+          - rollback
+        default: release
+      release_sha:
+        description: Full current-main SHA, or rollback SHA in break-glass mode
+        required: true
+        type: string
+      confirmation:
+        description: For rollback only, type BREAK GLASS ROLLBACK EXACT SHA
+        required: false
         type: string
 
 concurrency:
-  group: deploy-production
+  group: mosaic-production-release
   cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  statuses: read
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
@@ -23,69 +41,60 @@ env:
 
 jobs:
   resolve-release:
-    name: Resolve release commit
+    name: Resolve exact production release
     runs-on: ubuntu-latest
     outputs:
       release_sha: ${{ steps.resolve.outputs.release_sha }}
+      current_main_sha: ${{ steps.resolve.outputs.current_main_sha }}
+      release_mode: ${{ steps.resolve.outputs.release_mode }}
+      normal_release: ${{ steps.resolve.outputs.normal_release }}
     steps:
       - name: Checkout main history
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Resolve and validate release SHA
+      - name: Resolve exact release identity
         id: resolve
-        shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          WORKFLOW_REF: ${{ github.ref }}
-          PUSH_SHA: ${{ github.sha }}
+          EVENT_SHA: ${{ github.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'release' }}
           REQUESTED_RELEASE_SHA: ${{ inputs.release_sha }}
+          ROLLBACK_CONFIRMATION: ${{ inputs.confirmation }}
         run: |
-          set -euo pipefail
+          node scripts/release/resolve-production-release.js \
+            --event "$EVENT_NAME" \
+            --event-sha "$EVENT_SHA" \
+            --workflow-sha "$WORKFLOW_SHA" \
+            --requested-sha "$REQUESTED_RELEASE_SHA" \
+            --mode "$RELEASE_MODE" \
+            --confirmation "$ROLLBACK_CONFIRMATION" \
+            --output release-evidence/release-identity.json
 
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            if [ "$WORKFLOW_REF" != "refs/heads/main" ]; then
-              echo "Production deployment must be dispatched from the main branch"
-              exit 1
-            fi
-            candidate="$REQUESTED_RELEASE_SHA"
-            if [[ ! "$candidate" =~ ^[0-9a-fA-F]{40}$ ]]; then
-              echo "release_sha must be a full 40-character Git commit SHA"
-              exit 1
-            fi
-          else
-            candidate="$PUSH_SHA"
-          fi
+      - name: Upload release identity
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-release-identity-${{ steps.resolve.outputs.release_sha }}
+          path: release-evidence/release-identity.json
+          if-no-files-found: error
+          retention-days: 90
 
-          git cat-file -e "${candidate}^{commit}" 2>/dev/null || {
-            echo "Release commit does not exist in this repository"
-            exit 1
-          }
-
-          release_sha=$(git rev-parse "${candidate}^{commit}")
-          git fetch --no-tags origin main
-          git merge-base --is-ancestor "$release_sha" origin/main || {
-            echo "Release commit is not reachable from origin/main"
-            exit 1
-          }
-
-          echo "Validated release commit: $release_sha"
-          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
-
-  test:
-    name: Test
+  exact-ci:
+    name: Exact SHA release tests
     needs: resolve-release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.resolve-release.outputs.release_sha }}
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
           cache: npm
@@ -93,194 +102,577 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
+      - name: Unit tests
         run: npm test
 
-  deploy:
-    name: Deploy
-    needs:
-      - resolve-release
-      - test
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+      - name: Contract tests
+        run: npm run test:contract
+
+      - name: Integration tests
+        run: npm run test:integration
+
+  target-checkout-surface:
+    name: Exact target checkout route proof
+    needs: resolve-release
     runs-on: ubuntu-latest
-    environment: production
-    timeout-minutes: 45
+    steps:
+      - name: Checkout trusted route-proof controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.resolve-release.outputs.current_main_sha }}
+          persist-credentials: false
+          path: release-control-runtime
+
+      - name: Checkout fresh exact target for runtime route proof
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
+          persist-credentials: false
+          path: release-target-runtime
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: release-target-runtime/package-lock.json
+
+      - name: Install exact-target runtime without lifecycle scripts
+        working-directory: release-target-runtime
+        run: npm ci --ignore-scripts
+
+      - name: Prove exact target has only the canonical checkout initiator
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+        run: |
+          node release-control-runtime/scripts/release/probe-target-checkout-surface.js \
+            --root release-target-runtime \
+            --release-sha "$RELEASE_SHA" \
+            --output release-evidence/exact-target-checkout-runtime.json
+
+      - name: Upload exact-target route evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-exact-target-checkout-${{ needs.resolve-release.outputs.release_sha }}
+          path: release-evidence/exact-target-checkout-runtime.json
+          if-no-files-found: error
+          retention-days: 90
+
+  verify-source:
+    name: Verify exact staging certificate
+    needs: resolve-release
+    if: needs.resolve-release.outputs.normal_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact release commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.resolve-release.outputs.current_main_sha }}
+
+      - name: Verify canonical promotion and certificate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          TRUSTED_STATUS_CREATOR: ${{ vars.RELEASE_AUTOMATION_APP_BOT_LOGIN }}
+        run: |
+          node scripts/release/verify-main-release-source.js \
+            --main-sha "$RELEASE_SHA" \
+            --output release-evidence/source-certificate.json
+
+      - name: Upload source evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-source-certificate-${{ needs.resolve-release.outputs.release_sha }}
+          path: release-evidence/source-certificate.json
+          if-no-files-found: error
+          retention-days: 90
+
+  public-preflight:
+    name: Public production preflight
+    needs: resolve-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted current-main controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.resolve-release.outputs.current_main_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: release-control
+
+      - name: Checkout exact release target as read-only data
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
+          persist-credentials: false
+          path: release-target
+
+      - name: Require exclusive canonical checkout surface in exact target
+        run: |
+          node release-control/scripts/release/verify-checkout-surface-contract.js \
+            --root release-target \
+            --output release-evidence/checkout-surface.json
+
+      - name: Observe public production safely
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          LEGACY_PAYMENT_RETIREMENT_SHA: ${{ vars.LEGACY_PAYMENT_RETIREMENT_SHA }}
+          LEGACY_PAYMENT_RECONCILIATION_SHA256: ${{ vars.LEGACY_PAYMENT_RECONCILIATION_SHA256 }}
+        run: |
+          node release-control/scripts/release/verify-production-public-surfaces.js \
+            --mode preflight \
+            --base-url "$PRODUCTION_API_URL" \
+            --expected-sha "$RELEASE_SHA" \
+            --legacy-retirement-sha "$LEGACY_PAYMENT_RETIREMENT_SHA" \
+            --legacy-reconciliation-sha256 "$LEGACY_PAYMENT_RECONCILIATION_SHA256" \
+            --output release-evidence/public-preflight.json
+
+      - name: Bind retirement attestation to deployed and target ancestry
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          LEGACY_PAYMENT_RETIREMENT_SHA: ${{ vars.LEGACY_PAYMENT_RETIREMENT_SHA }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$LEGACY_PAYMENT_RETIREMENT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Legacy payment retirement SHA is not configured as one full SHA."
+            exit 1
+          fi
+          observed_sha=$(node -e 'const f=require("./release-evidence/public-preflight.json");process.stdout.write(f.observedSha)')
+          git -C release-control merge-base --is-ancestor "$LEGACY_PAYMENT_RETIREMENT_SHA" "$observed_sha"
+          git -C release-control merge-base --is-ancestor "$LEGACY_PAYMENT_RETIREMENT_SHA" "$RELEASE_SHA"
+
+      - name: Upload public preflight
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-public-preflight-${{ needs.resolve-release.outputs.release_sha }}
+          path: release-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+  aws-preflight:
+    name: AWS production preflight
+    needs: resolve-release
+    runs-on: ubuntu-latest
+    environment:
+      name: production-preflight
     permissions:
       id-token: write
       contents: read
-
     steps:
       - name: Checkout exact release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ needs.resolve-release.outputs.release_sha }}
+          ref: ${{ needs.resolve-release.outputs.current_main_sha }}
 
-      - name: Verify external checkout gate
-        run: bash scripts/release/verify-checkout-gate.sh "$PRODUCTION_API_URL"
+      - name: Configure read-only AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
+        with:
+          role-to-assume: ${{ vars.AWS_PREFLIGHT_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: false
 
-      - name: Create deployment package
+      - name: Verify live topology without mutation
         env:
           RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
         run: |
-          cat > release-manifest.json <<EOF
+          node scripts/release/aws-release-topology.js preflight \
+            --release-sha "$RELEASE_SHA" \
+            --mixed-version-safe false \
+            --output release-evidence/aws-preflight.json
+
+      - name: Validate approved drain configuration
+        env:
+          CHECKOUT_DRAIN_SECONDS: ${{ vars.CHECKOUT_DRAIN_SECONDS }}
+          CHECKOUT_MAX_REQUEST_SECONDS: ${{ vars.CHECKOUT_MAX_REQUEST_SECONDS }}
+        run: |
+          node scripts/release/validate-release-drain.js \
+            --topology release-evidence/aws-preflight.json \
+            --output release-evidence/drain-configuration.json
+
+      - name: Upload AWS preflight
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-aws-preflight-${{ needs.resolve-release.outputs.release_sha }}
+          path: release-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+  release-readiness:
+    name: Ready for production approval
+    needs:
+      - resolve-release
+      - exact-ci
+      - target-checkout-surface
+      - verify-source
+      - public-preflight
+      - aws-preflight
+    if: ${{ !cancelled() && needs.resolve-release.result == 'success' && needs.exact-ci.result == 'success' && needs.target-checkout-surface.result == 'success' && (needs.verify-source.result == 'success' || needs.resolve-release.outputs.normal_release != 'true') && needs.public-preflight.result == 'success' && needs.aws-preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report verified production approval readiness
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+        run: |
           {
-            "commit": "$RELEASE_SHA",
-            "environment": "production",
-            "deploymentVersion": "mosaic-$RELEASE_SHA"
-          }
-          EOF
-          shopt -s dotglob
-          zip -r deploy.zip . \
-            -x "*.git*" \
-            -x "*node_modules/*" \
-            -x "*.env*" \
-            -x "*tests/*" \
-            -x "*docs/*" \
-            -x "*.github/*" \
-            -x "*.zip" \
-            -x "*logs/*" \
-            -x "*.log" \
-            -x "debug-data.js" \
-            -x "fix-product-data.js" \
-            -x "fix-variants.js" \
-            -x "test-products.js" \
-            -x "*.txt"
+            echo "## READY FOR PRODUCTION APPROVAL"
+            echo ""
+            echo "- Exact release SHA: \`$RELEASE_SHA\`"
+            echo "- Exact-SHA unit, contract, and integration suites: success"
+            echo "- Fresh exact-target canonical/legacy route proof: success"
+            echo "- Canonical staging source and certificate: verified (normal release) or explicit break-glass rollback"
+            echo "- Public probes and read-only AWS topology: success"
+            echo "- Production mutation: NO"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Configure AWS credentials
-        id: aws_creds
-        uses: aws-actions/configure-aws-credentials@v4
+  production-approval-and-release:
+    name: Approved production release
+    needs:
+      - resolve-release
+      - release-readiness
+    if: ${{ !cancelled() && needs.resolve-release.result == 'success' && needs.release-readiness.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment:
+      # A new Environment/OIDC subject is deliberate. Historical rerunnable
+      # deployment YAML used `production`; it must not be able to assume this
+      # release-control role with the old workflow definition.
+      name: production-release-control
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+      RELEASE_MODE: ${{ needs.resolve-release.outputs.release_mode }}
+      CHECKOUT_GATE_LOAD_BALANCER_ARN: ${{ vars.CHECKOUT_GATE_LOAD_BALANCER_ARN }}
+      CHECKOUT_GATE_HTTP_RULE_ARN: ${{ vars.CHECKOUT_GATE_HTTP_RULE_ARN }}
+      CHECKOUT_GATE_HTTPS_RULE_ARN: ${{ vars.CHECKOUT_GATE_HTTPS_RULE_ARN }}
+      CHECKOUT_GATE_HTTP_PRIORITY: ${{ vars.CHECKOUT_GATE_HTTP_PRIORITY }}
+      CHECKOUT_GATE_HTTPS_PRIORITY: ${{ vars.CHECKOUT_GATE_HTTPS_PRIORITY }}
+      CHECKOUT_GATE_DISABLED_PATH: ${{ vars.CHECKOUT_GATE_DISABLED_PATH }}
+      CHECKOUT_DRAIN_SECONDS: ${{ vars.CHECKOUT_DRAIN_SECONDS }}
+      CHECKOUT_MAX_REQUEST_SECONDS: ${{ vars.CHECKOUT_MAX_REQUEST_SECONDS }}
+      SSM_RESERVATION_DOCUMENT_NAME: ${{ vars.SSM_RESERVATION_DOCUMENT_NAME }}
+      SSM_RESERVATION_DOCUMENT_VERSION: ${{ vars.SSM_RESERVATION_DOCUMENT_VERSION }}
+      SSM_RESERVATION_DOCUMENT_SHA256: ${{ vars.SSM_RESERVATION_DOCUMENT_SHA256 }}
+    steps:
+      - name: Checkout exact approved release
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          ref: ${{ needs.resolve-release.outputs.current_main_sha }}
+          fetch-depth: 0
+
+      - name: Reconfirm trusted controller and approved target after approval
+        env:
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          git fetch --no-tags origin main
+          current_main=$(git rev-parse origin/main)
+          if [ "$(git rev-parse HEAD)" != "$current_main" ]; then
+            echo "::error::Trusted release controller is not the current main tip."
+            exit 1
+          fi
+          if [ "$WORKFLOW_SHA" != "$current_main" ]; then
+            echo "::error::Executing workflow definition is not the current main revision."
+            exit 1
+          fi
+          if [ "$RELEASE_MODE" = "release" ] && [ "$current_main" != "$RELEASE_SHA" ]; then
+            echo "::error::Approved candidate became stale while awaiting Production approval."
+            exit 1
+          fi
+          if ! git cat-file -e "$RELEASE_SHA^{commit}" 2>/dev/null; then
+            echo "::error::Approved release target is unavailable."
+            exit 1
+          fi
+          if [ "$RELEASE_MODE" = "rollback" ] && ! git merge-base --is-ancestor "$RELEASE_SHA" "$current_main"; then
+            echo "::error::Break-glass rollback target is not reachable from current main."
+            exit 1
+          fi
+
+      - name: Configure production AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
-          output-credentials: true
+          output-credentials: false
 
-      - name: Deploy to Elastic Beanstalk
-        uses: einaregilsson/beanstalk-deploy@v22
+      - name: Revalidate topology before mutation
+        run: |
+          node scripts/release/aws-release-topology.js preflight \
+            --release-sha "$RELEASE_SHA" \
+            --mixed-version-safe false \
+            --output release-evidence/aws-approved-preflight.json
+
+      - name: Enable exact checkout gate
+        id: gate
+        run: |
+          # Keep this current-main proof in the same shell step and immediately
+          # before the first ALB mutation. A stale approval must not touch the gate.
+          git fetch --no-tags origin main
+          current_main=$(git rev-parse origin/main)
+          test "$(git rev-parse HEAD)" = "$current_main"
+          if [ "$RELEASE_MODE" = "release" ]; then
+            test "$current_main" = "$RELEASE_SHA"
+          else
+            git merge-base --is-ancestor "$RELEASE_SHA" "$current_main"
+          fi
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+          mkdir -p release-evidence
+          node - <<'NODE'
+          const fs = require('node:fs');
+          fs.writeFileSync('release-evidence/gate-attempt.json', `${JSON.stringify({
+            schemaVersion: 1,
+            status: 'attempted',
+            operation: 'enable',
+            target: { method: 'POST', path: '/api/orders/initiate' },
+            attemptedAt: new Date().toISOString(),
+          }, null, 2)}\n`, { mode: 0o600 });
+          NODE
+          node scripts/release/manage-checkout-gate.js enable \
+            --confirm ENABLE_CHECKOUT_GATE \
+            --output release-evidence/gate-enabled.json
+          echo "active=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verify checkout gate on HTTPS and HTTP
+        run: |
+          bash scripts/release/verify-checkout-gate.sh \
+            "$PRODUCTION_API_URL" \
+            "http://api.mosaicbizhub.com"
+
+      - name: Drain approved request window
+        run: |
+          node scripts/release/validate-release-drain.js \
+            --topology release-evidence/aws-approved-preflight.json \
+            --output release-evidence/drain-approved.json
+          sleep "$CHECKOUT_DRAIN_SECONDS"
+          bash scripts/release/verify-checkout-gate.sh \
+            "$PRODUCTION_API_URL" \
+            "http://api.mosaicbizhub.com"
+
+      - name: Require zero active reservations before deploy
+        run: |
+          node scripts/release/run-ssm-reservation-check.js --require-zero \
+            --output release-evidence/reservations-before.json
+
+      - name: Refresh production AWS credentials before deployment
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
         with:
-          aws_access_key: ${{ steps.aws_creds.outputs.aws-access-key-id }}
-          aws_secret_key: ${{ steps.aws_creds.outputs.aws-secret-access-key }}
-          aws_session_token: ${{ steps.aws_creds.outputs.aws-session-token }}
-          application_name: ${{ env.EB_APPLICATION_NAME }}
-          environment_name: ${{ env.EB_ENVIRONMENT_NAME }}
-          region: ${{ env.AWS_REGION }}
-          version_label: mosaic-${{ needs.resolve-release.outputs.release_sha }}
-          deployment_package: deploy.zip
-          use_existing_version_if_available: true
-          wait_for_deployment: true
-          wait_for_environment_recovery: true
+          role-to-assume: ${{ vars.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: false
+
+      - name: Re-prove gate immediately before EB mutation
+        run: |
+          node scripts/release/manage-checkout-gate.js verify \
+            --expected-state active \
+            --output release-evidence/gate-before-deploy.json
+          bash scripts/release/verify-checkout-gate.sh \
+            "$PRODUCTION_API_URL" \
+            "http://api.mosaicbizhub.com"
+
+      - name: Deploy immutable exact SHA to Elastic Beanstalk
+        run: |
+          node scripts/release/manage-checkout-gate.js verify \
+            --expected-state active \
+            --output release-evidence/gate-at-deploy-command.json
+          bash scripts/release/verify-checkout-gate.sh \
+            "$PRODUCTION_API_URL" \
+            "http://api.mosaicbizhub.com"
+          bash scripts/release/deploy-eb-exact-sha.sh \
+            "$RELEASE_SHA" \
+            release-evidence/eb-deployment.json
 
       - name: Verify every EB instance deployment
-        env:
-          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
         run: bash scripts/release/verify-eb-instance-versions.sh "$RELEASE_SHA"
 
-      - name: Post-deploy health probe
+      - name: Verify exact deployed topology and targets
         run: |
-          echo "Deployed commit: ${{ needs.resolve-release.outputs.release_sha }}"
-          echo "Version label: mosaic-${{ needs.resolve-release.outputs.release_sha }}"
-          for i in 1 2 3 4 5; do
-            status=$(curl -s -o /tmp/health.json -w "%{http_code}" "${PRODUCTION_API_URL}/")
-            echo "Attempt $i: HTTP $status"
-            if [ "$status" = "200" ]; then
-              cat /tmp/health.json
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "Health probe failed after 5 attempts"
-          exit 1
+          node scripts/release/aws-release-topology.js verify \
+            --release-sha "$RELEASE_SHA" \
+            --mixed-version-safe false \
+            --output release-evidence/aws-deployed.json
 
-      - name: Post-deploy auth probe
+      - name: Verify exact public release while checkout stays gated
         run: |
-          status=$(curl -s -o /dev/null -w "%{http_code}" "${PRODUCTION_API_URL}/api/users/auth/check")
-          echo "Auth check (unauthenticated): HTTP $status"
-          if [ "$status" != "401" ]; then
-            echo "Expected 401 for unauthenticated auth/check"
-            exit 1
-          fi
+          node scripts/release/verify-production-public-surfaces.js \
+            --mode deployed \
+            --base-url "$PRODUCTION_API_URL" \
+            --expected-sha "$RELEASE_SHA" \
+            --output release-evidence/public-deployed.json
+          bash scripts/release/verify-checkout-gate.sh \
+            "$PRODUCTION_API_URL" \
+            "http://api.mosaicbizhub.com"
 
-      - name: Post-deploy readiness probe
+      - name: Refresh production AWS credentials before post-deploy proof
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: false
+
+      - name: Require zero active reservations after deploy
+        run: |
+          node scripts/release/run-ssm-reservation-check.js --require-zero \
+            --output release-evidence/reservations-after.json
+
+      - name: Refresh production AWS credentials before ungating
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: false
+
+      - name: Disable exact checkout gate
+        id: ungate
+        run: |
+          node scripts/release/manage-checkout-gate.js disable \
+            --confirm DISABLE_CHECKOUT_GATE \
+            --output release-evidence/gate-disabled.json
+          echo "inactive=true" >> "$GITHUB_OUTPUT"
+
+      - name: Prove normal checkout and exact production health
+        id: final-open
+        run: |
+          node scripts/release/verify-production-public-surfaces.js \
+            --mode ungated \
+            --base-url "$PRODUCTION_API_URL" \
+            --expected-sha "$RELEASE_SHA" \
+            --output release-evidence/public-ungated.json
+          bash scripts/release/verify-checkout-gate.sh --state inactive \
+            "$PRODUCTION_API_URL" \
+            "http://api.mosaicbizhub.com"
+          node scripts/release/manage-checkout-gate.js verify \
+            --expected-state inactive \
+            --output release-evidence/gate-final.json
+          echo "safe_open=true" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh AWS credentials for fail-safe gate control
+        if: ${{ always() && steps.gate.outputs.attempted == 'true' && steps.final-open.outputs.safe_open != 'true' }}
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: false
+
+      - name: Reassert safe gate after any post-enable failure
+        if: ${{ always() && steps.gate.outputs.attempted == 'true' && steps.final-open.outputs.safe_open != 'true' }}
+        run: |
+          node scripts/release/manage-checkout-gate.js enable \
+            --confirm ENABLE_CHECKOUT_GATE \
+            --output release-evidence/gate-failure-safe.json
+
+      - name: Generate release evidence and failure summary
+        if: always()
         env:
-          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          for path in /api/health /api/ready /api/build-info; do
-            status=$(curl -s -o /dev/null -w "%{http_code}" "${PRODUCTION_API_URL}${path}")
-            echo "${path}: HTTP $status"
-            if [ "$status" != "200" ]; then
-              echo "Expected 200 for ${path}"
-              exit 1
-            fi
-          done
+          node scripts/release/build-production-evidence.js \
+            --directory release-evidence \
+            --release-sha "$RELEASE_SHA" \
+            --job-status "$JOB_STATUS" \
+            --run-url "$RUN_URL" \
+            --output release-evidence/production-release-evidence.json
 
-          curl -fsS "${PRODUCTION_API_URL}/api/health" > /tmp/api-health.json
-          curl -fsS "${PRODUCTION_API_URL}/api/build-info" > /tmp/api-build-info.json
-          node - "$RELEASE_SHA" <<'NODE'
-          const fs = require('fs');
-          const expectedSha = process.argv[2];
-          const expectedShortSha = expectedSha.slice(0, 7);
-          const expectedVersion = `mosaic-${expectedSha}`;
+      - name: Upload complete release evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-release-evidence-${{ needs.resolve-release.outputs.release_sha }}
+          path: release-evidence/
+          if-no-files-found: error
+          retention-days: 90
 
-          for (const file of ['/tmp/api-health.json', '/tmp/api-build-info.json']) {
-            const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
-            const release = payload.release;
-            if (!release?.commit || !release?.environment || !release?.deploymentVersion) {
-              throw new Error(`Missing release identity in ${file}`);
-            }
-            if (release.commit !== expectedShortSha) {
-              throw new Error(
-                `Release commit mismatch in ${file}: expected ${expectedShortSha}, got ${release.commit}`
-              );
-            }
-            if (release.deploymentVersion !== expectedVersion) {
-              throw new Error(
-                `Version mismatch in ${file}: expected ${expectedVersion}, got ${release.deploymentVersion}`
-              );
-            }
-          }
+  release-summary:
+    name: Production release summary
+    if: ${{ !cancelled() }}
+    needs:
+      - resolve-release
+      - exact-ci
+      - target-checkout-surface
+      - verify-source
+      - public-preflight
+      - aws-preflight
+      - release-readiness
+      - production-approval-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout workflow source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.resolve-release.outputs.current_main_sha || github.sha }}
 
-          console.log(`Public release identity matches ${expectedVersion}`);
+      - name: Download safe evidence from this workflow run
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: production-*-${{ needs.resolve-release.outputs.release_sha || github.sha }}
+          path: release-evidence
+          merge-multiple: true
+
+      - name: Build concise release result
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha || github.sha }}
+          RESOLVE_RESULT: ${{ needs.resolve-release.result }}
+          EXACT_CI_RESULT: ${{ needs.exact-ci.result }}
+          TARGET_SURFACE_RESULT: ${{ needs.target-checkout-surface.result }}
+          SOURCE_RESULT: ${{ needs.verify-source.result }}
+          PUBLIC_PREFLIGHT_RESULT: ${{ needs.public-preflight.result }}
+          AWS_PREFLIGHT_RESULT: ${{ needs.aws-preflight.result }}
+          READINESS_RESULT: ${{ needs.release-readiness.result }}
+          RELEASE_JOB_RESULT: ${{ needs.production-approval-and-release.result }}
+          NORMAL_RELEASE: ${{ needs.resolve-release.outputs.normal_release || 'unknown' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p release-evidence
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const keys = {
+            resolve: 'RESOLVE_RESULT',
+            exactCi: 'EXACT_CI_RESULT',
+            targetCheckoutSurface: 'TARGET_SURFACE_RESULT',
+            sourceCertificate: 'SOURCE_RESULT',
+            publicPreflight: 'PUBLIC_PREFLIGHT_RESULT',
+            awsPreflight: 'AWS_PREFLIGHT_RESULT',
+            readiness: 'READINESS_RESULT',
+            production: 'RELEASE_JOB_RESULT',
+          };
+          const jobs = Object.fromEntries(Object.entries(keys).map(([key, envName]) => [key, process.env[envName] || 'unknown']));
+          fs.writeFileSync('release-evidence/workflow-results.json', `${JSON.stringify({
+            schemaVersion: 1,
+            normalRelease: process.env.NORMAL_RELEASE === 'true',
+            jobs,
+          }, null, 2)}\n`, { mode: 0o600 });
           NODE
-
-      - name: Post-deploy CORS probe
-        env:
-          LAUNCH_ORIGIN: https://mosaic-biz-frontend-launch.vercel.app
-          VERCEL_PRODUCTION_ORIGIN: https://mosaic-biz-frontend-launch-digital-builders.vercel.app
-          VERCEL_MAIN_ORIGIN: https://mosaic-biz-frontend-launch-git-main-digital-builders.vercel.app
-          VERCEL_DEVELOP_ORIGIN: https://mosaic-biz-frontend-launch-git-develop-digital-builders.vercel.app
-          APEX_ORIGIN: https://mosaicbizhub.com
-          LEGACY_APP_ORIGIN: https://app.mosaicbizhub.com
-        run: |
-          for origin in "$APEX_ORIGIN" "$LEGACY_APP_ORIGIN" "$LAUNCH_ORIGIN" "$VERCEL_PRODUCTION_ORIGIN" "$VERCEL_MAIN_ORIGIN" "$VERCEL_DEVELOP_ORIGIN"; do
-            echo "CORS OPTIONS for Origin: $origin"
-            headers=$(curl -s -D - -o /dev/null -X OPTIONS \
-              -H "Origin: $origin" \
-              -H "Access-Control-Request-Method: GET" \
-              "${PRODUCTION_API_URL}/api/featured-products")
-            echo "$headers" | grep -i "access-control-allow-origin: $origin" || {
-              echo "Missing Access-Control-Allow-Origin for $origin"
-              exit 1
-            }
-          done
-          status=$(curl -s -o /dev/null -w "%{http_code}" "${PRODUCTION_API_URL}/api/featured-products")
-          echo "GET /api/featured-products: HTTP $status"
-          if [ "$status" != "200" ]; then
-            echo "Expected 200 for featured-products GET"
-            exit 1
+          if [ "$RELEASE_JOB_RESULT" = "success" ]; then
+            job_status=success
+          elif [ "$RELEASE_JOB_RESULT" = "cancelled" ]; then
+            job_status=cancelled
+          else
+            job_status=failure
           fi
+          node scripts/release/build-production-evidence.js \
+            --directory release-evidence \
+            --release-sha "$RELEASE_SHA" \
+            --job-status "$job_status" \
+            --run-url "$RUN_URL" \
+            --output release-evidence/production-release-summary.json
 
-      - name: Deployment summary
+      - name: Update source release PR with evidence
+        continue-on-error: true
         env:
-          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          {
-            echo "## Production deploy"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Commit | \`$RELEASE_SHA\` |"
-            echo "| Version label | \`mosaic-$RELEASE_SHA\` |"
-            echo "| EB application | \`${{ env.EB_APPLICATION_NAME }}\` |"
-            echo "| EB environment | \`${{ env.EB_ENVIRONMENT_NAME }}\` |"
-            echo "| Region | \`${{ env.AWS_REGION }}\` |"
-            echo "| API URL | \`${{ env.PRODUCTION_API_URL }}\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          node scripts/release/upsert-release-pr-comment.js \
+            --evidence release-evidence/production-release-summary.json
+
+      - name: Upload final release packet
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-release-summary-${{ needs.resolve-release.outputs.release_sha || github.sha }}
+          path: release-evidence/
+          if-no-files-found: error
+          retention-days: 90

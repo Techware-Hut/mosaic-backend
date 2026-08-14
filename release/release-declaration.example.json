@@ -1,0 +1,25 @@
+{
+  "$schema": "./release-declaration.schema.json",
+  "schemaVersion": 1,
+  "releaseKey": "example-backend-only",
+  "issueRefs": [
+    "MOSAIC-EXAMPLE"
+  ],
+  "backendRequired": true,
+  "frontendRequired": false,
+  "backendSha": "0123456789abcdef0123456789abcdef01234567",
+  "frontendSha": null,
+  "deploymentOrder": "backend-only",
+  "paymentSensitive": false,
+  "emailSensitive": true,
+  "inventorySensitive": false,
+  "mixedVersionSafe": false,
+  "mixedVersionCertification": null,
+  "productionUat": [
+    "transactional-email-delivery",
+    "duplicate-email-negative-case"
+  ],
+  "notes": [
+    "Illustrative metadata only; replace the placeholder SHA with an exact certified commit."
+  ]
+}

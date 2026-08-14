@@ -19,9 +19,11 @@ const ACTIVE_RESERVATION_PROJECTION = Object.freeze({
 });
 
 function parseMode(argv) {
-  const supported = new Set(['--report', '--require-zero']);
+  const supported = new Set(['--report', '--require-zero', '--count-json']);
   if (argv.length !== 1 || !supported.has(argv[0])) {
-    throw new Error('Usage: query-active-reservations.js --report|--require-zero');
+    throw new Error(
+      'Usage: query-active-reservations.js --report|--require-zero|--count-json'
+    );
   }
   return argv[0];
 }
@@ -31,6 +33,10 @@ async function queryActiveReservations(OrderModel) {
     .sort({ inventoryReservedAt: 1 })
     .lean()
     .exec();
+}
+
+async function queryActiveReservationCount(OrderModel) {
+  return OrderModel.countDocuments(ACTIVE_RESERVATION_FILTER).exec();
 }
 
 function printableReservation(order) {
@@ -44,17 +50,28 @@ function printableReservation(order) {
   };
 }
 
-async function run({ mode, mongoose, OrderModel, mongoUri }) {
+async function run({ mode, mongoose, OrderModel, mongoUri, logger = console }) {
   if (!mongoUri) {
     throw new Error('MONGODB_URI is required; the connection value is never printed');
   }
 
   await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 10000 });
   try {
+    if (mode === '--count-json') {
+      const count = await queryActiveReservationCount(OrderModel);
+      if (!Number.isSafeInteger(count) || count < 0) {
+        throw new Error('Reservation count was not a non-negative safe integer');
+      }
+      // This mode is the only supported automation/SSM interface. Its stdout is
+      // deliberately a one-field JSON object and can never contain order data.
+      logger.log(JSON.stringify({ activeReservationCount: count }));
+      return count;
+    }
+
     const reservations = await queryActiveReservations(OrderModel);
-    console.log(`Active inventory reservations: ${reservations.length}`);
+    logger.log(`Active inventory reservations: ${reservations.length}`);
     for (const order of reservations) {
-      console.log(JSON.stringify(printableReservation(order)));
+      logger.log(JSON.stringify(printableReservation(order)));
     }
 
     if (mode === '--require-zero' && reservations.length !== 0) {
@@ -82,7 +99,16 @@ async function main(argv = process.argv.slice(2)) {
 
 if (require.main === module) {
   main().catch((error) => {
-    console.error(`Active-reservation query failed: ${error.message}`);
+    const safeMessages = [
+      'MONGODB_URI is required; the connection value is never printed',
+      'Reservation count was not a non-negative safe integer',
+    ];
+    const safeMessage = safeMessages.includes(error.message)
+      ? error.message
+      : /^Expected zero active reservations; found \d+$/.test(error.message)
+        ? error.message
+        : 'Read-only reservation query could not complete';
+    console.error(`Active-reservation query failed: ${safeMessage}`);
     process.exitCode = 1;
   });
 }
@@ -91,6 +117,7 @@ module.exports = {
   ACTIVE_RESERVATION_FILTER,
   ACTIVE_RESERVATION_PROJECTION,
   parseMode,
+  queryActiveReservationCount,
   queryActiveReservations,
   printableReservation,
   run,

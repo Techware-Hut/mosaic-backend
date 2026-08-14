@@ -87,28 +87,55 @@ mandatory. If instance count, Max capacity, target count, or deployment policy
 differs at release time, stop and reassess.
 
 Follow `docs/release/CHECKOUT_GATE_OPERATIONS.md`. The inventory-specific safety
-sequence is:
+sequence is automated after the protected Production approval:
 
-1. At the load balancer/WAF/maintenance layer, temporarily return `503` for
-   authenticated `POST /api/orders/initiate` only. Keep both Stripe webhook
-   endpoints reachable.
-2. Wait at least the maximum application request timeout and confirm there are
-   no in-flight checkout-initiation requests.
-3. Confirm no `inventoryReservedAt` marker was created after the gate time.
-4. Start the deployment. Do not reopen checkout during the single-instance
-   deployment/recovery interval.
+1. The two pinned ALB rules temporarily return `503` for
+   `POST /api/orders/initiate` only on HTTP and HTTPS. All mounted Stripe webhook
+   endpoints remain reachable.
+2. The workflow validates and waits longer than both the approved maximum
+   application request duration and live ALB idle timeout, then re-verifies the
+   gate.
+3. The pinned SSM document runs a separately provisioned, root-owned,
+   SHA-256-pinned count-only tool inside the one exact EB instance trust
+   boundary. It never executes the deployed candidate tree, requires zero, and
+   never returns order identifiers or the database URI to GitHub.
+4. The workflow starts the exact-SHA deployment. It does not reopen checkout
+   during the single-instance deployment/recovery interval.
 5. In Elastic Beanstalk, verify every serving instance reports the new
    application version. Repeated `/api/build-info` probes are supporting
    evidence but do not replace the per-instance/version check.
-6. Verify health/readiness and the signed Stripe webhook endpoints while the
-   checkout gate remains active.
-7. Re-run the active-reservation query. Reconcile any unexpected marker before
-   proceeding.
-8. Remove the checkout-initiation gate only after no old #260 instance can
-   receive traffic.
+6. The workflow verifies health/readiness/build identity and harmless unsigned
+   Stripe webhook rejection while the checkout gate remains active.
+7. The workflow runs the same read-only count proof again. A nonzero result
+   leaves the gate active and requires human reconciliation before proceeding.
+8. The workflow removes the checkout-initiation gate only after no old instance
+   can receive traffic, then proves normal checkout behavior is restored.
 
-If the infrastructure owner cannot provide this gate and per-instance version
-proof, deployment is blocked. Do not assume rolling-drain behavior is safe.
+If the infrastructure owner cannot provide the pinned gate, SSM count-only
+document, and per-instance version proof, deployment is blocked. Do not fall
+back to a GitHub `MONGODB_URI` secret or assume rolling-drain behavior is safe.
+
+## Automated release reservation evidence
+
+The normal Production workflow invokes only the reviewed, parameterless
+`MosaicReadOnlyReservationCheck` SSM document. The document hash-pins the
+candidate-independent bundled diagnostic; that tool uses one majority-read
+MongoDB aggregation with fixed facets for active reservations, incomplete paid
+order post-payment work, and unresolved stored PaymentIntent liabilities. It
+emits exactly three nonnegative integer counts and cannot list reconciliation
+fields or perform a write. One aggregation avoids a state transition falling
+between sequential count queries.
+
+Pre-deploy count zero and post-deploy count zero are both mandatory. If either
+count is nonzero, the evidence packet records only the count and the workflow
+reports `BLOCKED — HUMAN RECONCILIATION REQUIRED`. Use the manual procedure in
+this runbook to identify and reconcile records through their canonical Stripe
+event paths; do not teach release automation to reconcile them.
+
+`--report` remains a break-glass/operator diagnostic because it includes order
+identifiers and selected reconciliation fields. Run it only from an approved
+operations context, not a normal GitHub Actions job, and store its output under
+the applicable restricted evidence policy.
 
 ## Rollback
 
@@ -120,7 +147,8 @@ active `inventoryReservedAt` marker. Before rollback:
 3. Finalize every succeeded PaymentIntent.
 4. Cancel every retryable PaymentIntent and confirm `canceled` before release.
 5. Leave uncertain states reserved and resolve them before continuing.
-6. Prove the active-reservation count is zero.
+6. Prove the active-reservation, incomplete-paid-order, and unresolved-issued-
+   PaymentIntent counts are all zero.
 7. Only then roll back code. The additive schema fields may remain.
 
 ## Production topology evidence

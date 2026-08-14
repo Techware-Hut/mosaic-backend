@@ -1,5 +1,11 @@
 # GitHub Actions — Elastic Beanstalk Setup
 
+> **Legacy reference:** The agentic release controller does not use the legacy
+> `production` Environment or `AWS_ROLE_TO_ASSUME`. Follow
+> [RELEASE_CONTROL_INFRASTRUCTURE_SETUP.md](release/RELEASE_CONTROL_INFRASTRUCTURE_SETUP.md)
+> and provision the isolated `production-release-control` Environment/role.
+> Re-enabling the legacy role would make historical workflow reruns deployable.
+
 One-time configuration for CI and production deploy workflows. Deploy auth uses **GitHub OIDC → IAM role assumption** (no long-lived AWS access keys in GitHub). Application runtime secrets stay on EB; GitHub only needs deploy role + EB metadata variables.
 
 ---

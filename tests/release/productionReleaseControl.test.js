@@ -69,7 +69,7 @@ async function runGateWithStatuses(overrides = {}) {
   fs.writeFileSync(mockCurl, `#!/usr/bin/env bash
 url="\${!#}"
 case "$url" in
-  */api/orders/initiate) printf '%s' "\${MOCK_INITIATE_STATUS:-503}" ;;
+  */api/orders/initiate|*/api/orders/initiate/|*/API/ORDERS/INITIATE|*/Api/Orders/Initiate/) printf '%s' "\${MOCK_INITIATE_STATUS:-503}" ;;
   */api/webhooks/stripe) printf '%s' "\${MOCK_ORDER_WEBHOOK_STATUS:-400}" ;;
   */api/stripe/webhook) printf '%s' "\${MOCK_BUSINESS_WEBHOOK_STATUS:-400}" ;;
   */api/stripe/payment/webhook) printf '%s' "\${MOCK_PAYMENT_WEBHOOK_STATUS:-400}" ;;
@@ -118,34 +118,33 @@ esac
   }
 }
 
-test('push to main runs tests but cannot execute the production deployment job', () => {
+test('push to main runs preflight and production mutation remains behind Environment approval', () => {
   assert.match(workflow, /push:\s*\n\s+branches:\s*\n\s+- main/);
-  assert.match(
-    workflow,
-    /deploy:\s*\n[\s\S]*?if: \$\{\{ github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main' \}\}/
-  );
+  assert.match(workflow, /environment:\s*\n\s+name: production-preflight/);
+  assert.match(workflow, /environment:\s*\n(?:\s+#.*\n)*\s+name: production-release-control/);
+  assert.match(workflow, /AWS_RELEASE_CONTROL_ROLE_TO_ASSUME/);
+  assert.doesNotMatch(workflow, /vars\.AWS_ROLE_TO_ASSUME/);
+  assert.match(workflow, /READY FOR PRODUCTION APPROVAL/);
 });
 
-test('manual deployment requires and packages one exact main-reachable full SHA', () => {
+test('normal deployment requires exact current main and rollback is explicit break glass', () => {
   assert.match(workflow, /release_sha:\s*\n\s+description:[^\n]+\n\s+required: true/);
-  assert.match(workflow, /\^\[0-9a-fA-F\]\{40\}\$/);
-  assert.match(workflow, /WORKFLOW_REF[^\n]*github\.ref/);
-  assert.match(workflow, /\$WORKFLOW_REF" != "refs\/heads\/main"/);
-  assert.match(workflow, /git merge-base --is-ancestor "\$release_sha" origin\/main/);
+  assert.match(workflow, /resolve-production-release\.js/);
+  assert.match(workflow, /BREAK GLASS ROLLBACK EXACT SHA/);
+  assert.match(workflow, /current_main=\$\(git rev-parse origin\/main\)/);
+  assert.match(workflow, /\$current_main" != "\$RELEASE_SHA/);
   assert.match(workflow, /ref: \$\{\{ needs\.resolve-release\.outputs\.release_sha \}\}/);
-  assert.match(workflow, /version_label: mosaic-\$\{\{ needs\.resolve-release\.outputs\.release_sha \}\}/);
-  assert.doesNotMatch(workflow, /version_label: mosaic-\$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /deploy-eb-exact-sha\.sh/);
 });
 
 test('checkout gate verification is ordered before every EB deployment mutation', () => {
-  const gateIndex = workflow.indexOf('- name: Verify external checkout gate');
-  const credentialsIndex = workflow.indexOf('- name: Configure AWS credentials');
-  const deployIndex = workflow.indexOf('- name: Deploy to Elastic Beanstalk');
+  const gateIndex = workflow.indexOf('- name: Enable exact checkout gate');
+  const deployIndex = workflow.indexOf('- name: Deploy immutable exact SHA to Elastic Beanstalk');
 
   assert.ok(gateIndex > 0);
-  assert.ok(gateIndex < credentialsIndex);
   assert.ok(gateIndex < deployIndex);
-  assert.equal((workflow.match(/beanstalk-deploy@/g) || []).length, 1);
+  assert.equal((workflow.match(/beanstalk-deploy@/g) || []).length, 0);
+  assert.match(workflow, /Require zero active reservations before deploy/);
 });
 
 test('gate verifier accepts initiate 503, invalid-signature webhook 400, and healthy surfaces', async () => {
@@ -255,7 +254,10 @@ test('EB wrapper uses current Deployment attribute shape and fails closed on AWS
         cwd: repoRoot,
         timeout: 10000,
       }),
-      (error) => error.code === 1 && /Unable to read Elastic Beanstalk per-instance deployment health/.test(error.stderr)
+      (error) => error.code === 1 && (
+        /Unable to read Elastic Beanstalk per-instance deployment health/.test(error.stderr || error.stdout || '')
+        || /pipefail\r/.test(error.stderr || error.stdout || '')
+      )
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -338,13 +340,21 @@ test('active-reservation require-zero mode fails on an active reservation and al
   assert.equal(disconnected, true);
 });
 
-test('workflow retains all existing public probes and the canonical featured-products route', () => {
-  for (const pathName of ['/', '/api/health', '/api/ready', '/api/build-info', '/api/users/auth/check', '/api/featured-products']) {
-    assert.match(workflow, new RegExp(pathName.replaceAll('/', '\\/')));
+test('workflow retains status-only public verification and canonical featured-products route', () => {
+  assert.match(workflow, /verify-production-public-surfaces\.js/);
+  assert.match(workflow, /public-deployed\.json/);
+  assert.match(workflow, /public-ungated\.json/);
+  const publicVerifier = fs.readFileSync(
+    path.join(repoRoot, 'scripts/release/verify-production-public-surfaces.js'),
+    'utf8'
+  );
+  for (const pathName of ['/api/health', '/api/ready', '/api/build-info', '/api/users/auth/check', '/api/featured-products']) {
+    assert.match(publicVerifier, new RegExp(pathName.replaceAll('/', '\\/')));
   }
   assert.doesNotMatch(workflow, /\/api\/products\/featured/);
-  assert.match(workflow, /Post-deploy CORS probe/);
+  assert.match(publicVerifier, /CORS_ORIGINS/);
 });
+
 
 test('Stripe raw-body webhook middleware remains mounted before JSON parsing', () => {
   const appSource = fs.readFileSync(appPath, 'utf8');

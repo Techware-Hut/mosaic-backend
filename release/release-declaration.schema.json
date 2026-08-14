@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Techware-Hut/mosaic-backend/blob/staging/release/release-declaration.schema.json",
+  "title": "Mosaic cross-repository release declaration",
+  "description": "Declares which Mosaic application repositories participate in one release. This is planning metadata, not production approval.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "releaseKey",
+    "issueRefs",
+    "backendRequired",
+    "frontendRequired",
+    "backendSha",
+    "frontendSha",
+    "deploymentOrder",
+    "paymentSensitive",
+    "emailSensitive",
+    "inventorySensitive",
+    "mixedVersionSafe",
+    "mixedVersionCertification",
+    "productionUat"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Relative or absolute URI for this schema."
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "releaseKey": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 100,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "issueRefs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "uniqueItems": true
+    },
+    "backendRequired": {
+      "type": "boolean",
+      "description": "Whether the backend repository must be certified and promoted for this release."
+    },
+    "frontendRequired": {
+      "type": "boolean",
+      "description": "Whether the frontend repository must be certified and promoted for this release. False forbids a frontend release for symmetry."
+    },
+    "backendSha": {
+      "description": "Exact certified backend SHA when backendRequired is true; otherwise null.",
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "frontendSha": {
+      "description": "Exact certified frontend SHA when frontendRequired is true; otherwise null.",
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "deploymentOrder": {
+      "type": "string",
+      "enum": [
+        "backend-only",
+        "frontend-only",
+        "independent",
+        "frontend-then-backend",
+        "backend-then-frontend"
+      ]
+    },
+    "paymentSensitive": {
+      "type": "boolean"
+    },
+    "emailSensitive": {
+      "type": "boolean"
+    },
+    "inventorySensitive": {
+      "type": "boolean"
+    },
+    "mixedVersionSafe": {
+      "type": "boolean",
+      "default": false,
+      "description": "Fail-closed topology metadata. Omitted or unconsumed metadata is treated as false; true requires explicit reviewed certification."
+    },
+    "mixedVersionCertification": {
+      "description": "Required evidence when mixedVersionSafe is true; otherwise null.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reviewedBy",
+            "reviewedAt",
+            "evidenceUrl"
+          ],
+          "properties": {
+            "reviewedBy": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "reviewedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "evidenceUrl": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        }
+      ]
+    },
+    "productionUat": {
+      "type": "array",
+      "description": "Machine-readable post-deploy business UAT keys. Infrastructure success does not satisfy these checks.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      },
+      "uniqueItems": true
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "uniqueItems": true,
+      "default": []
+    }
+  },
+  "allOf": [
+    {
+      "anyOf": [
+        {
+          "properties": {
+            "backendRequired": {
+              "const": true
+            }
+          },
+          "required": [
+            "backendRequired"
+          ]
+        },
+        {
+          "properties": {
+            "frontendRequired": {
+              "const": true
+            }
+          },
+          "required": [
+            "frontendRequired"
+          ]
+        }
+      ]
+    },
+    {
+      "if": {
+        "properties": {
+          "backendRequired": {
+            "const": true
+          }
+        },
+        "required": [
+          "backendRequired"
+        ]
+      },
+      "then": {
+        "properties": {
+          "backendSha": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "backendSha": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "frontendRequired": {
+            "const": true
+          }
+        },
+        "required": [
+          "frontendRequired"
+        ]
+      },
+      "then": {
+        "properties": {
+          "frontendSha": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "frontendSha": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "backendRequired": {
+            "const": true
+          },
+          "frontendRequired": {
+            "const": false
+          }
+        },
+        "required": [
+          "backendRequired",
+          "frontendRequired"
+        ]
+      },
+      "then": {
+        "properties": {
+          "deploymentOrder": {
+            "const": "backend-only"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "backendRequired": {
+            "const": false
+          },
+          "frontendRequired": {
+            "const": true
+          }
+        },
+        "required": [
+          "backendRequired",
+          "frontendRequired"
+        ]
+      },
+      "then": {
+        "properties": {
+          "deploymentOrder": {
+            "const": "frontend-only"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "backendRequired": {
+            "const": true
+          },
+          "frontendRequired": {
+            "const": true
+          }
+        },
+        "required": [
+          "backendRequired",
+          "frontendRequired"
+        ]
+      },
+      "then": {
+        "properties": {
+          "deploymentOrder": {
+            "enum": [
+              "independent",
+              "frontend-then-backend",
+              "backend-then-frontend"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mixedVersionSafe": {
+            "const": true
+          }
+        },
+        "required": [
+          "mixedVersionSafe"
+        ]
+      },
+      "then": {
+        "properties": {
+          "mixedVersionCertification": {
+            "type": "object"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "mixedVersionCertification": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}
