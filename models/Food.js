@@ -134,6 +134,9 @@ location: {
       default: true,
       index: true,
     },
+    wasPublishedAtDeactivation: {
+      type: Boolean,
+    },
     adminRemark: {
       type: String,
       trim: true,

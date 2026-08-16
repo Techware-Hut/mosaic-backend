@@ -17,6 +17,9 @@ const {
 } = require('../../lib/admin/catalogAudit');
 const { parseListingPrice } = require('../../lib/marketplace/listingPricePolicy');
 const {
+  applyCatalogActiveTransition,
+} = require('../../lib/admin/catalogActiveTransition');
+const {
   hasActiveFoodBookings,
   hasActiveServiceBookings,
 } = require('../../utils/bookingDeleteGuards');
@@ -135,6 +138,17 @@ function serializeListing(listing, type) {
     createdAt: listing.createdAt,
     updatedAt: listing.updatedAt,
   };
+}
+
+async function listingHasPublishedVariant(type, listingId) {
+  if (type !== 'product') return false;
+  return Boolean(
+    await ProductVariant.exists({
+      productId: listingId,
+      isPublished: true,
+      isDeleted: { $ne: true },
+    })
+  );
 }
 
 function pickAllowedUpdates(type, body = {}) {
@@ -275,8 +289,12 @@ exports.updateCatalogItem = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No valid fields to update.' });
     }
 
-    if (updates.isActive === false) {
-      updates.isPublished = false;
+    if (Object.prototype.hasOwnProperty.call(updates, 'isActive')) {
+      const hasPublishedVariant = await listingHasPublishedVariant(type, listing._id);
+      Object.assign(
+        updates,
+        applyCatalogActiveTransition(listing, updates.isActive, { hasPublishedVariant })
+      );
     }
 
     Object.assign(listing, updates);
