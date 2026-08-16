@@ -12,7 +12,11 @@ const {
   publicPaidOrderEmailDelivery,
   sendOrderPaidConfirmationIfNeeded,
 } = require("../utils/sendOrderPaidConfirmation");
-const { CLOSED_ORDER_STATUSES } = require("../utils/orderPaidEmailEligibility");
+const {
+  buildSucceededPaymentReconciliationFilter,
+  buildSucceededPaymentReconciliationPipeline,
+  canReconcileSucceededPayment,
+} = require("../utils/orderPaidEmailEligibility");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const toPublicEmailDelivery = (result) =>
@@ -55,79 +59,89 @@ async function cancelRetryablePaymentIntent(paymentIntent) {
 }
 
 /**
- * Webhook fallback for local Test Mode / missed Stripe CLI forwards:
- * when Stripe confirms the PI succeeded, mark orders paid/ordered and
- * decrement inventory once (idempotent via inventoryDecrementedAt).
+ * When Stripe authoritatively confirms the PaymentIntent succeeded, reconcile
+ * the related orders and decrement inventory once (idempotent via
+ * inventoryDecrementedAt). Shared by webhook delivery and polling fallback.
  */
-async function reconcileSucceededPaymentIntentOrders(orders, paymentIntent) {
+async function reconcileSucceededPaymentIntentOrders(
+  orders,
+  paymentIntent,
+  paymentEvidence = {},
+  { reloadOnMiss = false } = {}
+) {
   if (!paymentIntent || paymentIntent.status !== "succeeded") {
-    return { reconciled: false, emailResults: [] };
+    return { reconciled: false, emailResults: [], orders };
   }
 
   const emailResults = [];
+  const reconciledOrders = [];
   for (const order of orders) {
-    if (
-      String(order.paymentStatus || "").toLowerCase() === "refunded" ||
-      (
-        String(order.paymentStatus || "").toLowerCase() === "paid" &&
-        CLOSED_ORDER_STATUSES.has(String(order.status || "").toLowerCase())
-      )
-    ) {
-      continue;
-    }
-
-    const needsPaid = order.paymentStatus !== "paid";
-    const needsOrdered = order.status === "created";
-
-    if (needsPaid || needsOrdered) {
-      const update = {};
-      if (needsPaid) update.paymentStatus = "paid";
-      if (needsOrdered) {
-        update.status = "ordered";
-        update.$push = { statusHistory: { status: "ordered" } };
-      }
-
-      await Order.findByIdAndUpdate(order._id, update);
-      if (needsPaid) order.paymentStatus = "paid";
-      if (needsOrdered) order.status = "ordered";
-
-      console.log("retrieveIntent reconciled paid order (webhook fallback)", {
+    if (!canReconcileSucceededPayment(order)) {
+      console.log("Skipping stale succeeded-payment reconciliation for closed order", {
         orderId: String(order._id),
         paymentStatus: order.paymentStatus,
         status: order.status,
-        paymentIntentId: paymentIntent.id,
       });
+      const authoritativeOrder = reloadOnMiss
+        ? await Order.findById(order._id)
+        : null;
+      reconciledOrders.push(authoritativeOrder || order);
+      continue;
     }
 
+    const reconciledOrder = await Order.findOneAndUpdate(
+      buildSucceededPaymentReconciliationFilter(order._id, paymentIntent.id),
+      buildSucceededPaymentReconciliationPipeline(paymentEvidence),
+      { new: true }
+    );
+    if (!reconciledOrder) {
+      console.log("Skipping stale succeeded-payment reconciliation after state changed", {
+        orderId: String(order._id),
+      });
+      const authoritativeOrder = reloadOnMiss
+        ? await Order.findById(order._id)
+        : null;
+      reconciledOrders.push(authoritativeOrder || order);
+      continue;
+    }
+
+    reconciledOrders.push(reconciledOrder);
+    console.log("Reconciled paid order from succeeded PaymentIntent", {
+      orderId: String(reconciledOrder._id),
+      paymentStatus: reconciledOrder.paymentStatus,
+      status: reconciledOrder.status,
+      paymentIntentId: paymentIntent.id,
+    });
+
     try {
-      const inventoryResult = await decrementInventoryForPaidOrder(order);
+      const inventoryResult = await decrementInventoryForPaidOrder(reconciledOrder);
       if (inventoryResult.decremented) {
         console.log(
-          `Inventory decremented via retrieveIntent for order ${order._id}`,
+          `Inventory decremented for paid order ${reconciledOrder._id}`,
           JSON.stringify({ lines: inventoryResult.lines?.length || 0 })
         );
       } else if (inventoryResult.reason === "already_decremented") {
         console.log(
-          `Inventory already decremented for order ${order._id} (retrieveIntent idempotent skip)`
+          `Inventory already decremented for order ${reconciledOrder._id}, skipping`
         );
       }
     } catch (inventoryErr) {
       console.error(
-        `Failed to decrement inventory via retrieveIntent for order ${order._id}:`,
+        `Failed to decrement inventory for paid order ${reconciledOrder._id}:`,
         inventoryErr
       );
     }
 
-    // Local/test Mode often never receives Stripe webhook delivery. Mirror the
-    // post-payment confirmation send when retrieveIntent reconciles success.
+    // Local/test Mode often never receives Stripe webhook delivery, so polling
+    // and webhook reconciliation share the same persisted email orchestration.
     try {
-      const emailResult = await sendOrderPaidConfirmationIfNeeded(order, {
+      const emailResult = await sendOrderPaidConfirmationIfNeeded(reconciledOrder, {
         currency: paymentIntent.currency,
       });
       emailResults.push(emailResult);
       if (emailResult.emailWarning) {
         console.error("Paid-order email delivery incomplete", {
-          orderId: String(order._id),
+          orderId: String(reconciledOrder._id),
         });
       }
     } catch {
@@ -138,12 +152,12 @@ async function reconcileSucceededPaymentIntentOrders(orders, paymentIntent) {
         emailWarning: "paid_order_email_delivery_incomplete",
       });
       console.error("Unexpected paid-order email orchestration failure", {
-        orderId: String(order._id),
+        orderId: String(reconciledOrder._id),
       });
     }
   }
 
-  return { reconciled: true, emailResults };
+  return { reconciled: true, emailResults, orders: reconciledOrders };
 }
 
 async function failUnpaidOrderAndReleaseReservation(order, paymentIntent) {
@@ -251,66 +265,11 @@ exports.stripePaymentWebhook = async (req, res) => {
             : charge.application_fee?.id) || null;
       }
 
-      for (const order of orders) {
-        if (
-          String(order.paymentStatus || "").toLowerCase() === "refunded" ||
-          (
-            String(order.paymentStatus || "").toLowerCase() === "paid" &&
-            CLOSED_ORDER_STATUSES.has(String(order.status || "").toLowerCase())
-          )
-        ) {
-          continue;
-        }
-
-        order.paymentStatus = "paid";
-        if (order.status === "created") {
-          order.status = "ordered";
-          order.statusHistory.push({ status: "ordered" });
-        }
-
-        order.items.forEach((it) => {
-          it.chargeId = chargeId || it.chargeId;
-          it.transferId = transferId || it.transferId;
-          it.applicationFeeId = applicationFeeId || it.applicationFeeId;
-        });
-        order.markModified("items");
-
-        await order.save();
-
-        try {
-          const inventoryResult = await decrementInventoryForPaidOrder(order);
-          if (inventoryResult.decremented) {
-            console.log(
-              `Inventory decremented for paid order ${order._id}`,
-              JSON.stringify({ lines: inventoryResult.lines?.length || 0 })
-            );
-          } else if (inventoryResult.reason === "already_decremented") {
-            console.log(
-              `Inventory already decremented for order ${order._id}, skipping`
-            );
-          }
-        } catch (inventoryErr) {
-          console.error(
-            `Failed to decrement inventory for paid order ${order._id}:`,
-            inventoryErr
-          );
-        }
-
-        try {
-          const emailResult = await sendOrderPaidConfirmationIfNeeded(order, {
-            currency: pi.currency,
-          });
-          if (emailResult.emailWarning) {
-            console.error("Paid-order email delivery incomplete", {
-              orderId: String(order._id),
-            });
-          }
-        } catch {
-          console.error("Unexpected paid-order email orchestration failure", {
-            orderId: String(order._id),
-          });
-        }
-      }
+      await reconcileSucceededPaymentIntentOrders(orders, pi, {
+        chargeId,
+        transferId,
+        applicationFeeId,
+      });
 
       console.log(
         `✅ Stripe payment confirmed and email delivery processed for ${orders.length} order(s)`
@@ -361,8 +320,19 @@ exports.retrieveIntent = async (req, res) => {
 
     const reconciliation = await reconcileSucceededPaymentIntentOrders(
       orders,
-      paymentIntent
+      paymentIntent,
+      {},
+      { reloadOnMiss: true }
     );
+    const authoritativeOrders = new Map(
+      (reconciliation.orders || []).map((order) => [String(order._id), order])
+    );
+    for (const order of orders) {
+      const authoritative = authoritativeOrders.get(String(order._id));
+      if (!authoritative) continue;
+      order.paymentStatus = authoritative.paymentStatus;
+      order.status = authoritative.status;
+    }
     if (paymentIntent.status === "canceled") {
       for (const order of orders) {
         const failureResult = await failUnpaidOrderAndReleaseReservation(
