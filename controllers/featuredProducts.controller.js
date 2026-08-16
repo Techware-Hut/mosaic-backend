@@ -48,7 +48,7 @@ exports.getFeaturedProducts = async (req, res) => {
     const products = await Product.find(query)
       .populate('categoryId', 'name')
       .populate('subcategoryId', 'name')
-      .populate('businessId', 'businessName location')
+      .populate('businessId', 'businessName location badge')
       .select('title slug description coverImage minorityType price createdAt categoryId subcategoryId businessId')
       .sort({ createdAt: -1 })
       .skip(skip)

@@ -992,9 +992,15 @@ exports.getAllProducts = async (req, res) => {
       tags,
       zip,
       verified,
+      featured,
+      isFeatured,
     } = req.query;
 
     const filters = { isDeleted: false, isPublished: true, ...PUBLIC_ACTIVE_LISTING_FILTER };
+    if (featured === true || featured === 'true' || featured === 1 || featured === '1'
+      || isFeatured === true || isFeatured === 'true' || isFeatured === 1 || isFeatured === '1') {
+      filters.isFeatured = true;
+    }
 
     if (search) {
       filters.$or = [
