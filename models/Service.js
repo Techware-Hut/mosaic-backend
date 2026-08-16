@@ -94,6 +94,9 @@ const serviceSchema = new mongoose.Schema({
     default: true,
     index: true,
   },
+  wasPublishedAtDeactivation: {
+    type: Boolean,
+  },
   adminRemark: {
     type: String,
     trim: true,
