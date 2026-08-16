@@ -74,6 +74,11 @@ function loadRankedController(options = {}) {
     if (request === '../models/Business') return Business;
     if (request === '../models/ProductCategory') return {};
     if (request === '../models/ProductSubcategory') return {};
+    if (request === '../lib/listing/publicSearchFilters') {
+      return {
+        applyBadgeBusinessIdFilter: async () => ({ empty: false }),
+      };
+    }
     return originalLoad.call(this, request, parent, isMain);
   };
   delete require.cache[controllerPath];
@@ -95,4 +100,17 @@ test('listProductsRanked requires published products from approved active busine
   assert.equal(capturedBusinessFindQuery.value.isApproved, true);
   assert.equal(capturedBusinessFindQuery.value.isActive, true);
   assert.ok(Array.isArray(capturedFindQuery.value.businessId.$in));
+});
+
+test('listProductsRanked applies isFeatured when featured=true', async () => {
+  const { controller, capturedFindQuery } = loadRankedController();
+  const res = mockResponse();
+
+  await controller.listProductsRanked(
+    { query: { page: 1, pageSize: 8, featured: 'true' } },
+    res
+  );
+
+  assert.equal(capturedFindQuery.value.isFeatured, true);
+  assert.equal(capturedFindQuery.value.isPublished, true);
 });
