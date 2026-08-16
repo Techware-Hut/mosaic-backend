@@ -1,0 +1,326 @@
+name: Staging release PR controller
+
+on:
+  workflow_run:
+    workflows:
+      - Staging release certification
+    types:
+      - completed
+
+concurrency:
+  group: mosaic-staging-release-pr
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate-trigger:
+    name: Validate controller trigger
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      candidate_sha: ${{ steps.identity.outputs.candidate_sha }}
+      main_sha: ${{ steps.refs.outputs.main_sha }}
+    steps:
+      - name: Reject non-canonical trigger identity
+        id: identity
+        env:
+          TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
+          TRIGGER_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
+          TRIGGER_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          TRIGGER_WORKFLOW_PATH: ${{ github.event.workflow_run.path }}
+          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          if [ "$TRIGGER_EVENT" != "push" ] \
+            || [ "$TRIGGER_BRANCH" != "staging" ] \
+            || [ "$TRIGGER_REPOSITORY" != "$GITHUB_REPOSITORY" ] \
+            || [ "$TRIGGER_WORKFLOW_PATH" != ".github/workflows/staging-release-certification.yml" ] \
+            || [ "$TRIGGER_CONCLUSION" != "success" ] \
+            || [[ ! "$TRIGGER_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "::error::Release PR controller rejected a non-canonical workflow_run trigger."
+            exit 1
+          fi
+          echo "candidate_sha=$TRIGGER_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trusted default-branch release controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+          path: release-control
+
+      - name: Resolve trusted main and current staging
+        id: refs
+        env:
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        working-directory: release-control
+        run: |
+          set -euo pipefail
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          staging_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/staging" --jq '.object.sha')
+          if [ "$(git rev-parse HEAD)" != "$main_sha" ]; then
+            echo "::error::Trusted controller checkout is not the current main tip."
+            exit 1
+          fi
+          if [ "$WORKFLOW_SHA" != "$main_sha" ]; then
+            echo "::error::Controller workflow definition is not the current main revision."
+            exit 1
+          fi
+          if [ "$staging_sha" != "$CANDIDATE_SHA" ]; then
+            echo "::error::Certified staging candidate is stale."
+            exit 1
+          fi
+          echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
+
+  test-candidate:
+    name: Test candidate in isolated runner
+    needs: validate-trigger
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout untrusted candidate without credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.validate-trigger.outputs.candidate_sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Run full candidate test matrix
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+          npm run test:contract
+          npm run test:integration
+
+  validate-certificate:
+    name: Reconstruct certificate in fresh trusted runner
+    needs:
+      - validate-trigger
+      - test-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout trusted controller source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.validate-trigger.outputs.main_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: release-control
+
+      - name: Setup trusted Node.js runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Checkout candidate as untrusted read-only data
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.validate-trigger.outputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: candidate
+
+      - name: Download triggering certification artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: staging-certification-${{ needs.validate-trigger.outputs.candidate_sha }}
+          path: incoming-certification
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Re-require exact CI using trusted controller code
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.validate-trigger.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          node release-control/scripts/release/require-exact-ci-success.js \
+            --repository "$GITHUB_REPOSITORY" \
+            --branch staging \
+            --sha "$CANDIDATE_SHA" \
+            --workflow ci.yml \
+            --timeout-seconds 60 \
+            --poll-seconds 5 \
+            > "$RUNNER_TEMP/controller-exact-ci.json"
+
+      - name: Rebuild release manifest with trusted controller code
+        env:
+          CANDIDATE_SHA: ${{ needs.validate-trigger.outputs.candidate_sha }}
+          MAIN_SHA: ${{ needs.validate-trigger.outputs.main_sha }}
+        working-directory: candidate
+        run: |
+          set -euo pipefail
+          mkdir -p ../validated-certification
+          node ../release-control/scripts/release/build-release-manifest.js \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --main-sha "$MAIN_SHA" \
+            --ci-result "$RUNNER_TEMP/controller-exact-ci.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --output "../validated-certification/staging-certification-$CANDIDATE_SHA.json"
+
+      - name: Validate untrusted artifact identity and checksum
+        env:
+          CANDIDATE_SHA: ${{ needs.validate-trigger.outputs.candidate_sha }}
+          MAIN_SHA: ${{ needs.validate-trigger.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const candidate = process.env.CANDIDATE_SHA;
+          const expectedName = `staging-certification-${candidate}.json`;
+          const root = path.resolve('incoming-certification');
+          const entries = fs.readdirSync(root, { recursive: true, withFileTypes: true });
+          const files = entries.filter((entry) => entry.isFile());
+          if (files.length !== 1 || files[0].name !== expectedName || entries.some((entry) => entry.isSymbolicLink())) {
+            throw new Error('Certification artifact must contain exactly one expected regular JSON file');
+          }
+          const file = path.join(files[0].parentPath || files[0].path, files[0].name);
+          if (path.dirname(path.resolve(file)) !== root) {
+            throw new Error('Certification artifact JSON must be at the archive root');
+          }
+          const bytes = fs.readFileSync(file);
+          if (bytes.length === 0 || bytes.length > 1024 * 1024) throw new Error('Certification artifact size is invalid');
+          const manifest = JSON.parse(bytes.toString('utf8'));
+          const payload = { ...manifest };
+          delete payload.contentSha256;
+          delete payload.artifactFileSha256;
+          const digest = crypto.createHash('sha256').update(`${JSON.stringify(payload, null, 2)}\n`).digest('hex');
+          if (manifest.schemaVersion !== 1
+            || manifest.repository !== process.env.GITHUB_REPOSITORY
+            || manifest.sourceBranch !== 'staging'
+            || manifest.targetBranch !== 'main'
+            || manifest.candidateSha !== candidate
+            || manifest.mainSha !== process.env.MAIN_SHA
+            || manifest.ci?.event !== 'push'
+            || manifest.ci?.branch !== 'staging'
+            || manifest.ci?.conclusion !== 'success'
+            || manifest.contentSha256 !== digest) {
+            throw new Error('Certification artifact identity or content checksum is invalid');
+          }
+          const rebuiltPath = path.resolve('validated-certification', expectedName);
+          const rebuilt = JSON.parse(fs.readFileSync(rebuiltPath, 'utf8'));
+          const normalize = (value) => {
+            const copy = structuredClone(value);
+            delete copy.generatedAt;
+            delete copy.contentSha256;
+            delete copy.artifactFileSha256;
+            return copy;
+          };
+          if (JSON.stringify(normalize(rebuilt)) !== JSON.stringify(normalize(manifest))) {
+            throw new Error('Downloaded certificate payload does not match trusted reconstruction');
+          }
+          NODE
+
+      - name: Final stale-candidate guard
+        env:
+          CANDIDATE_SHA: ${{ needs.validate-trigger.outputs.candidate_sha }}
+          MAIN_SHA: ${{ needs.validate-trigger.outputs.main_sha }}
+          GH_TOKEN: ${{ github.token }}
+        working-directory: release-control
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$MAIN_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/staging" --jq '.object.sha')" = "$CANDIDATE_SHA"
+
+      - name: Upload trusted release-PR manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: validated-staging-release-${{ needs.validate-trigger.outputs.candidate_sha }}
+          path: validated-certification/staging-certification-${{ needs.validate-trigger.outputs.candidate_sha }}.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
+
+  ensure-release-pr:
+    name: Ensure one staging-to-main release PR
+    needs:
+      - validate-trigger
+      - validate-certificate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      # Main-only Environment scope keeps the App key unavailable to staging.
+      name: release-pr-controller
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout only trusted controller code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.validate-trigger.outputs.main_sha }}
+          persist-credentials: false
+          path: release-control
+
+      - name: Download trusted reconstructed manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: validated-staging-release-${{ needs.validate-trigger.outputs.candidate_sha }}
+          path: validated-certification
+
+      - name: Setup trusted Node.js runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Create scoped release-automation token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RELEASE_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Create or refresh the single release PR
+        env:
+          RELEASE_PR_TOKEN: ${{ steps.app-token.outputs.token }}
+          CANDIDATE_SHA: ${{ needs.validate-trigger.outputs.candidate_sha }}
+          WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          node release-control/scripts/release/ensure-staging-release-pr.js \
+            --repository "$GITHUB_REPOSITORY" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --manifest "validated-certification/staging-certification-$CANDIDATE_SHA.json" \
+            --workflow-run-url "$WORKFLOW_RUN_URL" \
+            > "$RUNNER_TEMP/release-pr-result.json"
+          node - "$RUNNER_TEMP/release-pr-result.json" <<'NODE'
+          const fs = require('node:fs');
+          const result = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          console.log(`Release PR ${result.action}: #${result.number} ${result.url}`);
+          NODE
+
+      - name: Failure summary
+        if: ${{ always() && (failure() || cancelled()) }}
+        env:
+          CANDIDATE_SHA: ${{ needs.validate-trigger.outputs.candidate_sha }}
+        run: |
+          {
+            echo "## BLOCKED BEFORE PRODUCTION"
+            echo ""
+            echo "- Release SHA: \`${CANDIDATE_SHA:-unknown}\`"
+            echo "- Failing phase: trusted release-PR controller"
+            echo "- Production mutation: **NO**"
+            echo "- Checkout gate: **NOT TOUCHED**"
+            echo "- Rollback needed: **NO**"
+            echo "- Next action: correct the controller precondition and rerun only for the current staging SHA."
+          } >> "$GITHUB_STEP_SUMMARY"

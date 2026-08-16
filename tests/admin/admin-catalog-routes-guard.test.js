@@ -25,3 +25,16 @@ test('admin catalog routes register expected handlers only', () => {
 
   assert.equal(routeMatches.length, 6);
 });
+
+test('catalog active updates restore publication instead of forcing draft', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../../controllers/admin/adminCatalog.controller.js'),
+    'utf8'
+  );
+
+  assert.match(source, /applyCatalogActiveTransition/);
+  assert.doesNotMatch(
+    source,
+    /if \(updates\.isActive === false\) \{\s*updates\.isPublished = false;/
+  );
+});

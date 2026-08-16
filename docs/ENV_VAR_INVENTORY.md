@@ -137,7 +137,8 @@ Sources compared: [`.env.example`](../.env.example), [README.md](../README.md), 
 
 | Variable / var | Where | Purpose |
 | --- | --- | --- |
-| `AWS_ROLE_TO_ASSUME` | GHA vars | OIDC deploy |
+| `AWS_RELEASE_CONTROL_ROLE_TO_ASSUME` | protected `production-release-control` Environment var | Agentic OIDC deploy; isolated from historical reruns |
+| `AWS_ROLE_TO_ASSUME` | remove/revoke | Legacy OIDC deploy path; must not remain usable after release-control cutover |
 | `AWS_REGION` | GHA env | EB region |
 | `EB_APPLICATION_NAME` | GHA env | EB app |
 | `EB_ENVIRONMENT_NAME` | GHA env | EB env |

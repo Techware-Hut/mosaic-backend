@@ -51,3 +51,57 @@ No values are included in this document.
 - `SENTRY_DSN`
 - `SENTRY_ENVIRONMENT`
 - `SENTRY_RELEASE`
+
+## GitHub Actions release control
+
+These names belong in the specific repository or protected Environment scope
+documented in `RELEASE_CONTROL_INFRASTRUCTURE_SETUP.md`. No values are included
+here. The release workflow uses OIDC role assumption; do not create long-lived
+`AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` Actions secrets for it.
+
+Repository variable:
+
+- `RELEASE_AUTOMATION_APP_BOT_LOGIN`
+- `LEGACY_PAYMENT_RETIREMENT_SHA`
+- `LEGACY_PAYMENT_RECONCILIATION_SHA256`
+
+`release-pr-controller` (main-only, no-reviewer) Environment variable:
+
+- `RELEASE_AUTOMATION_APP_ID`
+
+`release-pr-controller` Environment secret (never repository/org scoped):
+
+- `RELEASE_AUTOMATION_APP_PRIVATE_KEY`
+
+`production-preflight` Environment variables:
+
+- `AWS_PREFLIGHT_ROLE_TO_ASSUME`
+- `AWS_REGION`
+- `EB_APPLICATION_NAME`
+- `EB_ENVIRONMENT_NAME`
+- `CHECKOUT_DRAIN_SECONDS`
+- `CHECKOUT_MAX_REQUEST_SECONDS`
+
+`production-release-control` Environment variables:
+
+- `AWS_RELEASE_CONTROL_ROLE_TO_ASSUME`
+- `AWS_REGION`
+- `EB_APPLICATION_NAME`
+- `EB_ENVIRONMENT_NAME`
+- `CHECKOUT_GATE_LOAD_BALANCER_ARN`
+- `CHECKOUT_GATE_HTTP_RULE_ARN`
+- `CHECKOUT_GATE_HTTPS_RULE_ARN`
+- `CHECKOUT_GATE_HTTP_PRIORITY`
+- `CHECKOUT_GATE_HTTPS_PRIORITY`
+- `CHECKOUT_GATE_DISABLED_PATH`
+- `CHECKOUT_DRAIN_SECONDS`
+- `CHECKOUT_MAX_REQUEST_SECONDS`
+- `SSM_RESERVATION_DOCUMENT_NAME`
+- `SSM_RESERVATION_DOCUMENT_VERSION`
+- `SSM_RESERVATION_DOCUMENT_SHA256`
+
+Both checkout-gate priority variables must be the non-secret literal `1`, so
+no listener rule can take precedence over the gate.
+
+Do not store `MONGODB_URI`, AWS credentials, Stripe secrets, SSM output, or test
+user credentials in these release-control variables.

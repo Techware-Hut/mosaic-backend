@@ -1,0 +1,199 @@
+name: Staging release certification
+
+on:
+  push:
+    branches:
+      - staging
+
+concurrency:
+  group: mosaic-staging-release
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  certify-candidate:
+    name: Staging release certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      candidate_sha: ${{ steps.identity.outputs.candidate_sha }}
+      main_sha: ${{ steps.identity.outputs.main_sha }}
+
+    steps:
+      - name: Checkout exact staging candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Resolve immutable candidate identity
+        id: identity
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "identity" > "$RUNNER_TEMP/release-phase"
+          if [ "$EVENT_NAME" != "push" ] || [ "$EVENT_REF" != "refs/heads/staging" ]; then
+            echo "This workflow certifies only canonical pushes to staging" >&2
+            exit 1
+          fi
+          if [[ ! "$CANDIDATE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "Candidate must be a full lowercase Git SHA" >&2
+            exit 1
+          fi
+          staging_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/staging" --jq '.object.sha')
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$staging_sha" != "$CANDIDATE_SHA" ]; then
+            echo "Candidate is already stale; canonical staging moved" >&2
+            exit 1
+          fi
+          git cat-file -e "$main_sha^{commit}"
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Require successful CI for the exact push SHA
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          echo "exact-ci" > "$RUNNER_TEMP/release-phase"
+          node scripts/release/require-exact-ci-success.js \
+            --repository "$GITHUB_REPOSITORY" \
+            --branch staging \
+            --sha "$CANDIDATE_SHA" \
+            --workflow ci.yml \
+            --timeout-seconds 900 \
+            --poll-seconds 15 \
+            > "$RUNNER_TEMP/exact-ci-result.json"
+
+      - name: Run staging release-control tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "release-control-tests" > "$RUNNER_TEMP/release-phase"
+          node --test tests/release/stagingReleaseAutomation.test.js
+
+      - name: Reconfirm canonical refs did not move
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+          MAIN_SHA: ${{ steps.identity.outputs.main_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "final-ref-check" > "$RUNNER_TEMP/release-phase"
+          observed_staging=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/staging" --jq '.object.sha')
+          observed_main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$observed_staging" != "$CANDIDATE_SHA" ]; then
+            echo "Candidate became stale during certification" >&2
+            exit 1
+          fi
+          if [ "$observed_main" != "$MAIN_SHA" ]; then
+            echo "Main changed during staging certification; retry against the new baseline" >&2
+            exit 1
+          fi
+
+      - name: Build immutable certification manifest
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+          MAIN_SHA: ${{ steps.identity.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          echo "manifest" > "$RUNNER_TEMP/release-phase"
+          mkdir -p release-certification
+          node scripts/release/build-release-manifest.js \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --main-sha "$MAIN_SHA" \
+            --ci-result "$RUNNER_TEMP/exact-ci-result.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --output "release-certification/staging-certification-$CANDIDATE_SHA.json"
+
+      - name: Final stale-candidate guard
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "artifact-stale-guard" > "$RUNNER_TEMP/release-phase"
+          observed=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/staging" --jq '.object.sha')
+          if [ "$observed" != "$CANDIDATE_SHA" ]; then
+            echo "Candidate became stale before artifact publication" >&2
+            exit 1
+          fi
+
+      - name: Upload exact-SHA certification artifact
+        id: artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-certification-${{ steps.identity.outputs.candidate_sha }}
+          path: release-certification/staging-certification-${{ steps.identity.outputs.candidate_sha }}.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+          overwrite: false
+
+      - name: Certification summary
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+          MAIN_SHA: ${{ steps.identity.outputs.main_sha }}
+          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.artifact.outputs.artifact-digest }}
+        run: |
+          {
+            echo "## Exact staging certification"
+            echo ""
+            echo "- Candidate: \`$CANDIDATE_SHA\`"
+            echo "- Main baseline: \`$MAIN_SHA\`"
+            echo "- Exact push CI: success"
+            echo "- Artifact: $ARTIFACT_URL"
+            echo "- Archive digest: \`$ARTIFACT_DIGEST\`"
+            echo "- Production mutation: **NO**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Certification failure summary
+        if: ${{ always() && (failure() || cancelled()) }}
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          phase=$(cat "$RUNNER_TEMP/release-phase" 2>/dev/null || echo "workflow-initialization")
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/staging" --jq '.object.sha' 2>/dev/null || true)
+          stale="UNKNOWN"
+          if [ -n "$current" ]; then
+            if [ "$current" = "$CANDIDATE_SHA" ]; then stale="NO"; else stale="YES"; fi
+          fi
+          {
+            echo "## BLOCKED BEFORE PRODUCTION"
+            echo ""
+            echo "- Release SHA: \`$CANDIDATE_SHA\`"
+            echo "- Failing phase: \`$phase\`"
+            echo "- Current staging SHA: \`${current:-unavailable}\`"
+            echo "- Stale candidate: **$stale**"
+            echo "- Release PR action: **NOT COMPLETED**"
+            echo "- Production mutation: **NO**"
+            echo "- Checkout gate: **NOT TOUCHED**"
+            echo "- Rollback needed: **NO**"
+            echo "- Next action: inspect this phase, then retry only the current canonical staging SHA."
+          } >> "$GITHUB_STEP_SUMMARY"
