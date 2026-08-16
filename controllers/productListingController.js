@@ -14,6 +14,13 @@ const {
 const {
   PUBLIC_PRODUCT_FILTER,
 } = require('../lib/listing/publicMarketplaceStates');
+const {
+  applyBadgeBusinessIdFilter,
+} = require('../lib/listing/publicSearchFilters');
+
+function parseTruthyQueryFlag(value) {
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
 
 // tiny helper: clip a number into a safe range (with default)
 const clip = (n, lo, hi, d) => {
@@ -40,7 +47,10 @@ async function listProductsRanked(req, res) {
       pageSize = 24, 
       businessType, 
       location, 
-      minority 
+      minority,
+      featured,
+      isFeatured,
+      badge,
     } = req.query;
     
     const pageNum = Math.max(1, Number(page));
@@ -54,8 +64,21 @@ async function listProductsRanked(req, res) {
         ...PUBLIC_PRODUCT_FILTER,
         businessId: { $in: visibleBusinessIds },
       };
+      if (parseTruthyQueryFlag(featured) || parseTruthyQueryFlag(isFeatured)) {
+        simpleQuery.isFeatured = true;
+      }
+      const badgeScoped = await applyBadgeBusinessIdFilter(simpleQuery, badge);
+      if (badgeScoped.empty) {
+        return res.json({
+          items: [],
+          total: 0,
+          page: pageNum,
+          pageSize: pageSizeN,
+          mix: {},
+        });
+      }
       const products = await Product.find(simpleQuery)
-        .populate('businessId', 'businessName')
+        .populate('businessId', 'businessName badge')
         .populate('categoryId', 'name')
         .populate('subcategoryId', 'name')
         .sort({ createdAt: -1 })
