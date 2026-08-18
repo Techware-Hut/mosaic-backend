@@ -62,6 +62,11 @@ function validateStage1Payload(body = {}) {
     errors.push('Compliance declaration must be accepted when no business license is provided');
   }
 
+  // If vendor claims to have a business license, the number is required
+  if (body.hasBusinessLicense === true && !isNonEmptyString(body.licenseNumber)) {
+    errors.push('Business license number is required');
+  }
+
   OPTIONAL_URL_FIELDS.forEach((field) => {
     if (body[field] && !isValidUrl(body[field])) {
       errors.push(`Invalid URL provided for ${field}`);
