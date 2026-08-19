@@ -61,12 +61,27 @@ test('validateStage1Payload requires minority categories when minority-owned', (
   assert.ok(errors.some((e) => e.includes('minority category')));
 });
 
-test('validateStage1Payload requires terms and declaration', () => {
+test('validateStage1Payload requires terms', () => {
   const errors = validateStage1Payload(validPayload({
     acceptedTerms: false,
+  }));
+  assert.ok(errors.some((e) => e.includes('Terms and conditions must be accepted')));
+});
+
+test('validateStage1Payload requires declaration when hasBusinessLicense is false', () => {
+  const errors = validateStage1Payload(validPayload({
+    hasBusinessLicense: false,
     declarationAccepted: false,
   }));
-  assert.ok(errors.some((e) => e.includes('Terms and declaration')));
+  assert.ok(errors.some((e) => e.includes('Compliance declaration must be accepted')));
+});
+
+test('validateStage1Payload requires license number when hasBusinessLicense is true', () => {
+  const errors = validateStage1Payload(validPayload({
+    hasBusinessLicense: true,
+    licenseNumber: '',
+  }));
+  assert.ok(errors.some((e) => e.includes('Business license number is required')));
 });
 
 test('validateStage1Payload validates optional social URLs when provided', () => {

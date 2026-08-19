@@ -51,14 +51,20 @@ function validateStage1Payload(body = {}) {
     }
   }
 
-  const termsPresent = Object.prototype.hasOwnProperty.call(body, 'acceptedTerms')
-    || Object.prototype.hasOwnProperty.call(body, 'declarationAccepted');
-  if (termsPresent) {
-    if (!body.acceptedTerms || !body.declarationAccepted) {
-      errors.push('Terms and declaration must be accepted');
-    }
-  } else if (!body.acceptedTerms || !body.declarationAccepted) {
-    errors.push('Terms and declaration must be accepted');
+  // Terms & Conditions must always be accepted
+  if (!body.acceptedTerms) {
+    errors.push('Terms and conditions must be accepted');
+  }
+
+  // Declaration is only required when vendor has NO business license
+  // (they must sign the compliance declaration as an alternative)
+  if (body.hasBusinessLicense === false && !body.declarationAccepted) {
+    errors.push('Compliance declaration must be accepted when no business license is provided');
+  }
+
+  // If vendor claims to have a business license, the number is required
+  if (body.hasBusinessLicense === true && !isNonEmptyString(body.licenseNumber)) {
+    errors.push('Business license number is required');
   }
 
   OPTIONAL_URL_FIELDS.forEach((field) => {

@@ -480,7 +480,7 @@ test('initiateOrder cancels a created PaymentIntent before releasing stock when 
     initiateOrder,
     getPiCancelCalls,
     getReservationReleaseCalls,
-  } = loadInitiateOrder({ orderSaveErrorAtCall: 2 });
+  } = loadInitiateOrder({ orderSaveErrorAtCall: 1 });
   const res = mockResponse();
 
   await initiateOrder(baseRequest(), res);
