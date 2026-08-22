@@ -101,8 +101,8 @@ async function ensureSubscriptionPlan() {
       price: 0,
       limits: {
         productListings: 10,
-        serviceListings: 10,
-        foodListings: 10,
+        serviceListings: 5,
+        foodListings: 5,
         imageLimit: 100,
         videoLimit: 10,
       },

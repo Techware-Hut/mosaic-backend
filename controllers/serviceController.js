@@ -28,6 +28,7 @@ const {
 } = require('../lib/listing/publicMarketplaceStates');
 const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
 const { safeGeocodeAddress } = require('../utils/geocode');
+const { checkBusinessListingQuota } = require('../services/listingQuotaService');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -65,17 +66,20 @@ const getGalleryImageLimit = (subscriptionPlan) =>
 const countGalleryImages = (images) =>
   Array.isArray(images) ? images.filter(Boolean).length : 0;
 
-const getOwnerChildServiceCount = async (ownerId, excludeServiceId = null) => {
-  const filters = { ownerId };
-  if (excludeServiceId) {
-    filters._id = { $ne: excludeServiceId };
-  }
-
-  const services = await Service.find(filters).select('services').lean();
-  return services.reduce((sum, item) => (
-    sum + (Array.isArray(item.services) ? item.services.length : 0)
-  ), 0);
-};
+const sendListingQuotaFailure = (res, result) => res.status(result.status || 403).json({
+  success: false,
+  code: result.code,
+  status: result.status || 403,
+  error: result.error || result.message,
+  message: result.message || result.error,
+  listingType: result.listingType,
+  tier: result.tier,
+  limit: result.limit,
+  current: result.current,
+  attemptedIncrease: result.attemptedIncrease,
+  projected: result.projected,
+  remaining: result.remaining,
+});
 
 // Create parent service with minimal details
 exports.createParentService = async (req, res) => {
@@ -273,14 +277,17 @@ exports.createService = async (req, res) => {
       return res.status(403).json({ error: 'Valid subscription not found.' });
 
     const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    const serviceLimit = subscriptionPlan?.limits?.serviceListings || 0;
     const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
 
-    const currentChildServiceCount = await getOwnerChildServiceCount(userId);
-    if (currentChildServiceCount + normalizedServices.length > serviceLimit) {
-      return res.status(403).json({
-        error: `Service listing limit reached. You can add only ${Math.max(serviceLimit - currentChildServiceCount, 0)}  services.`,
+    if (isPublished && normalizedServices.length > 0) {
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId,
+        listingType: 'service',
+        attemptedIncrease: normalizedServices.length,
+        models: { Service },
       });
+      if (!quotaCheck.ok) return sendListingQuotaFailure(res, quotaCheck);
     }
 
     if (countGalleryImages(images) > galleryImageLimit) {
@@ -619,7 +626,6 @@ exports.addChildServices = async (req, res) => {
     }
 
     const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    const serviceLimit = subscriptionPlan?.limits?.serviceListings || 0;
     const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
 
     // Add new child services to existing ones
@@ -629,11 +635,19 @@ exports.addChildServices = async (req, res) => {
       return res.status(400).json(formatValidationErrorResponse(childValidation.fieldErrors));
     }
 
-    const currentChildServiceCount = await getOwnerChildServiceCount(userId);
-    if (currentChildServiceCount + normalizedChildServices.length > serviceLimit) {
-      return res.status(403).json({
-        error: `Service listing limit reached. You can add only ${Math.max(serviceLimit - currentChildServiceCount, 0)} more services.`,
+    const parentBusinessId = parentService.businessId?._id || parentService.businessId;
+    const business = await Business.findById(parentBusinessId)
+      .select('_id isActive isApproved owner subscriptionId');
+
+    if (parentService.isPublished === true && parentService.isActive !== false) {
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId,
+        listingType: 'service',
+        attemptedIncrease: normalizedChildServices.length,
+        models: { Service },
       });
+      if (!quotaCheck.ok) return sendListingQuotaFailure(res, quotaCheck);
     }
 
     const nextGalleryImages = images !== undefined ? images : parentService.images;
@@ -668,8 +682,6 @@ exports.addChildServices = async (req, res) => {
       updatePayload,
       { new: true }
     );
-
-    const business = await Business.findById(parentService.businessId).select('isActive isApproved owner');
 
     return res.status(200).json(
       formatOwnerServiceResponse(updatedService, business, 'Child services added successfully.')
@@ -781,7 +793,7 @@ exports.updateService = async (req, res) => {
     }
 
     const business = await Business.findOne({ _id: service.businessId, owner: userId })
-      .select('_id isActive isApproved owner');
+      .select('_id isActive isApproved owner subscriptionId');
 
     const subscription = await Subscription.findOne({
       userId,
@@ -794,7 +806,6 @@ exports.updateService = async (req, res) => {
     }
 
     const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    const serviceLimit = subscriptionPlan?.limits?.serviceListings || 0;
     const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
 
     // Snapshot media that may be replaced — only delete from Cloudinary after save succeeds
@@ -804,6 +815,13 @@ exports.updateService = async (req, res) => {
 
     const requestedPublish =
       req.body.isPublished === true || req.body.isPublished === 'true';
+    const nextPublished = req.body.isPublished !== undefined
+      ? requestedPublish
+      : service.isPublished === true;
+    const previousServiceCount =
+      service.isPublished === true && service.isActive !== false && Array.isArray(service.services)
+        ? service.services.length
+        : 0;
 
     let nextServices = service.services;
     if (req.body.services !== undefined) {
@@ -821,13 +839,6 @@ exports.updateService = async (req, res) => {
         const childValidation = validateChildServices(payload.normalizedServices);
         if (!childValidation.ok) {
           return res.status(400).json(formatValidationErrorResponse(childValidation.fieldErrors));
-        }
-
-        const otherChildServiceCount = await getOwnerChildServiceCount(userId, service._id);
-        if (otherChildServiceCount + payload.normalizedServices.length > serviceLimit) {
-          return res.status(403).json({
-            message: `Service listing limit reached. You can add only ${Math.max(serviceLimit - otherChildServiceCount, 0)} more child services.`,
-          });
         }
 
         nextServices = payload.normalizedServices;
@@ -905,6 +916,22 @@ exports.updateService = async (req, res) => {
         publishValidation.fieldErrors,
         publishValidation.message
       ));
+    }
+
+    const nextServiceCount =
+      nextPublished && service.isActive !== false && Array.isArray(nextServices)
+        ? nextServices.length
+        : 0;
+    const attemptedIncrease = nextServiceCount - previousServiceCount;
+    if (attemptedIncrease > 0) {
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId,
+        listingType: 'service',
+        attemptedIncrease,
+        models: { Service },
+      });
+      if (!quotaCheck.ok) return sendListingQuotaFailure(res, quotaCheck);
     }
 
     const nextGalleryImages = req.body.images !== undefined ? req.body.images : service.images;
