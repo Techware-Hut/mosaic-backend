@@ -68,12 +68,27 @@ test('validateStage1Payload requires terms', () => {
   assert.ok(errors.some((e) => e.includes('Terms and conditions must be accepted')));
 });
 
-test('validateStage1Payload requires declaration when hasBusinessLicense is false', () => {
+test('validateStage1Payload requires general accuracy declaration for all vendors', () => {
   const errors = validateStage1Payload(validPayload({
-    hasBusinessLicense: false,
     declarationAccepted: false,
   }));
+  assert.ok(errors.some((e) => e.includes('General accuracy declaration must be accepted')));
+});
+
+test('validateStage1Payload requires compliance declaration when hasBusinessLicense is false', () => {
+  const errors = validateStage1Payload(validPayload({
+    hasBusinessLicense: false,
+    noLicenseComplianceConfirmed: false,
+  }));
   assert.ok(errors.some((e) => e.includes('Compliance declaration must be accepted')));
+});
+
+test('validateStage1Payload accepts noLicenseComplianceConfirmed when hasBusinessLicense is false', () => {
+  const errors = validateStage1Payload(validPayload({
+    hasBusinessLicense: false,
+    noLicenseComplianceConfirmed: true,
+  }));
+  assert.deepEqual(errors, []);
 });
 
 test('validateStage1Payload requires license number when hasBusinessLicense is true', () => {

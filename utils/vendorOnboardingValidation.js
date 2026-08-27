@@ -56,10 +56,19 @@ function validateStage1Payload(body = {}) {
     errors.push('Terms and conditions must be accepted');
   }
 
-  // Declaration is only required when vendor has NO business license
-  // (they must sign the compliance declaration as an alternative)
-  if (body.hasBusinessLicense === false && !body.declarationAccepted) {
-    errors.push('Compliance declaration must be accepted when no business license is provided');
+  // General accuracy declaration is required for ALL vendors
+  if (body.declarationAccepted !== true) {
+    errors.push('General accuracy declaration must be accepted');
+  }
+
+  // Compliance declaration is required when vendor has NO business license
+  if (body.hasBusinessLicense === false) {
+    const hasConfirmedCompliance =
+      body.noLicenseComplianceConfirmed === true ||
+      body.noLicenseDeclarationAccepted === true;
+    if (!hasConfirmedCompliance) {
+      errors.push('Compliance declaration must be accepted when no business license is provided');
+    }
   }
 
   // If vendor claims to have a business license, the number is required

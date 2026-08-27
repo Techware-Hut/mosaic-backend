@@ -136,6 +136,11 @@ const VendorOnboardingStage1Schema = new mongoose.Schema(
       default: false,
     },
 
+    noLicenseComplianceConfirmed: {
+      type: Boolean,
+      default: false,
+    },
+
     declarationAccepted: {
       type: Boolean,
       default: false,

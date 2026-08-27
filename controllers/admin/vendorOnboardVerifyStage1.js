@@ -998,8 +998,8 @@ exports.finalizeVerification = async (req, res) => {
     // declaration (declarationAccepted) satisfies the license requirement.
     // If they said YES to having a license, the doc must be uploaded and verified.
     const vendorHasNoLicense = application.hasBusinessLicense === false;
-    const hasBusinessLicense = vendorHasNoLicense
-      ? application.declarationAccepted === true
+    const hasLicenseDocVerified = vendorHasNoLicense
+      ? true
       : Boolean(application.verificationChecklist?.businessLicense);
 
     const hasMinorityDocs = application.isMinorityOwned
@@ -1007,7 +1007,7 @@ exports.finalizeVerification = async (req, res) => {
       : true;
 
     const hasRequiredDocsVerified =
-      hasTaxDocs && hasBusinessLicense && hasMinorityDocs;
+      hasTaxDocs && hasLicenseDocVerified && hasMinorityDocs;
 
     // ❌ Missing docs
     const missingRequiredDocuments = [];
@@ -1016,9 +1016,8 @@ exports.finalizeVerification = async (req, res) => {
       missingRequiredDocuments.push('EIN document');
     }
 
-    if (!hasBusinessLicense) {
-      // vendor claimed to have a license but it was not verified yet
-      missingRequiredDocuments.push('business license document (not yet verified)');
+    if (!hasLicenseDocVerified) {
+      missingRequiredDocuments.push('business license document');
     }
 
     if (application.isMinorityOwned && !hasMinorityDocs) {
