@@ -58,6 +58,8 @@ function buildVariant(overrides = {}) {
     productId: {
       _id: { toString: () => productId },
       title: 'Test Product',
+      ownerId: owner,
+      businessId: biz,
       ...(overrides.productId || {}),
     },
     ...overrides.variantExtra,
@@ -67,6 +69,7 @@ function buildVariant(overrides = {}) {
 function buildBusiness(overrides = {}) {
   return {
     _id: businessId,
+    owner: vendorId,
     email: 'vendor@example.com',
     isApproved: overrides.isApproved ?? true,
     isActive: overrides.isActive ?? true,

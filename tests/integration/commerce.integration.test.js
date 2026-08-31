@@ -291,13 +291,14 @@ test('order initiate rejects empty cart for customer', async () => {
   assert.notEqual(res.status, 200);
 });
 
-test('vendor cannot initiate customer checkout order', async () => {
+test('vendor can reach checkout validation with the existing business_owner session', async () => {
   const agent = createAgent(getApp());
   const vendor = await registerAndVerify(agent, { role: 'business_owner' });
   await login(agent, vendor.email, vendor.password);
 
   const res = await agent.post('/api/orders/initiate').send({});
-  assert.equal(res.status, 403);
+  assert.equal(res.status, 400);
+  assert.equal(res.body.message, 'Items are required');
 });
 
 test('admin can list orders; vendor can list vendor orders endpoint', async () => {

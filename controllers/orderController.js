@@ -104,6 +104,12 @@ const {
 } = require("../lib/inventory/orderInventory");
 const { getBusinessCheckoutBlock } = require("../utils/checkoutGuards");
 const {
+  PRODUCT_OWNERSHIP_INVALID_MESSAGE,
+  SELF_PURCHASE_MESSAGE,
+  hasConsistentPurchaseOwnership,
+  isSelfPurchase,
+} = require("../utils/purchaseAuthorization");
+const {
   sendOrderStatusEmail,
   sendOrderUpdateEmail,
   sendOrderLifecycleEmail,
@@ -628,7 +634,7 @@ exports.initiateOrder = async (req, res) => {
       });
     }
 
-    const vendorItemMap = {};
+    const resolvedPurchaseItems = [];
     const seen = new Set();
 
     for (const item of items) {
@@ -665,6 +671,79 @@ exports.initiateOrder = async (req, res) => {
         });
       }
 
+      resolvedPurchaseItems.push({ item, product: variant.productId, variant });
+    }
+
+    const businessById = new Map();
+    for (const { variant } of resolvedPurchaseItems) {
+      const resolvedBusinessId = String(variant.businessId);
+      if (!businessById.has(resolvedBusinessId)) {
+        const resolvedBusiness = await Business.findById(variant.businessId);
+        if (!resolvedBusiness) {
+          const checkoutBlock = getBusinessCheckoutBlock(null);
+          return res.status(checkoutBlock.status).json({
+            success: false,
+            message: checkoutBlock.message,
+          });
+        }
+        businessById.set(resolvedBusinessId, resolvedBusiness);
+      }
+    }
+
+    for (const { variant, product } of resolvedPurchaseItems) {
+      const business = businessById.get(String(variant.businessId));
+      if (!hasConsistentPurchaseOwnership({ variant, product, business })) {
+        return res.status(409).json({
+          success: false,
+          code: "PRODUCT_OWNERSHIP_INVALID",
+          message: PRODUCT_OWNERSHIP_INVALID_MESSAGE,
+        });
+      }
+    }
+
+    const vendorItemMap = {};
+    for (const { variant } of resolvedPurchaseItems) {
+      const vendorId = String(variant.ownerId);
+      if (!vendorItemMap[vendorId]) {
+        vendorItemMap[vendorId] = {
+          businessId: variant.businessId,
+          items: [],
+        };
+      }
+    }
+
+    const vendorIds = Object.keys(vendorItemMap);
+
+    if (vendorIds.length !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Single-vendor checkout only at this time.",
+      });
+    }
+
+    const vendorId = vendorIds[0];
+    const { businessId, items: rawVendorItems } = vendorItemMap[vendorId];
+
+    const business = businessById.get(String(businessId));
+
+    if (isSelfPurchase({ buyerId: userId, business })) {
+      return res.status(403).json({
+        success: false,
+        code: "SELF_PURCHASE_NOT_ALLOWED",
+        message: SELF_PURCHASE_MESSAGE,
+      });
+    }
+
+    const checkoutBlock = getBusinessCheckoutBlock(business);
+    if (checkoutBlock) {
+      return res.status(checkoutBlock.status).json({
+        success: false,
+        message: checkoutBlock.message,
+      });
+    }
+
+    for (const { item, variant } of resolvedPurchaseItems) {
+      const { productId, variantId, size, quantity, price } = item;
       const selectedVariant = resolveVariantSelection(variant, size);
 
       if (!selectedVariant) {
@@ -684,23 +763,13 @@ exports.initiateOrder = async (req, res) => {
       const discountEnd = selectedVariant.discountEndDate
         ? new Date(selectedVariant.discountEndDate)
         : null;
-
       const validDiscount =
         selectedVariant.salePrice &&
         (!discountEnd || discountEnd.getTime() > Date.now());
-
       const actualPrice = validDiscount
         ? Number(selectedVariant.salePrice)
         : Number(selectedVariant.price);
-
-      const vendorId = variant.ownerId.toString();
-
-      if (!vendorItemMap[vendorId]) {
-        vendorItemMap[vendorId] = {
-          businessId: variant.businessId,
-          items: [],
-        };
-      }
+      const vendorId = String(variant.ownerId);
 
       vendorItemMap[vendorId].items.push({
         productId,
@@ -723,29 +792,7 @@ exports.initiateOrder = async (req, res) => {
       });
     }
 
-    const vendorIds = Object.keys(vendorItemMap);
-
-    if (vendorIds.length !== 1) {
-      return res.status(400).json({
-        success: false,
-        message: "Single-vendor checkout only at this time.",
-      });
-    }
-
-    const vendorId = vendorIds[0];
-    const { businessId, items: rawVendorItems } = vendorItemMap[vendorId];
-
-    // Load user + business
-    const business = await Business.findById(businessId);
     const user = await User.findById(userId).select("email");
-
-    const checkoutBlock = getBusinessCheckoutBlock(business);
-    if (checkoutBlock) {
-      return res.status(checkoutBlock.status).json({
-        success: false,
-        message: checkoutBlock.message,
-      });
-    }
 
     const account = await stripe.accounts.retrieve(
       business.stripeConnectAccountId

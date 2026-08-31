@@ -58,6 +58,8 @@ function buildVariant(overrides = {}) {
     productId: {
       _id: { toString: () => productId },
       title: 'Test Product',
+      ownerId: owner,
+      businessId: biz,
       ...(overrides.productId || {}),
     },
     ...overrides.variantExtra,
@@ -67,6 +69,7 @@ function buildVariant(overrides = {}) {
 function buildBusiness(overrides = {}) {
   return {
     _id: businessId,
+    owner: vendorId,
     email: 'vendor@example.com',
     isApproved: overrides.isApproved ?? true,
     isActive: overrides.isActive ?? true,
@@ -93,6 +96,7 @@ function buildStripeAccount(overrides = {}) {
 
 function loadInitiateOrder({
   business = buildBusiness(),
+  businessById = null,
   stripeAccount = buildStripeAccount(),
   variants = [buildVariant()],
   variantById = null,
@@ -180,7 +184,7 @@ function loadInitiateOrder({
     }
     if (request.endsWith('models/Business')) {
       return {
-        findById: async () => business,
+        findById: async (id) => businessById ? businessById(id) : business,
       };
     }
     if (request.endsWith('models/User')) {
@@ -249,6 +253,7 @@ function loadInitiateOrder({
     getPiCreateCalls: () => piCreateCalls,
     getAccountRetrieveCalls: () => accountRetrieveCalls,
     getPiCancelCalls: () => piCancelCalls,
+    getOrderSaveCount: () => orderSaveCount,
     getSavedOrderPayload: () => savedOrderPayload,
     getReservationCalls: () => reservationCalls,
     getReservationReleaseCalls: () => reservationReleaseCalls,
@@ -323,15 +328,20 @@ test('initiateOrder blocks checkout when transfers capability is inactive', asyn
 test('initiateOrder rejects multi-vendor cart', async () => {
   process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
   const otherVendor = '507f1f77bcf86cd799439099';
+  const otherBusinessId = '507f1f77bcf86cd799439097';
   const otherProductId = '507f1f77bcf86cd799439098';
   const otherVariantId = '507f1f77bcf86cd799439099';
-  const { initiateOrder, getPiCreateCalls } = loadInitiateOrder({
+  const { initiateOrder, getPiCreateCalls, getOrderSaveCount, getReservationCalls } = loadInitiateOrder({
+    businessById: (id) => String(id) === otherBusinessId
+      ? buildBusiness({ _id: otherBusinessId, owner: otherVendor })
+      : buildBusiness(),
     variantById: (id) => {
       if (id === variantId) {
         return buildVariant();
       }
       return buildVariant({
         ownerId: otherVendor,
+        businessId: otherBusinessId,
         productId: {
           _id: { toString: () => otherProductId },
           title: 'Other Product',
@@ -367,8 +377,87 @@ test('initiateOrder rejects multi-vendor cart', async () => {
   );
 
   assert.equal(res.statusCode, 400);
-  assert.match(res.body.message, /Single-vendor checkout only/i);
+  assert.deepEqual(res.body, {
+    success: false,
+    message: 'Single-vendor checkout only at this time.',
+  });
   assert.equal(getPiCreateCalls().length, 0);
+  assert.equal(getOrderSaveCount(), 0);
+  assert.equal(getReservationCalls().length, 0);
+});
+
+test('initiateOrder denies self-purchase using canonical Business.owner before effects', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  let businessSaveCount = 0;
+  const ownedBusiness = buildBusiness({
+    owner: userId,
+    save: async function save() {
+      businessSaveCount += 1;
+      return this;
+    },
+  });
+  const ownedVariant = buildVariant({ ownerId: userId });
+  const {
+    initiateOrder,
+    getAccountRetrieveCalls,
+    getOrderSaveCount,
+    getPiCreateCalls,
+    getReservationCalls,
+  } = loadInitiateOrder({ business: ownedBusiness, variants: [ownedVariant] });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    success: false,
+    code: 'SELF_PURCHASE_NOT_ALLOWED',
+    message: "You can’t purchase products from your own business. Please select a product from another vendor.",
+  });
+  assert.equal(businessSaveCount, 0);
+  assert.equal(getAccountRetrieveCalls().length, 0);
+  assert.equal(getOrderSaveCount(), 0);
+  assert.equal(getPiCreateCalls().length, 0);
+  assert.equal(getReservationCalls().length, 0);
+});
+
+test('initiateOrder rejects inconsistent persisted ownership without leaking IDs or effects', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  let businessSaveCount = 0;
+  const inconsistentVariant = buildVariant({
+    productId: { ownerId: '507f1f77bcf86cd799439099' },
+  });
+  const {
+    initiateOrder,
+    getAccountRetrieveCalls,
+    getOrderSaveCount,
+    getPiCreateCalls,
+    getReservationCalls,
+  } = loadInitiateOrder({
+    business: buildBusiness({
+      save: async function save() {
+        businessSaveCount += 1;
+        return this;
+      },
+    }),
+    variants: [inconsistentVariant],
+  });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, {
+    success: false,
+    code: 'PRODUCT_OWNERSHIP_INVALID',
+    message: 'Product ownership information is inconsistent.',
+  });
+  assert.equal(JSON.stringify(res.body).includes(vendorId), false);
+  assert.equal(businessSaveCount, 0);
+  assert.equal(getAccountRetrieveCalls().length, 0);
+  assert.equal(getOrderSaveCount(), 0);
+  assert.equal(getPiCreateCalls().length, 0);
+  assert.equal(getReservationCalls().length, 0);
 });
 
 test('initiateOrder rejects price mismatch', async () => {

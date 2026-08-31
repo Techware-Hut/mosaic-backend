@@ -45,9 +45,9 @@ test('stripe.routes wires auth middleware on Connect helper routes', () => {
   assert.match(source, /router\.post\('\/backfill-customers', authenticate, isAdmin/);
 });
 
-test('orderRoutes requires customer role for initiate checkout', () => {
+test('orderRoutes requires checkout-buyer role for initiate checkout', () => {
   const source = fs.readFileSync(orderRoutesPath, 'utf8');
-  assert.match(source, /router\.post\('\/initiate', authenticate, isCustomer, initiateOrder\)/);
+  assert.match(source, /router\.post\('\/initiate', authenticate, isCheckoutBuyer, initiateOrder\)/);
 });
 
 test('authenticate rejects unauthenticated payment route access', async () => {
