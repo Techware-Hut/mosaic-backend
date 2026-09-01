@@ -11,6 +11,9 @@ const {
   LISTING_PRICE_REQUIRED_CODE,
   LISTING_PRICE_REQUIRED_MESSAGE,
 } = require('../lib/marketplace/listingPricePolicy');
+const {
+  checkBusinessListingQuota,
+} = require('../services/listingQuotaService');
 
 const LISTING_TYPES = new Set(['product', 'service', 'food']);
 // Approved 2026-07-07 (#218): Connect/payout setup required only for product vendors
@@ -218,13 +221,13 @@ async function loadListingSnapshotsByBusinessIds(businessIds = []) {
 
   const [products, services, foods, variants] = await Promise.all([
     Product.find({ businessId: { $in: ids }, isDeleted: false })
-      .select('_id title slug businessId ownerId coverImage price isPublished isDeleted createdAt updatedAt')
+      .select('_id title slug businessId ownerId coverImage price isPublished isActive isDeleted createdAt updatedAt')
       .lean(),
     Service.find({ businessId: { $in: ids } })
-      .select('_id title slug businessId ownerId coverImage price isPublished services createdAt updatedAt')
+      .select('_id title slug businessId ownerId coverImage price isPublished isActive services createdAt updatedAt')
       .lean(),
     Food.find({ businessId: { $in: ids } })
-      .select('_id title slug businessId ownerId coverImage price isPublished createdAt updatedAt')
+      .select('_id title slug businessId ownerId coverImage price isPublished isActive createdAt updatedAt')
       .lean(),
     ProductVariant.find({ businessId: { $in: ids }, isDeleted: false })
       .select('_id productId businessId ownerId sku stock price salePrice isPublished isDeleted createdAt updatedAt')
@@ -393,11 +396,47 @@ async function publishBusinessListings({ business, userId }) {
   const blockers = buildPublicationBlockers({ business, onboarding, snapshot });
   const eligibleBeforePublication = getEligibleListingsForBusiness(business, snapshot);
   const requiredListingCount = countRequiredListings(eligibleBeforePublication);
+  let quotaFailureStatus = null;
+
+  if (blockers.length === 0) {
+    const publicationIncrease = eligibleBeforePublication.listings.reduce((sum, listing) => {
+      if (listing.isPublished === true || listing.isActive === false) return sum;
+      if (eligibleBeforePublication.type === 'service') {
+        return sum + getServiceOfferings(listing).length;
+      }
+      return sum + 1;
+    }, 0);
+
+    if (publicationIncrease > 0) {
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId,
+        listingType: eligibleBeforePublication.type,
+        attemptedIncrease: publicationIncrease,
+        models: { Product, Service, Food },
+      });
+
+      if (!quotaCheck.ok) {
+        quotaFailureStatus = quotaCheck.status || 403;
+        blockers.push({
+          code: quotaCheck.code,
+          message: quotaCheck.message || quotaCheck.error,
+          listingType: quotaCheck.listingType,
+          tier: quotaCheck.tier,
+          limit: quotaCheck.limit,
+          current: quotaCheck.current,
+          attemptedIncrease: quotaCheck.attemptedIncrease,
+          projected: quotaCheck.projected,
+          remaining: quotaCheck.remaining,
+        });
+      }
+    }
+  }
 
   if (blockers.length) {
     return {
       ok: false,
-      status: 409,
+      status: quotaFailureStatus || 409,
       blockers,
       onboarding,
       snapshot,

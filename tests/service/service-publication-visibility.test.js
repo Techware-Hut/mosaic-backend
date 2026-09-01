@@ -40,6 +40,7 @@ function buildServiceDoc(overrides = {}) {
     title: 'Hair Styling',
     description: 'Salon menu',
     isPublished: false,
+    isActive: true,
     services: [{ name: 'Cut', price: 45, durationMinutes: 60 }],
     price: 45,
     duration: '',
@@ -49,16 +50,66 @@ function buildServiceDoc(overrides = {}) {
   };
 }
 
+function buildChildServices(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    name: `Service ${index + 1}`,
+    price: 25 + index,
+    durationMinutes: 30,
+  }));
+}
+
 function loadServiceController(options = {}) {
   const {
     existingService = null,
-    business = { _id: businessId, owner: ownerId, isActive: true, minorityType: 'none' },
+    business = {
+      _id: businessId,
+      owner: ownerId,
+      subscriptionId: 'subscription-1',
+      isActive: true,
+      minorityType: 'none',
+    },
     subscription = { subscriptionPlanId: 'plan-1', status: 'active' },
     serviceLimit = 10,
+    quotaCurrent = 0,
+    listingQuotaCheck = null,
   } = options;
 
   const savedDocs = [];
+  const quotaCalls = [];
   let createCalled = false;
+
+  const checkBusinessListingQuota = async (input) => {
+    quotaCalls.push(input);
+    if (listingQuotaCheck) return listingQuotaCheck(input);
+
+    const current = typeof quotaCurrent === 'function'
+      ? Number(quotaCurrent(input))
+      : Number(quotaCurrent);
+    const attemptedIncrease = Number(input.attemptedIncrease);
+    const projected = current + attemptedIncrease;
+    const base = {
+      listingType: 'service',
+      tier: 'Silver',
+      limit: serviceLimit,
+      current,
+      attemptedIncrease,
+      projected,
+      remaining: Math.max(serviceLimit - current, 0),
+    };
+
+    if (attemptedIncrease <= 0 || projected <= serviceLimit) {
+      return { ok: true, ...base };
+    }
+
+    return {
+      ok: false,
+      status: 403,
+      code: 'LISTING_LIMIT_REACHED',
+      error: 'Service listing limit reached.',
+      message: 'Service listing limit reached.',
+      ...base,
+    };
+  };
 
   const Service = {
     startSession: async () => ({
@@ -141,11 +192,11 @@ function loadServiceController(options = {}) {
       ServiceExport.find = Service.find;
       ServiceExport.findById = () => {
         const refreshed = existingService || buildServiceDoc();
-        return {
-          populate: () => ({
-            populate: async () => refreshed,
-          }),
+        const chain = {
+          populate: () => chain,
+          then: (resolve, reject) => Promise.resolve(refreshed).then(resolve, reject),
         };
+        return chain;
       };
       ServiceExport.findByIdAndUpdate = Service.findByIdAndUpdate;
       return ServiceExport;
@@ -163,7 +214,9 @@ function loadServiceController(options = {}) {
             lean: async () => [business],
           }),
         }),
-        findById: async () => business,
+        findById: () => ({
+          select: async () => business,
+        }),
       };
     }
     if (request.endsWith('models/Subscription')) {
@@ -181,6 +234,9 @@ function loadServiceController(options = {}) {
     if (request.endsWith('models/PendingImage')) {
       return { deleteMany: async () => {}, deleteOne: async () => {} };
     }
+    if (request.endsWith('services/listingQuotaService')) {
+      return { checkBusinessListingQuota };
+    }
     if (request.endsWith('utils/deleteCloudinaryFile')) return async () => {};
     if (request.endsWith('@aws-sdk/client-s3')) return awsMocks();
     if (request.endsWith('@aws-sdk/s3-request-presigner')) return { getSignedUrl: async () => 'url' };
@@ -192,7 +248,7 @@ function loadServiceController(options = {}) {
   delete require.cache[serviceControllerPath];
   const controller = require(serviceControllerPath);
   Module._load = originalLoad;
-  return { controller, savedDocs };
+  return { controller, savedDocs, quotaCalls };
 }
 
 function loadPublicListingController(options = {}) {
@@ -371,6 +427,252 @@ test('createService persists normalized listing features on first save', async (
   assert.equal(res.statusCode, 201);
   assert.deepEqual(savedDocs[0].features, ['Mobile appointments', 'Consultation included']);
   assert.deepEqual(res.body.data.service.features, ['Mobile appointments', 'Consultation included']);
+});
+
+test('createService treats string false as a draft and does not consume service quota', async () => {
+  const { controller, quotaCalls } = loadServiceController({
+    existingService: null,
+    serviceLimit: 5,
+    quotaCurrent: 5,
+  });
+  const res = mockResponse();
+
+  await controller.createService(
+    {
+      user: { _id: ownerId },
+      body: {
+        businessId,
+        categoryId: '507f1f77bcf86cd799439014',
+        subcategoryId: '507f1f77bcf86cd799439015',
+        title: 'Draft Hair Styling',
+        isPublished: 'false',
+        services: buildChildServices(6),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(quotaCalls.length, 0);
+  assert.equal(res.body.data.service.isPublished, false);
+});
+
+test('createService allows a fifth published Silver offering', async () => {
+  const { controller, quotaCalls } = loadServiceController({
+    existingService: null,
+    serviceLimit: 5,
+    quotaCurrent: 0,
+  });
+  const res = mockResponse();
+
+  await controller.createService(
+    {
+      user: { _id: ownerId },
+      body: {
+        businessId,
+        categoryId: '507f1f77bcf86cd799439014',
+        subcategoryId: '507f1f77bcf86cd799439015',
+        title: 'Published Hair Styling',
+        isPublished: true,
+        services: buildChildServices(5),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(quotaCalls.length, 1);
+  assert.equal(quotaCalls[0].attemptedIncrease, 5);
+});
+
+test('createService blocks a sixth published Silver offering', async () => {
+  const { controller, quotaCalls } = loadServiceController({
+    existingService: null,
+    serviceLimit: 5,
+    quotaCurrent: 0,
+  });
+  const res = mockResponse();
+
+  await controller.createService(
+    {
+      user: { _id: ownerId },
+      body: {
+        businessId,
+        categoryId: '507f1f77bcf86cd799439014',
+        subcategoryId: '507f1f77bcf86cd799439015',
+        title: 'Published Hair Styling',
+        isPublished: true,
+        services: buildChildServices(6),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'LISTING_LIMIT_REACHED');
+  assert.equal(quotaCalls.length, 1);
+  assert.equal(quotaCalls[0].attemptedIncrease, 6);
+});
+
+test('updateService blocks a draft publication when Silver service quota is full', async () => {
+  const draft = buildServiceDoc({
+    isPublished: false,
+    services: buildChildServices(1),
+  });
+  const { controller, quotaCalls } = loadServiceController({
+    existingService: draft,
+    serviceLimit: 5,
+    quotaCurrent: 5,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: { isPublished: 'true' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'LISTING_LIMIT_REACHED');
+  assert.equal(quotaCalls.length, 1);
+  assert.equal(quotaCalls[0].attemptedIncrease, 1);
+});
+
+test('updateService blocks a positive embedded-offering delta at the Silver limit', async () => {
+  const published = buildServiceDoc({
+    isPublished: true,
+    services: buildChildServices(5),
+  });
+  const { controller, quotaCalls } = loadServiceController({
+    existingService: published,
+    serviceLimit: 5,
+    quotaCurrent: 5,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: { services: buildChildServices(6) },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'LISTING_LIMIT_REACHED');
+  assert.equal(quotaCalls.length, 1);
+  assert.equal(quotaCalls[0].attemptedIncrease, 1);
+});
+
+test('addChildServices cannot bypass a full published Silver service quota', async () => {
+  const published = buildServiceDoc({
+    isPublished: true,
+    businessId: { _id: businessId, owner: ownerId },
+    services: buildChildServices(5),
+  });
+  const { controller, quotaCalls } = loadServiceController({
+    existingService: published,
+    serviceLimit: 5,
+    quotaCurrent: 5,
+  });
+  const res = mockResponse();
+
+  await controller.addChildServices(
+    {
+      user: { _id: ownerId },
+      body: {
+        parentServiceId: serviceId,
+        childServices: buildChildServices(1),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'LISTING_LIMIT_REACHED');
+  assert.equal(quotaCalls.length, 1);
+  assert.equal(quotaCalls[0].attemptedIncrease, 1);
+});
+
+test('updateService allows a zero service delta after downgrade', async () => {
+  const overCap = buildServiceDoc({
+    isPublished: true,
+    services: buildChildServices(6),
+  });
+  const { controller, quotaCalls } = loadServiceController({
+    existingService: overCap,
+    serviceLimit: 5,
+    quotaCurrent: 6,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: { title: 'Updated title only' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(quotaCalls.length, 0);
+});
+
+test('updateService allows a negative service delta after downgrade', async () => {
+  const overCap = buildServiceDoc({
+    isPublished: true,
+    services: buildChildServices(6),
+  });
+  const { controller, quotaCalls } = loadServiceController({
+    existingService: overCap,
+    serviceLimit: 5,
+    quotaCurrent: 6,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: { services: buildChildServices(5) },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(quotaCalls.length, 0);
+  assert.equal(overCap.services.length, 5);
+});
+
+test('updateService does not charge quota for offerings on an inactive parent', async () => {
+  const inactive = buildServiceDoc({
+    isPublished: true,
+    isActive: false,
+    services: buildChildServices(5),
+  });
+  const { controller, quotaCalls } = loadServiceController({
+    existingService: inactive,
+    serviceLimit: 5,
+    quotaCurrent: 5,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: { services: buildChildServices(6) },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(quotaCalls.length, 0);
 });
 
 test('public getServiceById excludes unpublished services', async () => {

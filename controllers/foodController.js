@@ -29,6 +29,9 @@ const {
   validateFoodPublishState,
 } = require('../lib/marketplace/listingPricePolicy');
 const { safeGeocodeAddress } = require('../utils/geocode');
+const {
+  checkBusinessListingQuota,
+} = require('../services/listingQuotaService');
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -43,6 +46,23 @@ const getGalleryImageLimit = (subscriptionPlan) =>
 
 const countGalleryImages = (images) =>
   Array.isArray(images) ? images.filter(Boolean).length : 0;
+
+const normalizePublicationBoolean = (value) => value === true || value === 'true';
+
+const sendListingQuotaFailure = (res, result) => res.status(result.status || 403).json({
+  success: false,
+  code: result.code,
+  status: result.status || 403,
+  error: result.error || result.message,
+  message: result.message || result.error,
+  listingType: result.listingType,
+  tier: result.tier,
+  limit: result.limit,
+  current: result.current,
+  attemptedIncrease: result.attemptedIncrease,
+  projected: result.projected,
+  remaining: result.remaining,
+});
 
 const normalizeMetaFields = (metaFields) => {
   if (!Array.isArray(metaFields)) return [];
@@ -88,6 +108,8 @@ exports.createFood = async (req, res) => {
       return res.status(403).json({ error: 'You do not own this business.' });
     }
 
+    const nextPublished = normalizePublicationBoolean(isPublished);
+
     const subscription = await Subscription.findOne({
       userId,
       status: 'active',
@@ -99,14 +121,17 @@ exports.createFood = async (req, res) => {
     }
 
     const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    const foodLimit = subscriptionPlan?.limits?.foodListings || 0;
     const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
-    const existingFoodCount = await Food.countDocuments({ ownerId: userId });
 
-    if (existingFoodCount >= foodLimit) {
-      return res.status(403).json({
-        error: `Food listing limit reached for your subscription. You can add up to ${foodLimit} foods.`,
+    if (nextPublished) {
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId,
+        listingType: 'food',
+        attemptedIncrease: 1,
+        models: { Food },
       });
+      if (!quotaCheck.ok) return sendListingQuotaFailure(res, quotaCheck);
     }
 
     if (countGalleryImages(images) > galleryImageLimit) {
@@ -115,7 +140,6 @@ exports.createFood = async (req, res) => {
       });
     }
 
-    const nextPublished = Boolean(isPublished);
     const numericPrice = Number.isFinite(Number(price)) ? Number(price) : null;
     const publishCheck = validateFoodPublishState({
       food: { price: numericPrice },
@@ -330,6 +354,14 @@ exports.updateFood = async (req, res) => {
       return res.status(404).json({ message: 'Food not found.' });
     }
 
+    const publicationWasProvided = Object.prototype.hasOwnProperty.call(req.body, 'isPublished');
+    const currentPublished = normalizePublicationBoolean(food.isPublished);
+    const nextPublished = publicationWasProvided
+      ? normalizePublicationBoolean(req.body.isPublished)
+      : currentPublished;
+    const publicationIncrease =
+      food.isActive !== false && !currentPublished && nextPublished ? 1 : 0;
+
     const subscription = await Subscription.findOne({
       userId,
       status: 'active',
@@ -350,6 +382,23 @@ exports.updateFood = async (req, res) => {
       });
     }
 
+    if (publicationIncrease > 0) {
+      const resolvedBusinessId = food.businessId?._id || food.businessId;
+      const business = await Business.findOne({ _id: resolvedBusinessId, owner: userId });
+      if (!business) {
+        return res.status(404).json({ message: 'Business not found.' });
+      }
+
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId,
+        listingType: 'food',
+        attemptedIncrease: publicationIncrease,
+        models: { Food },
+      });
+      if (!quotaCheck.ok) return sendListingQuotaFailure(res, quotaCheck);
+    }
+
     const updatableFields = [
       'title',
       'description',
@@ -359,7 +408,6 @@ exports.updateFood = async (req, res) => {
       'menuImage',
       'businessHours',
       'bookingToolLink',
-      'isPublished',
       'foodType',
       'brand',
       'categoryId',
@@ -371,6 +419,10 @@ exports.updateFood = async (req, res) => {
         food[field] = req.body[field];
       }
     });
+
+    if (publicationWasProvided) {
+      food.isPublished = nextPublished;
+    }
 
     if (req.body.metaFields !== undefined) {
       food.metaFields = normalizeMetaFields(req.body.metaFields);
