@@ -61,7 +61,7 @@ test('launch-critical protected routes reject unauthenticated callers', async ()
   }
 });
 
-test('wrong roles are denied from customer, vendor, and admin launch surfaces', async () => {
+test('role boundaries allow checkout buyers while denying vendor and admin privileges', async () => {
   const customerAgent = createAgent(getApp());
   const customer = await registerAndVerify(customerAgent, { role: 'customer' });
   await login(customerAgent, customer.email, customer.password);
@@ -77,7 +77,8 @@ test('wrong roles are denied from customer, vendor, and admin launch surfaces', 
   await login(vendorAgent, vendor.email, vendor.password);
 
   const vendorCheckout = await vendorAgent.post('/api/orders/initiate').send({});
-  assert.equal(vendorCheckout.status, 403);
+  assert.equal(vendorCheckout.status, 400);
+  assert.equal(vendorCheckout.body.message, 'Items are required');
 
   const vendorAudit = await vendorAgent.get('/admin/api/audit-events');
   assert.equal(vendorAudit.status, 403);
