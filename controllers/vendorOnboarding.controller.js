@@ -206,6 +206,12 @@ exports.saveDraft = async (req, res) => {
       }
     });
 
+    // 6b️⃣ Enforce mutual exclusivity per diagram:
+    // YES path: clear noLicenseComplianceConfirmed so vendor can't hold both states
+    if (onboarding.hasBusinessLicense === true) {
+      onboarding.noLicenseComplianceConfirmed = false;
+    }
+
     // 7️⃣ Default fields
     const defaultFields = {
       firstName: "",

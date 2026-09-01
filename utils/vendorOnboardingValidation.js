@@ -61,12 +61,15 @@ function validateStage1Payload(body = {}) {
     errors.push('General accuracy declaration must be accepted');
   }
 
+  // Vendor cannot claim BOTH a business license AND a no-license compliance declaration
+  if (body.hasBusinessLicense === true && body.noLicenseComplianceConfirmed === true) {
+    errors.push('Cannot submit both a business license and a no-license compliance declaration at the same time');
+  }
+
   // Compliance declaration is required when vendor has NO business license
+  // noLicenseComplianceConfirmed is the dedicated field for this (separate from the general declarationAccepted)
   if (body.hasBusinessLicense === false) {
-    const hasConfirmedCompliance =
-      body.noLicenseComplianceConfirmed === true ||
-      body.noLicenseDeclarationAccepted === true;
-    if (!hasConfirmedCompliance) {
+    if (body.noLicenseComplianceConfirmed !== true) {
       errors.push('Compliance declaration must be accepted when no business license is provided');
     }
   }
