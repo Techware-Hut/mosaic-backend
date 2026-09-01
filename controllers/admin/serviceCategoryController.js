@@ -15,6 +15,9 @@ exports.getServiceCategories = async (req, res) => {
     );
     res.json({ success: true, categories });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -32,6 +35,9 @@ exports.createServiceCategory = async (req, res) => {
     await category.save();
     res.status(201).json({ success: true, category });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     res.status(400).json({ success: false, message: err.message });
   }
 };
@@ -56,6 +62,9 @@ exports.updateServiceCategory = async (req, res) => {
     if (!category) return res.status(404).json({ success: false, message: 'Category not found' });
     res.json({ success: true, category });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     res.status(400).json({ success: false, message: err.message });
   }
 };
@@ -76,6 +85,9 @@ exports.deleteServiceCategory = async (req, res) => {
 
     res.json({ success: true, message: 'Category and image deleted successfully' });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     console.error('Delete Service Category Error:', err);
     res.status(500).json({ success: false, message: err.message });
   }

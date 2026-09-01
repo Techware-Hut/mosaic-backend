@@ -19,6 +19,9 @@ exports.createProductSubcategory = async (req, res) => {
 
         res.status(201).json({ success: true, data: newSub });
     } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Subcategory already exists' });
+    }
         console.error('Create Subcategory Error:', err);
         res.status(500).json({ success: false, message: 'Server error' });
     }
@@ -38,6 +41,9 @@ exports.getProductSubcategories = async (req, res) => {
 
         res.json({ success: true, data: subs });
     } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Subcategory already exists' });
+    }
         console.error('Get Subcategories Error:', err);
         res.status(500).json({ success: false, message: 'Server error' });
     }
@@ -62,6 +68,9 @@ exports.updateProductSubcategory = async (req, res) => {
 
         res.json({ success: true, data: updated });
     } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Subcategory already exists' });
+    }
         console.error('Update Subcategory Error:', err);
         res.status(500).json({ success: false, message: 'Server error' });
     }
@@ -79,6 +88,9 @@ exports.deleteProductSubcategory = async (req, res) => {
 
         res.json({ success: true, message: 'Subcategory deleted' });
     } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Subcategory already exists' });
+    }
         console.error('Delete Subcategory Error:', err);
         res.status(500).json({ success: false, message: 'Server error' });
     }

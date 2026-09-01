@@ -25,6 +25,9 @@ exports.createFoodCategory = async (req, res) => {
 
     res.status(201).json({ success: true, data: category });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 };
@@ -37,6 +40,9 @@ exports.getFoodCategories = async (req, res) => {
     );
     res.json({ success: true, data: categories });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -61,6 +67,9 @@ exports.updateFoodCategory = async (req, res) => {
 
     res.json({ success: true, data: category });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 };
@@ -75,6 +84,9 @@ exports.deleteFoodCategory = async (req, res) => {
 
     res.json({ success: true, message: 'Category deleted successfully' });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     res.status(500).json({ success: false, message: err.message });
   }
 };

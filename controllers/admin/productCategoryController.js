@@ -45,6 +45,9 @@ exports.createProductCategory = async (req, res) => {
 
     return res.status(201).json({ success: true, data: category });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     if (err.statusCode && err.statusCode < 500) {
       console.warn('Create Product Category validation error:', err.message);
     } else {
@@ -83,6 +86,9 @@ exports.updateProductCategory = async (req, res) => {
 
     return res.status(200).json({ success: true, data: category });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     if (err.statusCode && err.statusCode < 500) {
       console.warn('Update Product Category validation error:', err.message);
     } else {
@@ -120,6 +126,9 @@ exports.deleteProductCategory = async (req, res) => {
 
     return res.status(200).json({ success: true, message: 'Category and related subcategories deleted successfully' });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     console.error('Delete Product Category Error:', err);
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -133,6 +142,9 @@ exports.getAllProductCategories = async (req, res) => {
     );
     return res.status(200).json({ success: true, data: categories });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     console.error('Fetch Categories Error:', err);
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -147,6 +159,9 @@ exports.getProductCategoryById = async (req, res) => {
     }
     return res.status(200).json({ success: true, category });
   } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
     console.error('Fetch Category Error:', err);
     return res.status(500).json({ success: false, message: err.message });
   }
