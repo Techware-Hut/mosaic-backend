@@ -158,9 +158,9 @@ test('GET /api/orders/admin requires authenticate and isAdmin', () => {
   assert.match(source, /router\.get\('\/admin', authenticate, isAdmin, getAllOrdersAdmin\)/);
 });
 
-test('POST /api/orders/initiate requires authenticate and customer role', () => {
+test('POST /api/orders/initiate requires authenticate and checkout-buyer role', () => {
   const source = readSource(orderRoutesPath);
-  assert.match(source, /router\.post\('\/initiate', authenticate, isCustomer, initiateOrder\)/);
+  assert.match(source, /router\.post\('\/initiate', authenticate, isCheckoutBuyer, initiateOrder\)/);
 });
 
 // Legacy route: canonical checkout is POST /api/orders/initiate (Connect destination charge).
