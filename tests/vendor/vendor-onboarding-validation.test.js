@@ -19,6 +19,8 @@ function validPayload(overrides = {}) {
     },
     acceptedTerms: true,
     declarationAccepted: true,
+    hasBusinessLicense: true,
+    licenseNumber: '123456789',
     isMinorityOwned: false,
     ...overrides,
   };
@@ -26,6 +28,14 @@ function validPayload(overrides = {}) {
 
 test('validateStage1Payload accepts valid MVP payload', () => {
   assert.deepEqual(validateStage1Payload(validPayload()), []);
+});
+
+test('validateStage1Payload rejects missing or non-boolean hasBusinessLicense', () => {
+  const missingErrors = validateStage1Payload(validPayload({ hasBusinessLicense: undefined }));
+  assert.ok(missingErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
+
+  const nullErrors = validateStage1Payload(validPayload({ hasBusinessLicense: null }));
+  assert.ok(nullErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
 });
 
 test('validateStage1Payload requires business name', () => {

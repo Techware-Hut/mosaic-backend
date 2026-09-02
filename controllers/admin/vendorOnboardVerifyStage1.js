@@ -479,6 +479,8 @@ exports.verifyAndAllocatePoints = async (req, res) => {
     } else if (verificationType === 'business-license' && isVerified) {
       if (application.verificationChecklist.businessLicense) {
         alreadyVerified = true;
+      } else if (application.hasBusinessLicense === false && application.noLicenseComplianceConfirmed !== true) {
+        missingField = 'business license compliance declaration';
       } else {
         if (documentIndex !== undefined && application.businessLicenseDocuments[documentIndex]) {
           application.businessLicenseDocuments[documentIndex].verified = true;
@@ -995,12 +997,13 @@ exports.finalizeVerification = async (req, res) => {
     const hasTaxDocs = Boolean(application.verificationChecklist?.taxDocs);
 
     // If vendor declared they have NO business license, their signed compliance
-    // declaration (declarationAccepted) satisfies the license requirement.
+    // declaration (noLicenseComplianceConfirmed) AND admin attestation verification (businessLicense checklist)
+    // are required to satisfy the license requirement.
     // If they said YES to having a license, the doc must be uploaded and verified.
     const vendorHasNoLicense = application.hasBusinessLicense === false;
     const hasLicenseDocVerified = vendorHasNoLicense
-      ? true
-      : Boolean(application.verificationChecklist?.businessLicense);
+      ? Boolean(application.noLicenseComplianceConfirmed === true && application.verificationChecklist?.businessLicense === true)
+      : Boolean(application.verificationChecklist?.businessLicense === true);
 
     const hasMinorityDocs = application.isMinorityOwned
       ? Boolean(application.verificationChecklist?.minorityDocs)
@@ -1017,7 +1020,11 @@ exports.finalizeVerification = async (req, res) => {
     }
 
     if (!hasLicenseDocVerified) {
-      missingRequiredDocuments.push('business license document');
+      missingRequiredDocuments.push(
+        vendorHasNoLicense
+          ? 'business license compliance attestation'
+          : 'business license document'
+      );
     }
 
     if (application.isMinorityOwned && !hasMinorityDocs) {

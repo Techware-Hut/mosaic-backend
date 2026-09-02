@@ -148,12 +148,34 @@ exports.saveDraft = async (req, res) => {
     // 1️⃣ Check if onboarding exists
     let onboarding = await VendorOnboarding.findOne({ userId });
 
-    // 2️⃣ ❌ Block ONLY if verified (not submitted)
+    // 2️⃣ ❌ Lock editing if application is verified
     if (onboarding && onboarding.status === "verified") {
       return res.status(400).json({
         success: false,
         message: "Application already verified and cannot be edited",
       });
+    }
+
+    // 2b️⃣ ❌ Block modifying approval-sensitive fields while application is under admin review
+    if (onboarding && ["submitted", "under_review"].includes(onboarding.status)) {
+      const sensitiveFields = [
+        "hasBusinessLicense",
+        "licenseNumber",
+        "noLicenseComplianceConfirmed",
+        "declarationAccepted",
+        "isMinorityOwned",
+        "einNumber",
+        "ssnLast9"
+      ];
+      const attemptsSensitiveMutation = sensitiveFields.some(
+        (field) => payload[field] !== undefined
+      );
+      if (attemptsSensitiveMutation) {
+        return res.status(400).json({
+          success: false,
+          message: `Application is currently ${onboarding.status} and approval-sensitive fields cannot be edited`,
+        });
+      }
     }
 
     // 3️⃣ Create new onboarding if it doesn't exist

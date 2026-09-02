@@ -56,6 +56,11 @@ function validateStage1Payload(body = {}) {
     errors.push('Terms and conditions must be accepted');
   }
 
+  // hasBusinessLicense must explicitly be a boolean (true or false)
+  if (typeof body.hasBusinessLicense !== 'boolean') {
+    errors.push('hasBusinessLicense must be a boolean (true or false)');
+  }
+
   // General accuracy declaration is required for ALL vendors
   if (body.declarationAccepted !== true) {
     errors.push('General accuracy declaration must be accepted');
