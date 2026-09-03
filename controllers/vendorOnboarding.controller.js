@@ -645,16 +645,8 @@ exports.updateBusinessProfile = async (req, res) => {
       });
     }
 
-    // 1b️⃣ Full lock for verified applications
-    if (onboarding.status === 'verified') {
-      return res.status(400).json({
-        success: false,
-        message: 'Application is verified and cannot be edited',
-      });
-    }
-
-    // 1c️⃣ Block approval-sensitive fields when submitted or under_review
-    if (['submitted', 'under_review'].includes(onboarding.status)) {
+    // 1b️⃣ Block approval-sensitive fields when submitted, under_review, or verified
+    if (['submitted', 'under_review', 'verified'].includes(onboarding.status)) {
       const profileSensitiveFields = [
         'hasBusinessLicense',
         'licenseNumber',
@@ -859,16 +851,8 @@ exports.patchBusinessProfile = async (req, res) => {
       });
     }
 
-    // 2b️⃣ Full lock for verified applications
-    if (onboarding.status === 'verified') {
-      return res.status(400).json({
-        success: false,
-        message: 'Application is verified and cannot be edited',
-      });
-    }
-
-    // 2c️⃣ Block approval-sensitive fields when submitted or under_review
-    if (['submitted', 'under_review'].includes(onboarding.status)) {
+    // 2b️⃣ Block approval-sensitive fields when submitted, under_review, or verified
+    if (['submitted', 'under_review', 'verified'].includes(onboarding.status)) {
       const profileSensitiveFields = [
         'hasBusinessLicense',
         'licenseNumber',
