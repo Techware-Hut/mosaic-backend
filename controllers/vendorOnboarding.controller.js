@@ -148,6 +148,14 @@ exports.saveDraft = async (req, res) => {
     // 1️⃣ Check if onboarding exists
     let onboarding = await VendorOnboarding.findOne({ userId });
 
+    // 1b️⃣ Raw API boundary validation for hasBusinessLicense before model operations
+    if (payload.hasBusinessLicense !== undefined && typeof payload.hasBusinessLicense !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'hasBusinessLicense must be a boolean (true or false)',
+      });
+    }
+
     // 2️⃣ ❌ Lock editing if application is verified
     if (onboarding && onboarding.status === "verified") {
       return res.status(400).json({
@@ -163,7 +171,14 @@ exports.saveDraft = async (req, res) => {
         "licenseNumber",
         "noLicenseComplianceConfirmed",
         "declarationAccepted",
+        "acceptedTerms",
         "isMinorityOwned",
+        "minorityCategories",
+        "minorityProofDocuments",
+        "taxDocuments",
+        "businessLicenseDocuments",
+        "refundPolicyDocument",
+        "termsDocument",
         "einNumber",
         "ssnLast9"
       ];

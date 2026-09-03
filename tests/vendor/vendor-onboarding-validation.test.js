@@ -36,6 +36,15 @@ test('validateStage1Payload rejects missing or non-boolean hasBusinessLicense', 
 
   const nullErrors = validateStage1Payload(validPayload({ hasBusinessLicense: null }));
   assert.ok(nullErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
+
+  const stringErrors = validateStage1Payload(validPayload({ hasBusinessLicense: 'true' }));
+  assert.ok(stringErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
+
+  const numberErrors = validateStage1Payload(validPayload({ hasBusinessLicense: 1 }));
+  assert.ok(numberErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
+
+  const objectErrors = validateStage1Payload(validPayload({ hasBusinessLicense: {} }));
+  assert.ok(objectErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
 });
 
 test('validateStage1Payload requires business name', () => {
