@@ -238,3 +238,91 @@ test('finalizeVerification rejects explicit approve when no-license compliance a
   assert.equal(res.body.success, false);
   assert.ok(res.body.message.includes('required documents are not verified'));
 });
+
+// ─── PUT /business-profile status guard tests ──────────────────────────────
+
+test('updateBusinessProfile blocks hasBusinessLicense mutation when submitted', async () => {
+  const { controller } = loadControllerWithMock(buildOnboarding({ status: 'submitted' }));
+  const res = mockResponse();
+
+  await controller.updateBusinessProfile(
+    { user: { _id: userId }, body: { hasBusinessLicense: false } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+  assert.ok(res.body.message.includes('approval-sensitive fields cannot be edited'));
+});
+
+test('updateBusinessProfile blocks acceptedTerms mutation when under_review', async () => {
+  const { controller } = loadControllerWithMock(buildOnboarding({ status: 'under_review' }));
+  const res = mockResponse();
+
+  await controller.updateBusinessProfile(
+    { user: { _id: userId }, body: { acceptedTerms: false } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+  assert.ok(res.body.message.includes('approval-sensitive fields cannot be edited'));
+});
+
+test('updateBusinessProfile blocks all mutations when verified', async () => {
+  const { controller } = loadControllerWithMock(buildOnboarding({ status: 'verified' }));
+  const res = mockResponse();
+
+  await controller.updateBusinessProfile(
+    { user: { _id: userId }, body: { businessBio: 'New bio' } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+  assert.ok(res.body.message.includes('Application is verified and cannot be edited'));
+});
+
+// ─── PATCH /business-profile status guard tests ────────────────────────────
+
+test('patchBusinessProfile blocks licenseNumber mutation when submitted', async () => {
+  const { controller } = loadControllerWithMock(buildOnboarding({ status: 'submitted' }));
+  const res = mockResponse();
+
+  await controller.patchBusinessProfile(
+    { user: { _id: userId }, body: { licenseNumber: 'FAKE-999' } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+  assert.ok(res.body.message.includes('approval-sensitive fields cannot be edited'));
+});
+
+test('patchBusinessProfile blocks taxDocuments mutation when under_review', async () => {
+  const { controller } = loadControllerWithMock(buildOnboarding({ status: 'under_review' }));
+  const res = mockResponse();
+
+  await controller.patchBusinessProfile(
+    { user: { _id: userId }, body: { taxDocuments: [{ url: 'https://example.com/tax.pdf' }] } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+  assert.ok(res.body.message.includes('approval-sensitive fields cannot be edited'));
+});
+
+test('patchBusinessProfile blocks all mutations when verified', async () => {
+  const { controller } = loadControllerWithMock(buildOnboarding({ status: 'verified' }));
+  const res = mockResponse();
+
+  await controller.patchBusinessProfile(
+    { user: { _id: userId }, body: { businessBio: 'Trying to update' } },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+  assert.ok(res.body.message.includes('Application is verified and cannot be edited'));
+});
