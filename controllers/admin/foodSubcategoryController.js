@@ -17,6 +17,9 @@ exports.createFoodSubcategory = async (req, res) => {
         await newSub.save();
         res.status(201).json({ success: true, data: newSub });
     } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Subcategory already exists' });
+    }
         res.status(500).json({ success: false, message: err.message });
     }
 };
@@ -28,6 +31,9 @@ exports.getFoodSubcategories = async (req, res) => {
         const subs = await FoodSubcategory.find(filter).populate('category', 'name');
         res.json({ success: true, data: subs });
     } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Subcategory already exists' });
+    }
         res.status(500).json({ success: false, message: err.message });
     }
 };
@@ -47,6 +53,9 @@ exports.updateFoodSubcategory = async (req, res) => {
 
         res.json({ success: true, data: updated });
     } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Subcategory already exists' });
+    }
         res.status(500).json({ success: false, message: err.message });
     }
 };
@@ -59,6 +68,9 @@ exports.deleteFoodSubcategory = async (req, res) => {
         }
         res.json({ success: true, message: 'Subcategory deleted' });
     } catch (err) {
+    if (err.code === 11000 || (err.message && (err.message.includes('E11000') || err.message.includes('duplicate key')))) {
+      return res.status(400).json({ success: false, message: 'Subcategory already exists' });
+    }
         res.status(500).json({ success: false, message: err.message });
     }
 };

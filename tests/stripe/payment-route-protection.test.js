@@ -10,6 +10,7 @@ const orderRoutesPath = path.resolve(__dirname, '../../routes/orderRoutes.js');
 const paymentControllerPath = path.resolve(__dirname, '../../controllers/paymentController.js');
 const ownershipPath = path.resolve(__dirname, '../../utils/stripeConnectOwnership.js');
 const authenticatePath = path.resolve(__dirname, '../../middlewares/authenticate.js');
+const checkoutBuyerPath = path.resolve(__dirname, '../../middlewares/isCheckoutBuyer.js');
 
 function mockResponse() {
   return {
@@ -45,10 +46,45 @@ test('stripe.routes wires auth middleware on Connect helper routes', () => {
   assert.match(source, /router\.post\('\/backfill-customers', authenticate, isAdmin/);
 });
 
-test('orderRoutes requires customer role for initiate checkout', () => {
+test('orderRoutes requires checkout-buyer role for initiate checkout', () => {
   const source = fs.readFileSync(orderRoutesPath, 'utf8');
-  assert.match(source, /router\.post\('\/initiate', authenticate, isCustomer, initiateOrder\)/);
+  assert.match(source, /router\.post\('\/initiate', authenticate, isCheckoutBuyer, initiateOrder\)/);
 });
+
+for (const role of ['customer', 'business_owner']) {
+  test(`checkout buyer gate allows ${role} without changing the authenticated user`, () => {
+    const isCheckoutBuyer = require(checkoutBuyerPath);
+    const user = { id: `${role}-id`, role };
+    const req = { user };
+    const res = mockResponse();
+    let nextCalls = 0;
+
+    isCheckoutBuyer(req, res, () => {
+      nextCalls += 1;
+    });
+
+    assert.equal(nextCalls, 1);
+    assert.equal(res.statusCode, null);
+    assert.equal(req.user, user);
+    assert.equal(req.user.role, role);
+  });
+}
+
+for (const role of ['admin', 'unknown', undefined]) {
+  test(`checkout buyer gate denies ${role ?? 'missing'} role with the existing response shape`, () => {
+    const isCheckoutBuyer = require(checkoutBuyerPath);
+    const res = mockResponse();
+    let nextCalls = 0;
+
+    isCheckoutBuyer({ user: role ? { role } : undefined }, res, () => {
+      nextCalls += 1;
+    });
+
+    assert.equal(nextCalls, 0);
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.body, { message: 'Access denied: Checkout buyers only' });
+  });
+}
 
 test('authenticate rejects unauthenticated payment route access', async () => {
   const authenticate = require(authenticatePath);
