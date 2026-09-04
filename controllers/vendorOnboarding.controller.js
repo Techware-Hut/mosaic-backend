@@ -645,7 +645,10 @@ exports.updateBusinessProfile = async (req, res) => {
       });
     }
 
-    // 1b️⃣ Block approval-sensitive fields when submitted, under_review, or verified
+    // 1b️⃣ Block approval-sensitive field MUTATIONS when submitted, under_review, or verified.
+    // Field presence alone is not enough — the frontend always sends the full payload on
+    // every profile save (including unchanged fields). We only block when the incoming
+    // value genuinely differs from the stored value.
     if (['submitted', 'under_review', 'verified'].includes(onboarding.status)) {
       const profileSensitiveFields = [
         'hasBusinessLicense',
@@ -663,8 +666,10 @@ exports.updateBusinessProfile = async (req, res) => {
         'einNumber',
         'ssnLast9',
       ];
+      const isValueChanged = (incoming, existing) =>
+        JSON.stringify(incoming) !== JSON.stringify(existing);
       const attemptsSensitiveMutation = profileSensitiveFields.some(
-        (field) => payload[field] !== undefined
+        (field) => payload[field] !== undefined && isValueChanged(payload[field], onboarding[field])
       );
       if (attemptsSensitiveMutation) {
         return res.status(400).json({
@@ -851,7 +856,10 @@ exports.patchBusinessProfile = async (req, res) => {
       });
     }
 
-    // 2b️⃣ Block approval-sensitive fields when submitted, under_review, or verified
+    // 2b️⃣ Block approval-sensitive field MUTATIONS when submitted, under_review, or verified.
+    // Field presence alone is not enough — the frontend always sends the full payload on
+    // every profile save (including unchanged fields). We only block when the incoming
+    // value genuinely differs from the stored value.
     if (['submitted', 'under_review', 'verified'].includes(onboarding.status)) {
       const profileSensitiveFields = [
         'hasBusinessLicense',
@@ -869,8 +877,10 @@ exports.patchBusinessProfile = async (req, res) => {
         'einNumber',
         'ssnLast9',
       ];
+      const isValueChanged = (incoming, existing) =>
+        JSON.stringify(incoming) !== JSON.stringify(existing);
       const attemptsSensitiveMutation = profileSensitiveFields.some(
-        (field) => payload[field] !== undefined
+        (field) => payload[field] !== undefined && isValueChanged(payload[field], onboarding[field])
       );
       if (attemptsSensitiveMutation) {
         return res.status(400).json({

@@ -681,6 +681,17 @@ exports.verifyAndAllocatePoints = async (req, res) => {
     const previousPoints = application.totalVerificationPoints - pointsToAdd;
     application.totalVerificationPoints += pointsToAdd;
 
+    // Distinguish attestation type in the response for admin UI and audit consumers.
+    // A No-license vendor completing the compliance declaration earns the same +10
+    // businessLicense checklist point, but the label must never say "Business License
+    // Document Verification" — it is a regulatory compliance attestation.
+    let attestationLabel;
+    if (verificationType === 'business-license') {
+      attestationLabel = application.hasBusinessLicense === false
+        ? 'Regulatory Compliance / Attestation'
+        : 'Business License Verification';
+    }
+
     await application.save();
 
     // Keep Business points in sync with stage-1 onboarding points
@@ -697,10 +708,11 @@ exports.verifyAndAllocatePoints = async (req, res) => {
         {
           totalVerificationPoints: application.totalVerificationPoints,
           verificationType,
+          attestationLabel: attestationLabel || verificationType,
           isVerified: Boolean(isVerified),
           pointsAdded: pointsToAdd,
         },
-        ['totalVerificationPoints', 'verificationType', 'isVerified', 'pointsAdded']
+        ['totalVerificationPoints', 'verificationType', 'attestationLabel', 'isVerified', 'pointsAdded']
       ),
     });
 
@@ -710,7 +722,12 @@ exports.verifyAndAllocatePoints = async (req, res) => {
       data: {
         totalPoints: application.totalVerificationPoints,
         pointsAdded: pointsToAdd,
-        verificationChecklist: application.verificationChecklist
+        verificationChecklist: application.verificationChecklist,
+        // Semantic label: clearly identifies what was verified.
+        // 'Regulatory Compliance / Attestation' for No-license vendors;
+        // 'Business License Verification' for Yes-license vendors;
+        // undefined for all other verification types.
+        attestationLabel: attestationLabel || undefined,
       }
     });
 
