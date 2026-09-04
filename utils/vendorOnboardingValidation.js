@@ -51,14 +51,37 @@ function validateStage1Payload(body = {}) {
     }
   }
 
-  const termsPresent = Object.prototype.hasOwnProperty.call(body, 'acceptedTerms')
-    || Object.prototype.hasOwnProperty.call(body, 'declarationAccepted');
-  if (termsPresent) {
-    if (!body.acceptedTerms || !body.declarationAccepted) {
-      errors.push('Terms and declaration must be accepted');
+  // Terms & Conditions must always be accepted
+  if (!body.acceptedTerms) {
+    errors.push('Terms and conditions must be accepted');
+  }
+
+  // hasBusinessLicense must explicitly be a boolean (true or false)
+  if (typeof body.hasBusinessLicense !== 'boolean') {
+    errors.push('hasBusinessLicense must be a boolean (true or false)');
+  }
+
+  // General accuracy declaration is required for ALL vendors
+  if (body.declarationAccepted !== true) {
+    errors.push('General accuracy declaration must be accepted');
+  }
+
+  // Vendor cannot claim BOTH a business license AND a no-license compliance declaration
+  if (body.hasBusinessLicense === true && body.noLicenseComplianceConfirmed === true) {
+    errors.push('Cannot submit both a business license and a no-license compliance declaration at the same time');
+  }
+
+  // Compliance declaration is required when vendor has NO business license
+  // noLicenseComplianceConfirmed is the dedicated field for this (separate from the general declarationAccepted)
+  if (body.hasBusinessLicense === false) {
+    if (body.noLicenseComplianceConfirmed !== true) {
+      errors.push('Compliance declaration must be accepted when no business license is provided');
     }
-  } else if (!body.acceptedTerms || !body.declarationAccepted) {
-    errors.push('Terms and declaration must be accepted');
+  }
+
+  // If vendor claims to have a business license, the number is required
+  if (body.hasBusinessLicense === true && !isNonEmptyString(body.licenseNumber)) {
+    errors.push('Business license number is required');
   }
 
   OPTIONAL_URL_FIELDS.forEach((field) => {

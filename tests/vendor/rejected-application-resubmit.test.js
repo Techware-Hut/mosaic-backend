@@ -44,6 +44,8 @@ function buildOnboarding(overrides = {}) {
     },
     acceptedTerms: true,
     declarationAccepted: true,
+    hasBusinessLicense: true,
+    licenseNumber: '123456789',
     isMinorityOwned: false,
     status: 'draft',
     badge: null,

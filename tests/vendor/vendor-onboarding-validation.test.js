@@ -19,6 +19,8 @@ function validPayload(overrides = {}) {
     },
     acceptedTerms: true,
     declarationAccepted: true,
+    hasBusinessLicense: true,
+    licenseNumber: '123456789',
     isMinorityOwned: false,
     ...overrides,
   };
@@ -26,6 +28,23 @@ function validPayload(overrides = {}) {
 
 test('validateStage1Payload accepts valid MVP payload', () => {
   assert.deepEqual(validateStage1Payload(validPayload()), []);
+});
+
+test('validateStage1Payload rejects missing or non-boolean hasBusinessLicense', () => {
+  const missingErrors = validateStage1Payload(validPayload({ hasBusinessLicense: undefined }));
+  assert.ok(missingErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
+
+  const nullErrors = validateStage1Payload(validPayload({ hasBusinessLicense: null }));
+  assert.ok(nullErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
+
+  const stringErrors = validateStage1Payload(validPayload({ hasBusinessLicense: 'true' }));
+  assert.ok(stringErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
+
+  const numberErrors = validateStage1Payload(validPayload({ hasBusinessLicense: 1 }));
+  assert.ok(numberErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
+
+  const objectErrors = validateStage1Payload(validPayload({ hasBusinessLicense: {} }));
+  assert.ok(objectErrors.some((e) => e.includes('hasBusinessLicense must be a boolean')));
 });
 
 test('validateStage1Payload requires business name', () => {
@@ -61,12 +80,42 @@ test('validateStage1Payload requires minority categories when minority-owned', (
   assert.ok(errors.some((e) => e.includes('minority category')));
 });
 
-test('validateStage1Payload requires terms and declaration', () => {
+test('validateStage1Payload requires terms', () => {
   const errors = validateStage1Payload(validPayload({
     acceptedTerms: false,
+  }));
+  assert.ok(errors.some((e) => e.includes('Terms and conditions must be accepted')));
+});
+
+test('validateStage1Payload requires general accuracy declaration for all vendors', () => {
+  const errors = validateStage1Payload(validPayload({
     declarationAccepted: false,
   }));
-  assert.ok(errors.some((e) => e.includes('Terms and declaration')));
+  assert.ok(errors.some((e) => e.includes('General accuracy declaration must be accepted')));
+});
+
+test('validateStage1Payload requires compliance declaration when hasBusinessLicense is false', () => {
+  const errors = validateStage1Payload(validPayload({
+    hasBusinessLicense: false,
+    noLicenseComplianceConfirmed: false,
+  }));
+  assert.ok(errors.some((e) => e.includes('Compliance declaration must be accepted')));
+});
+
+test('validateStage1Payload accepts noLicenseComplianceConfirmed when hasBusinessLicense is false', () => {
+  const errors = validateStage1Payload(validPayload({
+    hasBusinessLicense: false,
+    noLicenseComplianceConfirmed: true,
+  }));
+  assert.deepEqual(errors, []);
+});
+
+test('validateStage1Payload requires license number when hasBusinessLicense is true', () => {
+  const errors = validateStage1Payload(validPayload({
+    hasBusinessLicense: true,
+    licenseNumber: '',
+  }));
+  assert.ok(errors.some((e) => e.includes('Business license number is required')));
 });
 
 test('validateStage1Payload validates optional social URLs when provided', () => {

@@ -148,12 +148,49 @@ exports.saveDraft = async (req, res) => {
     // 1️⃣ Check if onboarding exists
     let onboarding = await VendorOnboarding.findOne({ userId });
 
-    // 2️⃣ ❌ Block ONLY if verified (not submitted)
+    // 1b️⃣ Raw API boundary validation for hasBusinessLicense before model operations
+    if (payload.hasBusinessLicense !== undefined && typeof payload.hasBusinessLicense !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'hasBusinessLicense must be a boolean (true or false)',
+      });
+    }
+
+    // 2️⃣ ❌ Lock editing if application is verified
     if (onboarding && onboarding.status === "verified") {
       return res.status(400).json({
         success: false,
         message: "Application already verified and cannot be edited",
       });
+    }
+
+    // 2b️⃣ ❌ Block modifying approval-sensitive fields while application is under admin review
+    if (onboarding && ["submitted", "under_review"].includes(onboarding.status)) {
+      const sensitiveFields = [
+        "hasBusinessLicense",
+        "licenseNumber",
+        "noLicenseComplianceConfirmed",
+        "declarationAccepted",
+        "acceptedTerms",
+        "isMinorityOwned",
+        "minorityCategories",
+        "minorityProofDocuments",
+        "taxDocuments",
+        "businessLicenseDocuments",
+        "refundPolicyDocument",
+        "termsDocument",
+        "einNumber",
+        "ssnLast9"
+      ];
+      const attemptsSensitiveMutation = sensitiveFields.some(
+        (field) => payload[field] !== undefined
+      );
+      if (attemptsSensitiveMutation) {
+        return res.status(400).json({
+          success: false,
+          message: `Application is currently ${onboarding.status} and approval-sensitive fields cannot be edited`,
+        });
+      }
     }
 
     // 3️⃣ Create new onboarding if it doesn't exist
@@ -205,6 +242,12 @@ exports.saveDraft = async (req, res) => {
         applyVendorDraftField(onboarding, key, sanitizedPayload[key]);
       }
     });
+
+    // 6b️⃣ Enforce mutual exclusivity per diagram:
+    // YES path: clear noLicenseComplianceConfirmed so vendor can't hold both states
+    if (onboarding.hasBusinessLicense === true) {
+      onboarding.noLicenseComplianceConfirmed = false;
+    }
 
     // 7️⃣ Default fields
     const defaultFields = {
@@ -584,15 +627,13 @@ exports.getOnboardingData = async (req, res) => {
 
 /**
  * Update entire business profile (PUT)
- * This updates ALL fields - NO STATUS CHECKS
+ * Allowlist-filtered update with status guard.
  */
 
 exports.updateBusinessProfile = async (req, res) => {
   try {
     const userId = req.user._id;
     const payload = req.body;
-
-    const VendorOnboarding = require('../models/VendorOnboardingStage1');
 
     // 1️⃣ Check existing onboarding
     let onboarding = await VendorOnboarding.findOne({ userId });
@@ -602,6 +643,40 @@ exports.updateBusinessProfile = async (req, res) => {
         success: false,
         message: "No onboarding draft found. Please save draft first.",
       });
+    }
+
+    // 1b️⃣ Block approval-sensitive field MUTATIONS when submitted, under_review, or verified.
+    // Field presence alone is not enough — the frontend always sends the full payload on
+    // every profile save (including unchanged fields). We only block when the incoming
+    // value genuinely differs from the stored value.
+    if (['submitted', 'under_review', 'verified'].includes(onboarding.status)) {
+      const profileSensitiveFields = [
+        'hasBusinessLicense',
+        'licenseNumber',
+        'noLicenseComplianceConfirmed',
+        'declarationAccepted',
+        'acceptedTerms',
+        'isMinorityOwned',
+        'minorityCategories',
+        'minorityProofDocuments',
+        'taxDocuments',
+        'businessLicenseDocuments',
+        'refundPolicyDocument',
+        'termsDocument',
+        'einNumber',
+        'ssnLast9',
+      ];
+      const isValueChanged = (incoming, existing) =>
+        JSON.stringify(incoming) !== JSON.stringify(existing);
+      const attemptsSensitiveMutation = profileSensitiveFields.some(
+        (field) => payload[field] !== undefined && isValueChanged(payload[field], onboarding[field])
+      );
+      if (attemptsSensitiveMutation) {
+        return res.status(400).json({
+          success: false,
+          message: `Application is currently ${onboarding.status} and approval-sensitive fields cannot be edited`,
+        });
+      }
     }
 
     // 2️⃣ Update onboarding with allowlisted profile fields only
@@ -763,7 +838,7 @@ exports.updateBusinessProfile = async (req, res) => {
 // };
 
 /**
- * Patch business profile - NO STATUS CHECKS
+ * Patch business profile - allowlist-filtered with status guard.
  */
 exports.patchBusinessProfile = async (req, res) => {
   try {
@@ -781,7 +856,39 @@ exports.patchBusinessProfile = async (req, res) => {
       });
     }
 
-    // ✅ NO STATUS CHECKS - Always allow updates
+    // 2b️⃣ Block approval-sensitive field MUTATIONS when submitted, under_review, or verified.
+    // Field presence alone is not enough — the frontend always sends the full payload on
+    // every profile save (including unchanged fields). We only block when the incoming
+    // value genuinely differs from the stored value.
+    if (['submitted', 'under_review', 'verified'].includes(onboarding.status)) {
+      const profileSensitiveFields = [
+        'hasBusinessLicense',
+        'licenseNumber',
+        'noLicenseComplianceConfirmed',
+        'declarationAccepted',
+        'acceptedTerms',
+        'isMinorityOwned',
+        'minorityCategories',
+        'minorityProofDocuments',
+        'taxDocuments',
+        'businessLicenseDocuments',
+        'refundPolicyDocument',
+        'termsDocument',
+        'einNumber',
+        'ssnLast9',
+      ];
+      const isValueChanged = (incoming, existing) =>
+        JSON.stringify(incoming) !== JSON.stringify(existing);
+      const attemptsSensitiveMutation = profileSensitiveFields.some(
+        (field) => payload[field] !== undefined && isValueChanged(payload[field], onboarding[field])
+      );
+      if (attemptsSensitiveMutation) {
+        return res.status(400).json({
+          success: false,
+          message: `Application is currently ${onboarding.status} and approval-sensitive fields cannot be edited`,
+        });
+      }
+    }
 
     // 3️⃣ Only update allowlisted profile fields
     applyVendorBusinessProfileFields(onboarding, payload);
