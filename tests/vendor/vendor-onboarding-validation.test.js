@@ -98,14 +98,21 @@ test('validateStage1Payload requires compliance declaration when hasBusinessLice
   const errors = validateStage1Payload(validPayload({
     hasBusinessLicense: false,
     noLicenseComplianceConfirmed: false,
+    // Clear stale YES-path evidence so we isolate the compliance-check failure
+    licenseNumber: '',
+    businessLicenseDocuments: [],
   }));
   assert.ok(errors.some((e) => e.includes('Compliance declaration must be accepted')));
 });
 
 test('validateStage1Payload accepts noLicenseComplianceConfirmed when hasBusinessLicense is false', () => {
+  // A clean no-license payload: licenseNumber and documents must be absent/empty
+  // (the backend normalises these fields before calling validateStage1Payload)
   const errors = validateStage1Payload(validPayload({
     hasBusinessLicense: false,
     noLicenseComplianceConfirmed: true,
+    licenseNumber: '',
+    businessLicenseDocuments: [],
   }));
   assert.deepEqual(errors, []);
 });

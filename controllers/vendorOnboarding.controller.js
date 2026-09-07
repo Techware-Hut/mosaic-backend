@@ -244,9 +244,15 @@ exports.saveDraft = async (req, res) => {
     });
 
     // 6b️⃣ Enforce mutual exclusivity per diagram:
-    // YES path: clear noLicenseComplianceConfirmed so vendor can't hold both states
+    // YES path: clear noLicenseComplianceConfirmed so vendor can't hold both states.
+    // NO path: authoritatively clear stale license evidence so DB can never hold
+    // a contradictory state (hasBusinessLicense:false with a licenseNumber or docs).
     if (onboarding.hasBusinessLicense === true) {
       onboarding.noLicenseComplianceConfirmed = false;
+    } else if (onboarding.hasBusinessLicense === false) {
+      // 6c️⃣ Server-side normalization: wipe license evidence on NO path
+      onboarding.licenseNumber = '';
+      onboarding.businessLicenseDocuments = [];
     }
 
     // 7️⃣ Default fields
@@ -1305,6 +1311,15 @@ if (
         success: false,
         message: "Verification payment must be completed before submission",
       });
+    }
+
+    /* ------------------------------
+       SERVER-SIDE LICENSE NORMALIZATION (NO PATH)
+       Run before validation so the validator sees a clean record.
+    ------------------------------ */
+    if (onboarding.hasBusinessLicense === false) {
+      onboarding.licenseNumber = '';
+      onboarding.businessLicenseDocuments = [];
     }
 
     /* ------------------------------

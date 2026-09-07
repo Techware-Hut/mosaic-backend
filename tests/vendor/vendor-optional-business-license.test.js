@@ -78,3 +78,59 @@ test('No-license path requires both general declarationAccepted and noLicenseCom
   );
   assert.deepEqual(validNo, []);
 });
+
+test('No-license payload with stale licenseNumber is rejected by validation', () => {
+  const errors = validateStage1Payload(
+    buildStage1Payload({
+      hasBusinessLicense: false,
+      noLicenseComplianceConfirmed: true,
+      declarationAccepted: true,
+      licenseNumber: 'STALE-LIC-99',  // stale from a previous YES draft
+    })
+  );
+  assert.ok(
+    errors.some((e) => e.includes('No-license application cannot carry a license number')),
+    'Should reject stale licenseNumber on no-license payload'
+  );
+});
+
+test('No-license payload with stale businessLicenseDocuments is rejected by validation', () => {
+  const errors = validateStage1Payload(
+    buildStage1Payload({
+      hasBusinessLicense: false,
+      noLicenseComplianceConfirmed: true,
+      declarationAccepted: true,
+      businessLicenseDocuments: [{ url: 'https://s3.amazonaws.com/stale-doc.pdf', verified: false }],
+    })
+  );
+  assert.ok(
+    errors.some((e) => e.includes('No-license application cannot carry business license documents')),
+    'Should reject stale businessLicenseDocuments on no-license payload'
+  );
+});
+
+test('No-license validation passes with no stale evidence after normalization', () => {
+  // Simulates what the controller produces after normalization (licenseNumber cleared, docs cleared)
+  const errors = validateStage1Payload(
+    buildStage1Payload({
+      hasBusinessLicense: false,
+      noLicenseComplianceConfirmed: true,
+      declarationAccepted: true,
+      licenseNumber: '',                 // cleared by server normalization
+      businessLicenseDocuments: [],      // cleared by server normalization
+    })
+  );
+  assert.deepEqual(errors, []);
+});
+
+test('Yes-license validation still returns business-license-verification label (attestation semantics)', () => {
+  // Ensure YES path is unaffected by no-license validation additions
+  const errors = validateStage1Payload(
+    buildStage1Payload({
+      hasBusinessLicense: true,
+      licenseNumber: 'LIC-VALID-999',
+      declarationAccepted: true,
+    })
+  );
+  assert.deepEqual(errors, []);
+});

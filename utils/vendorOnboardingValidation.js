@@ -77,6 +77,16 @@ function validateStage1Payload(body = {}) {
     if (body.noLicenseComplianceConfirmed !== true) {
       errors.push('Compliance declaration must be accepted when no business license is provided');
     }
+    // Reject contradictory payloads: a no-license application must not carry
+    // stale license evidence. The backend normalises these fields before validation
+    // (via saveDraft/submitForReview) but we also enforce here as a last line of
+    // defence so the schema can never persist contradictory data through any path.
+    if (isNonEmptyString(body.licenseNumber)) {
+      errors.push('No-license application cannot carry a license number');
+    }
+    if (Array.isArray(body.businessLicenseDocuments) && body.businessLicenseDocuments.length > 0) {
+      errors.push('No-license application cannot carry business license documents');
+    }
   }
 
   // If vendor claims to have a business license, the number is required
