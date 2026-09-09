@@ -310,3 +310,90 @@ test('vendor profile updates query onboarding by authenticated user id only', as
   assert.notEqual(String(queryLog.lastUserId), vendorB);
   assert.equal(onboarding.businessBio, 'Vendor A bio');
 });
+
+// ─── Lionel Review Fix: Point 1 ─────────────────────────────────────────────
+// Verified vendors submitting the SAME sensitive field values must not get 400.
+// The frontend profile editor always includes the full payload (even unchanged
+// fields), so the guard must compare VALUES, not just field presence.
+
+test('verified vendor submitting unchanged licenseNumber does not get 400 (regression guard)', async () => {
+  const onboarding = buildOnboarding({
+    status: 'verified',
+    hasBusinessLicense: true,
+    licenseNumber: 'LIC-EXISTING-123',
+    refundPolicyDocument: { url: 'https://s3.example.com/refund.pdf', verified: true },
+    termsDocument: { url: 'https://s3.example.com/terms.pdf', verified: true },
+  });
+  const { controller } = loadController({ onboarding });
+  const res = mockResponse();
+
+  // Frontend sends the SAME values back as part of the full profile payload
+  await controller.updateBusinessProfile(
+    {
+      user: { _id: onboarding.userId },
+      body: {
+        businessBio: 'Updated bio',
+        licenseNumber: 'LIC-EXISTING-123',                            // unchanged
+        refundPolicyDocument: { url: 'https://s3.example.com/refund.pdf', verified: true }, // unchanged
+        termsDocument: { url: 'https://s3.example.com/terms.pdf', verified: true },         // unchanged
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200, `Expected 200 but got ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.success, true);
+});
+
+test('verified vendor trying to CHANGE licenseNumber is still blocked with 400', async () => {
+  const onboarding = buildOnboarding({
+    status: 'verified',
+    hasBusinessLicense: true,
+    licenseNumber: 'LIC-EXISTING-123',
+  });
+  const { controller } = loadController({ onboarding });
+  const res = mockResponse();
+
+  // Frontend tries to change the license number to a new value
+  await controller.updateBusinessProfile(
+    {
+      user: { _id: onboarding.userId },
+      body: {
+        businessBio: 'Updated bio',
+        licenseNumber: 'LIC-FRAUDULENT-999',   // CHANGED — must be blocked
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+});
+
+test('patchBusinessProfile: verified vendor with unchanged sensitive fields succeeds (regression guard)', async () => {
+  const onboarding = buildOnboarding({
+    status: 'verified',
+    hasBusinessLicense: false,
+    noLicenseComplianceConfirmed: true,
+    declarationAccepted: true,
+  });
+  const { controller } = loadController({ onboarding });
+  const res = mockResponse();
+
+  // Same values echoed back from frontend — must be allowed
+  await controller.patchBusinessProfile(
+    {
+      user: { _id: onboarding.userId },
+      body: {
+        businessBio: 'Patched bio from verified no-license vendor',
+        hasBusinessLicense: false,              // unchanged
+        noLicenseComplianceConfirmed: true,     // unchanged
+        declarationAccepted: true,              // unchanged
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200, `Expected 200 but got ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.success, true);
+});

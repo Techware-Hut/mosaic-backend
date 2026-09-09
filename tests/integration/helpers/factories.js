@@ -35,6 +35,8 @@ const validStage1Draft = {
   },
   acceptedTerms: true,
   declarationAccepted: true,
+  hasBusinessLicense: true,
+  licenseNumber: 'LIC-12345',
   isMinorityOwned: false,
 };
 

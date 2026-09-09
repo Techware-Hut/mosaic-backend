@@ -479,6 +479,8 @@ exports.verifyAndAllocatePoints = async (req, res) => {
     } else if (verificationType === 'business-license' && isVerified) {
       if (application.verificationChecklist.businessLicense) {
         alreadyVerified = true;
+      } else if (application.hasBusinessLicense === false && application.noLicenseComplianceConfirmed !== true) {
+        missingField = 'business license compliance declaration';
       } else {
         if (documentIndex !== undefined && application.businessLicenseDocuments[documentIndex]) {
           application.businessLicenseDocuments[documentIndex].verified = true;
@@ -679,6 +681,17 @@ exports.verifyAndAllocatePoints = async (req, res) => {
     const previousPoints = application.totalVerificationPoints - pointsToAdd;
     application.totalVerificationPoints += pointsToAdd;
 
+    // Distinguish attestation type in the response for admin UI and audit consumers.
+    // A No-license vendor completing the compliance declaration earns the same +10
+    // businessLicense checklist point, but the label must never say "Business License
+    // Document Verification" — it is a regulatory compliance attestation.
+    let attestationLabel;
+    if (verificationType === 'business-license') {
+      attestationLabel = application.hasBusinessLicense === false
+        ? 'Regulatory Compliance / Attestation'
+        : 'Business License Verification';
+    }
+
     await application.save();
 
     // Keep Business points in sync with stage-1 onboarding points
@@ -695,10 +708,11 @@ exports.verifyAndAllocatePoints = async (req, res) => {
         {
           totalVerificationPoints: application.totalVerificationPoints,
           verificationType,
+          attestationLabel: attestationLabel || verificationType,
           isVerified: Boolean(isVerified),
           pointsAdded: pointsToAdd,
         },
-        ['totalVerificationPoints', 'verificationType', 'isVerified', 'pointsAdded']
+        ['totalVerificationPoints', 'verificationType', 'attestationLabel', 'isVerified', 'pointsAdded']
       ),
     });
 
@@ -708,7 +722,12 @@ exports.verifyAndAllocatePoints = async (req, res) => {
       data: {
         totalPoints: application.totalVerificationPoints,
         pointsAdded: pointsToAdd,
-        verificationChecklist: application.verificationChecklist
+        verificationChecklist: application.verificationChecklist,
+        // Semantic label: clearly identifies what was verified.
+        // 'Regulatory Compliance / Attestation' for No-license vendors;
+        // 'Business License Verification' for Yes-license vendors;
+        // undefined for all other verification types.
+        attestationLabel: attestationLabel || undefined,
       }
     });
 
@@ -993,14 +1012,22 @@ exports.finalizeVerification = async (req, res) => {
 
     // ✅ Required docs check
     const hasTaxDocs = Boolean(application.verificationChecklist?.taxDocs);
-    const hasBusinessLicense = Boolean(application.verificationChecklist?.businessLicense);
+
+    // If vendor declared they have NO business license, their signed compliance
+    // declaration (noLicenseComplianceConfirmed) AND admin attestation verification (businessLicense checklist)
+    // are required to satisfy the license requirement.
+    // If they said YES to having a license, the doc must be uploaded and verified.
+    const vendorHasNoLicense = application.hasBusinessLicense === false;
+    const hasLicenseDocVerified = vendorHasNoLicense
+      ? Boolean(application.noLicenseComplianceConfirmed === true && application.verificationChecklist?.businessLicense === true)
+      : Boolean(application.verificationChecklist?.businessLicense === true);
 
     const hasMinorityDocs = application.isMinorityOwned
       ? Boolean(application.verificationChecklist?.minorityDocs)
       : true;
 
     const hasRequiredDocsVerified =
-      hasTaxDocs && hasBusinessLicense && hasMinorityDocs;
+      hasTaxDocs && hasLicenseDocVerified && hasMinorityDocs;
 
     // ❌ Missing docs
     const missingRequiredDocuments = [];
@@ -1009,8 +1036,12 @@ exports.finalizeVerification = async (req, res) => {
       missingRequiredDocuments.push('EIN document');
     }
 
-    if (!hasBusinessLicense) {
-      missingRequiredDocuments.push('business license document');
+    if (!hasLicenseDocVerified) {
+      missingRequiredDocuments.push(
+        vendorHasNoLicense
+          ? 'business license compliance attestation'
+          : 'business license document'
+      );
     }
 
     if (application.isMinorityOwned && !hasMinorityDocs) {
