@@ -6,7 +6,7 @@ const subscriptionPlanSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    enum: ['Silver Plan', 'Gold Plan', 'Platinum Plan']
+    enum: ['Launch Plan', 'Growth Plan', 'Legacy Plan'],
   },
   price: {
     type: Number,
