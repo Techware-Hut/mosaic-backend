@@ -416,9 +416,13 @@ exports.rejectServiceBooking = async (req, res) => {
   }
 };
 
-exports.getVendorBookings = async (req, res) => {
+// Internal helper: builds and runs the vendor booking query.
+// forcedBookingType pins the type for typed list routes and cannot
+// be overridden by the caller's query string.
+const queryVendorBookings = async (req, res, forcedBookingType) => {
   try {
-    const { businessId, status, bookingType } = req.query;
+    const { businessId, status } = req.query;
+    const bookingType = forcedBookingType || req.query.bookingType;
 
     if (!businessId) {
       return res.status(400).json({ success: false, message: 'businessId is required' });
@@ -448,19 +452,19 @@ exports.getVendorBookings = async (req, res) => {
   }
 };
 
-exports.getVendorServiceBookings = async (req, res) => {
-  req.query.bookingType = 'service';
-  return exports.getVendorBookings(req, res);
-};
+// Generic vendor list — bookingType is optional query param.
+exports.getVendorBookings = (req, res) => queryVendorBookings(req, res);
 
-exports.getVendorFoodBookings = async (req, res) => {
-  req.query.bookingType = 'food';
-  return exports.getVendorBookings(req, res);
-};
+// Typed vendor lists — type is fixed server-side, not from the URL.
+exports.getVendorServiceBookings = (req, res) => queryVendorBookings(req, res, 'service');
+exports.getVendorFoodBookings = (req, res) => queryVendorBookings(req, res, 'food');
 
-exports.getCustomerBookings = async (req, res) => {
+// Internal helper: builds and runs the customer booking query.
+// forcedBookingType pins the type for typed list routes.
+const queryCustomerBookings = async (req, res, forcedBookingType) => {
   try {
-    const { status, bookingType } = req.query;
+    const { status } = req.query;
+    const bookingType = forcedBookingType || req.query.bookingType;
 
     const query = {
       customerId: getAuthenticatedUserId(req),
@@ -487,15 +491,12 @@ exports.getCustomerBookings = async (req, res) => {
   }
 };
 
-exports.getCustomerServiceBookings = async (req, res) => {
-  req.query.bookingType = 'service';
-  return exports.getCustomerBookings(req, res);
-};
+// Generic customer list — bookingType is optional query param.
+exports.getCustomerBookings = (req, res) => queryCustomerBookings(req, res);
 
-exports.getCustomerFoodBookings = async (req, res) => {
-  req.query.bookingType = 'food';
-  return exports.getCustomerBookings(req, res);
-};
+// Typed customer lists — type is fixed server-side, not from the URL.
+exports.getCustomerServiceBookings = (req, res) => queryCustomerBookings(req, res, 'service');
+exports.getCustomerFoodBookings = (req, res) => queryCustomerBookings(req, res, 'food');
 
 exports.updateBookingStatus = async (req, res) => {
   const { id } = req.params;
