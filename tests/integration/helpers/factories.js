@@ -96,10 +96,10 @@ async function createAdminDirect() {
 }
 
 async function ensureSubscriptionPlan() {
-  let plan = await SubscriptionPlan.findOne({ name: 'Silver Plan' });
+  let plan = await SubscriptionPlan.findOne({ name: { $in: ['Launch Plan', 'Silver Plan'] } });
   if (!plan) {
     plan = await SubscriptionPlan.create({
-      name: 'Silver Plan',
+      name: 'Launch Plan',
       price: 0,
       limits: {
         productListings: 10,
