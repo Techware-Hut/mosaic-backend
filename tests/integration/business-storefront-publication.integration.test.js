@@ -21,6 +21,7 @@ const Product = require('../../models/Product');
 const ProductVariant = require('../../models/ProductVariant');
 const Service = require('../../models/Service');
 const Food = require('../../models/Food');
+const Business = require('../../models/Business');
 
 test.before(async () => {
   await startHarness();
@@ -435,4 +436,130 @@ test('vendor publish-storefront publishes draft food listings and public food de
 
   const afterDetail = await agent.get(`/api/public/foods/${food._id}`);
   assert.equal(afterDetail.status, 200, JSON.stringify(afterDetail.body));
+});
+
+test('publish-storefront allows the tenth Silver product when nine are already published', async () => {
+  const agent = createAgent(getApp());
+  const { business, product } = await setupVendorWithDraftProduct(agent, { isActive: false });
+
+  await Product.insertMany(Array.from({ length: 9 }, (_, index) => ({
+    title: `Published quota product ${index}`,
+    slug: `published-quota-${Date.now()}-${index}`,
+    description: 'Published quota fixture.',
+    categoryId: new mongoose.Types.ObjectId(),
+    subcategoryId: new mongoose.Types.ObjectId(),
+    ownerId: product.ownerId,
+    businessId: business._id,
+    coverImage: `https://example.test/quota-${index}.png`,
+    isPublished: true,
+    isActive: true,
+    isDeleted: false,
+    price: 25,
+  })));
+
+  const publishRes = await agent.post(`/api/business/${business._id}/publish-storefront`);
+  assert.equal(publishRes.status, 200, JSON.stringify(publishRes.body));
+
+  const reloaded = await Product.findById(product._id).lean();
+  assert.equal(reloaded.isPublished, true);
+});
+
+test('publish-storefront rejects an over-quota batch without activating or partially publishing', async () => {
+  const agent = createAgent(getApp());
+  const { business, product } = await setupVendorWithDraftProduct(agent, { isActive: false });
+
+  await Product.insertMany(Array.from({ length: 10 }, (_, index) => ({
+    title: `At-cap product ${index}`,
+    slug: `at-cap-${Date.now()}-${index}`,
+    description: 'At-cap quota fixture.',
+    categoryId: new mongoose.Types.ObjectId(),
+    subcategoryId: new mongoose.Types.ObjectId(),
+    ownerId: product.ownerId,
+    businessId: business._id,
+    coverImage: `https://example.test/at-cap-${index}.png`,
+    isPublished: true,
+    isActive: true,
+    isDeleted: false,
+    price: 25,
+  })));
+
+  const publishRes = await agent.post(`/api/business/${business._id}/publish-storefront`);
+  assert.equal(publishRes.status, 403, JSON.stringify(publishRes.body));
+  assert.ok(publishRes.body.blockers.some((blocker) =>
+    blocker.code === 'LISTING_LIMIT_REACHED' &&
+    blocker.limit === 10 &&
+    blocker.current === 10 &&
+    blocker.attemptedIncrease === 1
+  ));
+
+  const [reloadedBusiness, reloadedDraft] = await Promise.all([
+    Business.findById(business._id).lean(),
+    Product.findById(product._id).lean(),
+  ]);
+  assert.equal(reloadedBusiness.isActive, false);
+  assert.equal(reloadedDraft.isPublished, false);
+});
+
+test('publish-storefront rejects an inactive-only listing without activating the business', async () => {
+  const agent = createAgent(getApp());
+  const { business, product } = await setupVendorWithDraftProduct(agent, { isActive: false });
+  await Product.updateOne({ _id: product._id }, { $set: { isActive: false } });
+
+  const publishRes = await agent.post(`/api/business/${business._id}/publish-storefront`);
+  assert.equal(publishRes.status, 409, JSON.stringify(publishRes.body));
+  assert.ok(publishRes.body.blockers.some((blocker) => blocker.code === 'LISTING_REQUIRED'));
+
+  const [reloadedBusiness, reloadedProduct] = await Promise.all([
+    Business.findById(business._id).lean(),
+    Product.findById(product._id).lean(),
+  ]);
+  assert.equal(reloadedBusiness.isActive, false);
+  assert.equal(reloadedProduct.isActive, false);
+  assert.equal(reloadedProduct.isPublished, false);
+});
+
+test('publish-storefront does not hide or reject unchanged published overage after downgrade', async () => {
+  const agent = createAgent(getApp());
+  const vendor = await registerAndVerify(agent, { role: 'business_owner' });
+  const user = await User.findOne({ email: vendor.email });
+  const business = await seedApprovedBusiness(user, {
+    businessName: `Downgrade Overage ${Date.now()}`,
+    listingType: 'product',
+    chargesEnabled: true,
+    payoutsEnabled: true,
+    isActive: false,
+  });
+  await seedVendorOnboarding(user, { businessId: business._id, status: 'verified' });
+
+  const products = await Product.insertMany(Array.from({ length: 12 }, (_, index) => ({
+    title: `Existing overage ${index}`,
+    slug: `existing-overage-${Date.now()}-${index}`,
+    description: 'Existing published listing retained after downgrade.',
+    categoryId: new mongoose.Types.ObjectId(),
+    subcategoryId: new mongoose.Types.ObjectId(),
+    ownerId: user._id,
+    businessId: business._id,
+    coverImage: `https://example.test/overage-${index}.png`,
+    isPublished: true,
+    isActive: true,
+    isDeleted: false,
+    price: 25,
+  })));
+
+  const loginRes = await login(agent, vendor.email, vendor.password);
+  assert.equal(loginRes.status, 200);
+
+  const publishRes = await agent.post(`/api/business/${business._id}/publish-storefront`);
+  assert.equal(publishRes.status, 200, JSON.stringify(publishRes.body));
+
+  const [publishedCount, reloadedBusiness] = await Promise.all([
+    Product.countDocuments({
+      _id: { $in: products.map((item) => item._id) },
+      isPublished: true,
+      isActive: { $ne: false },
+    }),
+    Business.findById(business._id).lean(),
+  ]);
+  assert.equal(publishedCount, 12);
+  assert.equal(reloadedBusiness.isActive, true);
 });

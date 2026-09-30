@@ -2,6 +2,7 @@ const Product = require('../../models/Product');
 const ProductVariant = require('../../models/ProductVariant');
 const Service = require('../../models/Service');
 const Food = require('../../models/Food');
+const Business = require('../../models/Business');
 const {
   ADMIN_AUDIT_ACTIONS,
   ADMIN_AUDIT_TARGET_TYPES,
@@ -23,6 +24,9 @@ const {
   hasActiveFoodBookings,
   hasActiveServiceBookings,
 } = require('../../utils/bookingDeleteGuards');
+const {
+  checkBusinessListingQuota,
+} = require('../../services/listingQuotaService');
 
 const CATALOG_TYPES = Object.freeze(['product', 'service', 'food']);
 
@@ -65,6 +69,14 @@ function parseRequestedFlags(rawFlags) {
 
 function getModel(type) {
   return MODEL_BY_TYPE[type] || null;
+}
+
+function publishedActiveUnits(type, listing = {}) {
+  if (listing.isPublished !== true || listing.isActive === false) return 0;
+  if (type === 'service') {
+    return Array.isArray(listing.services) ? listing.services.length : 0;
+  }
+  return 1;
 }
 
 function baseListFilter(type) {
@@ -295,6 +307,44 @@ exports.updateCatalogItem = async (req, res) => {
         updates,
         applyCatalogActiveTransition(listing, updates.isActive, { hasPublishedVariant })
       );
+    }
+
+    const candidate = {
+      ...(typeof listing.toObject === 'function' ? listing.toObject() : listing),
+      ...updates,
+    };
+    const publicationIncrease = Math.max(
+      publishedActiveUnits(type, candidate) - publishedActiveUnits(type, listing),
+      0
+    );
+
+    if (publicationIncrease > 0) {
+      const business = await Business.findById(listing.businessId);
+      if (!business) {
+        return res.status(404).json({ success: false, message: 'Listing business not found.' });
+      }
+
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId: business.owner,
+        listingType: type,
+        attemptedIncrease: publicationIncrease,
+        models: { Product, Service, Food },
+      });
+      if (!quotaCheck.ok) {
+        return res.status(quotaCheck.status || 403).json({
+          success: false,
+          code: quotaCheck.code,
+          message: quotaCheck.message || quotaCheck.error,
+          error: quotaCheck.error || quotaCheck.message,
+          listingType: quotaCheck.listingType,
+          tier: quotaCheck.tier,
+          limit: quotaCheck.limit,
+          current: quotaCheck.current,
+          attemptedIncrease: quotaCheck.attemptedIncrease,
+          remaining: quotaCheck.remaining,
+        });
+      }
     }
 
     Object.assign(listing, updates);

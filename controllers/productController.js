@@ -11,10 +11,17 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const mongoose = require('mongoose');
 const VendorOnboardingStage1 = require('../models/VendorOnboardingStage1');
 const {
-  countProductListingUsage,
-  assertProductListingQuota,
-  resolveProductListingLimit,
-} = require('../utils/listingTierLimits');
+  checkBusinessListingQuota,
+  resolveBusinessListingEntitlement,
+} = require('../services/listingQuotaService');
+const {
+  countGalleryImages,
+  evaluateGalleryImageChange,
+  evaluateGalleryImageCount,
+  galleryLimitErrorBody,
+  getGalleryImageLimit,
+  parseCurrentImageCount,
+} = require('../utils/galleryImageLimits');
 const {
   PRESIGNED_S3_UPLOAD_EXPIRES_IN_SECONDS,
   MAX_IMAGE_S3_UPLOAD_BYTES,
@@ -42,11 +49,18 @@ const s3Client = new S3Client({
 });
 
 const DEFAULT_PRODUCT_SHIPPING = { standard: 0, overnight: 0, local: 0 };
-const getGalleryImageLimit = (subscriptionPlan) =>
-  subscriptionPlan?.limits?.galleryImageLimit ?? subscriptionPlan?.limits?.imageLimit ?? 0;
-
-const countGalleryImages = (images) =>
-  Array.isArray(images) ? images.filter(Boolean).length : 0;
+const sendTierPolicyFailure = (res, result) => res.status(result.status || 403).json({
+  success: false,
+  code: result.code,
+  error: result.error || result.message,
+  message: result.message || result.error,
+  listingType: result.listingType,
+  tier: result.tier,
+  limit: result.limit,
+  current: result.current,
+  attemptedIncrease: result.attemptedIncrease,
+  remaining: result.remaining,
+});
 
 const toShippingNumber = (value) => {
   if (value === undefined || value === null || value === "") {
@@ -317,46 +331,38 @@ exports.createProductWithVariants = async (req, res) => {
       return res.status(403).json({ error: 'You do not own this business.' });
     }
 
-    // Check subscription
-    const subscription = await Subscription.findOne({
-      userId,
-      status: 'active',
-      endDate: { $gte: new Date() },
-    }).sort({ createdAt: -1 });
+    const willPublish = isPublished === true || isPublished === 'true';
+    let entitlement;
 
-    if (!subscription) {
-      return res.status(403).json({ 
-        error: 'Valid subscription not found.',
-        details: 'Please ensure you have an active subscription with completed payment.'
+    if (willPublish) {
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId,
+        listingType: 'product',
+        attemptedIncrease: 1,
+        models: { Product },
       });
+      if (!quotaCheck.ok) return sendTierPolicyFailure(res, quotaCheck);
+      entitlement = quotaCheck.entitlement;
+    } else {
+      entitlement = await resolveBusinessListingEntitlement({
+        business,
+        userId,
+        listingType: 'product',
+      });
+      if (!entitlement.ok) return sendTierPolicyFailure(res, entitlement);
     }
 
-    const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    const productLimit = resolveProductListingLimit(
-      subscriptionPlan?.limits?.productListings || 0
-    );
-    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
-
-    const incomingVariantCount = Array.isArray(variants) ? variants.length : 0;
-    const usage = await countProductListingUsage({ Product, ProductVariant, businessId });
-    const quotaCheck = assertProductListingQuota({
-      total: usage.total,
-      incomingCount: 1 + incomingVariantCount,
-      limit: productLimit,
+    const galleryImageLimit = getGalleryImageLimit(entitlement.plan);
+    const galleryCheck = evaluateGalleryImageChange({
+      listingType: 'product',
+      currentImages: [],
+      nextImages: galleryImages,
+      limit: galleryImageLimit,
     });
-
-    if (!quotaCheck.ok) {
-      return res.status(quotaCheck.status).json({ error: quotaCheck.error });
+    if (!galleryCheck.ok) {
+      return res.status(galleryCheck.status).json(galleryLimitErrorBody(galleryCheck));
     }
-
-    const galleryCount = countGalleryImages(galleryImages);
-    if (galleryCount > galleryImageLimit) {
-      return res.status(400).json({
-        error: `Product gallery can have maximum ${galleryImageLimit} images for your plan.`,
-      });
-    }
-
-    const willPublish = Boolean(isPublished);
 
     // Create Product
     const product = new Product({
@@ -840,27 +846,48 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
-    const subscription = await Subscription.findOne({
-      userId,
-      status: 'active',
-      endDate: { $gte: new Date() },
-    }).sort({ createdAt: -1 });
-
-    if (!subscription) {
-      return res.status(403).json({
-        error: 'Valid subscription not found.',
-        details: 'Please ensure you have an active subscription with completed payment.'
-      });
+    const business = await Business.findOne({ _id: product.businessId, owner: userId });
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found.' });
     }
 
-    const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
+    const nextPublished = isPublished !== undefined
+      ? (isPublished === true || isPublished === 'true')
+      : product.isPublished;
+    const publicationIncrease =
+      product.isActive !== false && product.isPublished !== true && nextPublished === true ? 1 : 0;
+
+    let entitlement;
+    if (publicationIncrease > 0) {
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId,
+        listingType: 'product',
+        attemptedIncrease: publicationIncrease,
+        models: { Product },
+      });
+      if (!quotaCheck.ok) return sendTierPolicyFailure(res, quotaCheck);
+      entitlement = quotaCheck.entitlement;
+    } else {
+      entitlement = await resolveBusinessListingEntitlement({
+        business,
+        userId,
+        listingType: 'product',
+      });
+      if (!entitlement.ok) return sendTierPolicyFailure(res, entitlement);
+    }
+
+    const galleryImageLimit = getGalleryImageLimit(entitlement.plan);
     const nextGalleryImages = galleryImages !== undefined ? galleryImages : product.galleryImages;
 
-    if (countGalleryImages(nextGalleryImages) > galleryImageLimit) {
-      return res.status(400).json({
-        error: `Product gallery can have maximum ${galleryImageLimit} images for your plan.`,
-      });
+    const galleryCheck = evaluateGalleryImageChange({
+      listingType: 'product',
+      currentImages: product.galleryImages,
+      nextImages: nextGalleryImages,
+      limit: galleryImageLimit,
+    });
+    if (!galleryCheck.ok) {
+      return res.status(galleryCheck.status).json(galleryLimitErrorBody(galleryCheck));
     }
 
     // Handle cover image change
@@ -884,17 +911,15 @@ exports.updateProduct = async (req, res) => {
     }
     product.metaFields = metaFields || product.metaFields;
     product.discount = discount || product.discount;
-    const nextPublished =
-      isPublished !== undefined ? isPublished : product.isPublished;
-
     await product.save();
 
     // -----------------------------
     // Update / Create Variants
     // -----------------------------
     let savedVariants = [];
+    const variantsWereProvided = Array.isArray(variants);
 
-    if (Array.isArray(variants) && variants.length > 0) {
+    if (variantsWereProvided && variants.length > 0) {
       // Get onboarding info once
       const onboarding = await VendorOnboardingStage1.findOne({ userId });
 
@@ -982,8 +1007,9 @@ exports.updateProduct = async (req, res) => {
           savedVariants.push(newVariant);
         }
       }
-    } else {
-      // If no variants sent, remove all variants
+    } else if (variantsWereProvided) {
+      // An explicitly empty array removes all variants. Omitting `variants`
+      // is a metadata-only update and must preserve existing inventory.
       await ProductVariant.deleteMany({ productId });
     }
 
@@ -1008,7 +1034,11 @@ exports.updateProduct = async (req, res) => {
 
     product.isPublished = nextPublished;
 
-    if (allVariants.length > 0) {
+    if (!variantsWereProvided) {
+      // Preserve the existing price range when this request did not reconcile
+      // variant inventory.
+      await product.save();
+    } else if (allVariants.length > 0) {
       const prices = allVariants.map(v => {
         const sale = v.salePrice ? parseFloat(v.salePrice.toString()) : null;
         const price = parseFloat(v.price.toString());
@@ -1240,45 +1270,15 @@ exports.addVariants = async (req, res) => {
       return res.status(404).json({ error: 'Business not found' });
     }
 
-    // ✅ FIXED: Find subscription by userId (not by business.subscriptionId)
-    const subscription = await Subscription.findOne({
-      userId: req.user._id,  // Find by user ID
-      status: 'active',
-      paymentStatus: { $in: ['PENDING', 'COMPLETED', 'PAID'] },
-      endDate: { $gte: new Date() },
-    }).sort({ createdAt: -1 });
-
-    if (!subscription) {
-      return res.status(403).json({ 
-        error: 'Valid subscription not found.',
-        details: 'Please ensure you have an active subscription.'
-      });
-    }
-
-    // Get subscription plan
-    const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    if (!subscriptionPlan) {
-      return res.status(404).json({ error: 'Subscription plan not found' });
-    }
-
-    const productLimit = resolveProductListingLimit(
-      subscriptionPlan?.limits?.productListings || 0
-    );
-    const incomingVariantCount = Array.isArray(variants) ? variants.length : 0;
-    const usage = await countProductListingUsage({
-      Product,
-      ProductVariant,
-      businessId: product.businessId,
+    // Variants are attributes/inventory under a Product and never consume the
+    // approved parent-product quota. The exact Business subscription still
+    // gates this mutation.
+    const entitlement = await resolveBusinessListingEntitlement({
+      business,
+      userId: req.user._id,
+      listingType: 'product',
     });
-    const quotaCheck = assertProductListingQuota({
-      total: usage.total,
-      incomingCount: incomingVariantCount,
-      limit: productLimit,
-    });
-
-    if (!quotaCheck.ok) {
-      return res.status(quotaCheck.status).json({ error: quotaCheck.error });
-    }
+    if (!entitlement.ok) return sendTierPolicyFailure(res, entitlement);
 
     // Create new variants with unique SKUs
     const variantDocs = [];
@@ -1372,6 +1372,33 @@ exports.updateVariant = async (req, res) => {
       return res.status(400).json({ error: normalizedVariant.error });
     }
 
+    const requestedVariantPublished =
+      isPublished === true || isPublished === 'true';
+
+    if (
+      isPublished !== undefined &&
+      requestedVariantPublished &&
+      product.isPublished !== true &&
+      product.isActive !== false
+    ) {
+      const business = await Business.findOne({
+        _id: product.businessId,
+        owner: req.user._id,
+      });
+      if (!business) {
+        return res.status(404).json({ error: 'Business not found.' });
+      }
+
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId: req.user._id,
+        listingType: 'product',
+        attemptedIncrease: 1,
+        models: { Product },
+      });
+      if (!quotaCheck.ok) return sendTierPolicyFailure(res, quotaCheck);
+    }
+
     // Handle image cleanup if changed
     if (images && images.length > 0) {
       const oldImages = variant.images || [];
@@ -1395,7 +1422,7 @@ exports.updateVariant = async (req, res) => {
     if (images) variant.images = images;
 
     const nextVariantPublished =
-      isPublished !== undefined ? isPublished : variant.isPublished;
+      isPublished !== undefined ? requestedVariantPublished : variant.isPublished;
 
     if (nextVariantPublished) {
       const candidateVariant = {
@@ -1421,12 +1448,12 @@ exports.updateVariant = async (req, res) => {
       }
     }
 
-    if (isPublished !== undefined) variant.isPublished = isPublished;
+    if (isPublished !== undefined) variant.isPublished = requestedVariantPublished;
 
     await variant.save();
 
     // Auto-publish/unpublish product based on variants
-    if (isPublished === true && !product.isPublished) {
+    if (isPublished !== undefined && requestedVariantPublished && !product.isPublished) {
       const allVariants = await ProductVariant.find({ productId, isDeleted: false });
       const publishCheck = validateProductPublishState({
         product,
@@ -1443,7 +1470,7 @@ exports.updateVariant = async (req, res) => {
       }
       product.isPublished = true;
       await product.save();
-    } else if (isPublished === false) {
+    } else if (isPublished !== undefined && !requestedVariantPublished) {
       const publishedVariants = await ProductVariant.countDocuments({
         productId,
         isPublished: true,
@@ -1629,7 +1656,16 @@ exports.getProductUploadUrl = async (req, res) => {
 
   try {
     const userId = req.user._id;
-    const { fileName, fileType, fileSize, documentType, productId, variantIndex, currentImageCount } = req.query;
+    const {
+      fileName,
+      fileType,
+      fileSize,
+      documentType,
+      productId,
+      businessId,
+      variantIndex,
+      currentImageCount,
+    } = req.query;
 
     if (!fileName || !fileType || !documentType) {
       return res.status(400).json({
@@ -1678,28 +1714,91 @@ exports.getProductUploadUrl = async (req, res) => {
     }
 
     if (documentType === "product-gallery") {
-      const subscription = await Subscription.findOne({
-        userId,
-        status: 'active',
-        endDate: { $gte: new Date() },
-      }).sort({ createdAt: -1 });
+      let subscriptionPlan;
+      let currentCount;
 
-      if (!subscription) {
-        return res.status(403).json({
-          success: false,
-          message: 'Valid subscription not found.',
+      if (productId) {
+        const product = await Product.findOne({
+          _id: productId,
+          ownerId: userId,
+          isDeleted: false,
         });
+        if (!product) {
+          return res.status(404).json({
+            success: false,
+            code: 'PRODUCT_NOT_FOUND',
+            message: 'Product not found.',
+          });
+        }
+
+        const business = await Business.findOne({ _id: product.businessId, owner: userId });
+        if (!business) {
+          return res.status(404).json({
+            success: false,
+            code: 'BUSINESS_NOT_FOUND',
+            message: 'Business not found.',
+          });
+        }
+
+        const entitlement = await resolveBusinessListingEntitlement({
+          business,
+          userId,
+          listingType: 'product',
+        });
+        if (!entitlement.ok) return sendTierPolicyFailure(res, entitlement);
+        subscriptionPlan = entitlement.plan;
+        currentCount = countGalleryImages(product.galleryImages);
+      } else if (businessId) {
+        const business = await Business.findOne({ _id: businessId, owner: userId });
+        if (!business) {
+          return res.status(404).json({
+            success: false,
+            code: 'BUSINESS_NOT_FOUND',
+            message: 'Business not found.',
+          });
+        }
+
+        const entitlement = await resolveBusinessListingEntitlement({
+          business,
+          userId,
+          listingType: 'product',
+        });
+        if (!entitlement.ok) return sendTierPolicyFailure(res, entitlement);
+        subscriptionPlan = entitlement.plan;
+      } else {
+        // Legacy create-time callers do not identify a Business. The final
+        // create payload remains authoritative and rechecks the exact Business.
+        const subscription = await Subscription.findOne({
+          userId,
+          status: 'active',
+          endDate: { $gte: new Date() },
+        }).sort({ createdAt: -1 });
+        if (!subscription) {
+          return res.status(403).json({
+            success: false,
+            message: 'Valid subscription not found.',
+          });
+        }
+        subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
       }
 
-      const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-      const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
-      const currentCount = Number(currentImageCount || 0);
+      if (currentCount === undefined) {
+        const parsedCount = parseCurrentImageCount(currentImageCount);
+        if (!parsedCount.ok) {
+          return res.status(parsedCount.status).json(parsedCount);
+        }
+        currentCount = parsedCount.count;
+      }
 
-      if (currentCount + 1 > galleryImageLimit) {
-        return res.status(403).json({
-          success: false,
-          message: `Gallery image upload limit reached. Maximum ${galleryImageLimit} gallery images allowed for your plan.`,
-        });
+      const galleryCheck = evaluateGalleryImageCount({
+        listingType: 'product',
+        currentCount,
+        nextCount: currentCount + 1,
+        limit: getGalleryImageLimit(subscriptionPlan),
+        status: 403,
+      });
+      if (!galleryCheck.ok) {
+        return res.status(galleryCheck.status).json(galleryLimitErrorBody(galleryCheck));
       }
     }
 

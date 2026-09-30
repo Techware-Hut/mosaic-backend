@@ -29,6 +29,18 @@ const {
   validateFoodPublishState,
 } = require('../lib/marketplace/listingPricePolicy');
 const { safeGeocodeAddress } = require('../utils/geocode');
+const {
+  checkBusinessListingQuota,
+  resolveBusinessListingEntitlement,
+} = require('../services/listingQuotaService');
+const {
+  countGalleryImages,
+  evaluateGalleryImageChange,
+  evaluateGalleryImageCount,
+  galleryLimitErrorBody,
+  getGalleryImageLimit,
+  parseCurrentImageCount,
+} = require('../utils/galleryImageLimits');
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -37,12 +49,6 @@ const s3Client = new S3Client({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
 });
-
-const getGalleryImageLimit = (subscriptionPlan) =>
-  subscriptionPlan?.limits?.galleryImageLimit ?? subscriptionPlan?.limits?.imageLimit ?? 0;
-
-const countGalleryImages = (images) =>
-  Array.isArray(images) ? images.filter(Boolean).length : 0;
 
 const normalizeMetaFields = (metaFields) => {
   if (!Array.isArray(metaFields)) return [];
@@ -53,6 +59,19 @@ const normalizeMetaFields = (metaFields) => {
       value: String(item.value || '').trim(),
     }));
 };
+
+const sendTierPolicyFailure = (res, result) => res.status(result.status || 403).json({
+  success: false,
+  code: result.code,
+  error: result.error || result.message,
+  message: result.message || result.error,
+  listingType: result.listingType,
+  tier: result.tier,
+  limit: result.limit,
+  current: result.current,
+  attemptedIncrease: result.attemptedIncrease,
+  remaining: result.remaining,
+});
 
 exports.createFood = async (req, res) => {
   try {
@@ -88,34 +107,37 @@ exports.createFood = async (req, res) => {
       return res.status(403).json({ error: 'You do not own this business.' });
     }
 
-    const subscription = await Subscription.findOne({
-      userId,
-      status: 'active',
-      endDate: { $gte: new Date() },
-    }).sort({ createdAt: -1 });
-
-    if (!subscription) {
-      return res.status(403).json({ error: 'Valid subscription not found.' });
-    }
-
-    const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    const foodLimit = subscriptionPlan?.limits?.foodListings || 0;
-    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
-    const existingFoodCount = await Food.countDocuments({ ownerId: userId });
-
-    if (existingFoodCount >= foodLimit) {
-      return res.status(403).json({
-        error: `Food listing limit reached for your subscription. You can add up to ${foodLimit} foods.`,
+    const nextPublished = isPublished === true || isPublished === 'true';
+    let entitlement;
+    if (nextPublished) {
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId,
+        listingType: 'food',
+        attemptedIncrease: 1,
+        models: { Food },
       });
-    }
-
-    if (countGalleryImages(images) > galleryImageLimit) {
-      return res.status(400).json({
-        error: `Food gallery can have maximum ${galleryImageLimit} images for your plan.`,
+      if (!quotaCheck.ok) return sendTierPolicyFailure(res, quotaCheck);
+      entitlement = quotaCheck.entitlement;
+    } else {
+      entitlement = await resolveBusinessListingEntitlement({
+        business,
+        userId,
+        listingType: 'food',
       });
+      if (!entitlement.ok) return sendTierPolicyFailure(res, entitlement);
     }
 
-    const nextPublished = Boolean(isPublished);
+    const galleryCheck = evaluateGalleryImageChange({
+      listingType: 'food',
+      currentImages: [],
+      nextImages: images,
+      limit: getGalleryImageLimit(entitlement.plan),
+    });
+    if (!galleryCheck.ok) {
+      return res.status(galleryCheck.status).json(galleryLimitErrorBody(galleryCheck));
+    }
+
     const numericPrice = Number.isFinite(Number(price)) ? Number(price) : null;
     const publishCheck = validateFoodPublishState({
       food: { price: numericPrice },
@@ -330,24 +352,47 @@ exports.updateFood = async (req, res) => {
       return res.status(404).json({ message: 'Food not found.' });
     }
 
-    const subscription = await Subscription.findOne({
-      userId,
-      status: 'active',
-      endDate: { $gte: new Date() },
-    }).sort({ createdAt: -1 });
-
-    if (!subscription) {
-      return res.status(403).json({ message: 'Valid subscription not found.' });
+    const business = await Business.findOne({ _id: food.businessId, owner: userId });
+    if (!business) {
+      return res.status(404).json({ message: 'Business not found.' });
     }
 
-    const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-    const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
+    const nextPublished = req.body.isPublished !== undefined
+      ? (req.body.isPublished === true || req.body.isPublished === 'true')
+      : food.isPublished;
+    const publicationIncrease =
+      food.isActive !== false && food.isPublished !== true && nextPublished === true ? 1 : 0;
+
+    let entitlement;
+    if (publicationIncrease > 0) {
+      const quotaCheck = await checkBusinessListingQuota({
+        business,
+        userId,
+        listingType: 'food',
+        attemptedIncrease: publicationIncrease,
+        models: { Food },
+      });
+      if (!quotaCheck.ok) return sendTierPolicyFailure(res, quotaCheck);
+      entitlement = quotaCheck.entitlement;
+    } else {
+      entitlement = await resolveBusinessListingEntitlement({
+        business,
+        userId,
+        listingType: 'food',
+      });
+      if (!entitlement.ok) return sendTierPolicyFailure(res, entitlement);
+    }
+
     const nextGalleryImages = req.body.images !== undefined ? req.body.images : food.images;
 
-    if (countGalleryImages(nextGalleryImages) > galleryImageLimit) {
-      return res.status(400).json({
-        message: `Food gallery can have maximum ${galleryImageLimit} images for your plan.`,
-      });
+    const galleryCheck = evaluateGalleryImageChange({
+      listingType: 'food',
+      currentImages: food.images,
+      nextImages: nextGalleryImages,
+      limit: getGalleryImageLimit(entitlement.plan),
+    });
+    if (!galleryCheck.ok) {
+      return res.status(galleryCheck.status).json(galleryLimitErrorBody(galleryCheck));
     }
 
     const updatableFields = [
@@ -359,7 +404,6 @@ exports.updateFood = async (req, res) => {
       'menuImage',
       'businessHours',
       'bookingToolLink',
-      'isPublished',
       'foodType',
       'brand',
       'categoryId',
@@ -371,6 +415,10 @@ exports.updateFood = async (req, res) => {
         food[field] = req.body[field];
       }
     });
+
+    if (req.body.isPublished !== undefined) {
+      food.isPublished = nextPublished;
+    }
 
     if (req.body.metaFields !== undefined) {
       food.metaFields = normalizeMetaFields(req.body.metaFields);
@@ -470,7 +518,15 @@ exports.getFoodUploadUrl = async (req, res) => {
 
   try {
     const userId = req.user._id;
-    const { fileName, fileType, fileSize, documentType, foodId, currentImageCount } = req.query;
+    const {
+      fileName,
+      fileType,
+      fileSize,
+      documentType,
+      foodId,
+      businessId,
+      currentImageCount,
+    } = req.query;
 
     if (!fileName || !fileType || !documentType) {
       return res.status(400).json({
@@ -512,28 +568,83 @@ exports.getFoodUploadUrl = async (req, res) => {
     }
 
     if (documentType === 'food-gallery') {
-      const subscription = await Subscription.findOne({
-        userId,
-        status: 'active',
-        endDate: { $gte: new Date() },
-      }).sort({ createdAt: -1 });
+      let subscriptionPlan;
+      let currentCount;
 
-      if (!subscription) {
-        return res.status(403).json({
-          success: false,
-          message: 'Valid subscription not found.',
+      if (foodId) {
+        const food = await Food.findOne({ _id: foodId, ownerId: userId });
+        if (!food) {
+          return res.status(404).json({
+            success: false,
+            code: 'FOOD_NOT_FOUND',
+            message: 'Food not found.',
+          });
+        }
+
+        const business = await Business.findOne({ _id: food.businessId, owner: userId });
+        if (!business) {
+          return res.status(404).json({
+            success: false,
+            code: 'BUSINESS_NOT_FOUND',
+            message: 'Business not found.',
+          });
+        }
+
+        const entitlement = await resolveBusinessListingEntitlement({
+          business,
+          userId,
+          listingType: 'food',
         });
+        if (!entitlement.ok) return sendTierPolicyFailure(res, entitlement);
+        subscriptionPlan = entitlement.plan;
+        currentCount = countGalleryImages(food.images);
+      } else if (businessId) {
+        const business = await Business.findOne({ _id: businessId, owner: userId });
+        if (!business) {
+          return res.status(404).json({
+            success: false,
+            code: 'BUSINESS_NOT_FOUND',
+            message: 'Business not found.',
+          });
+        }
+
+        const entitlement = await resolveBusinessListingEntitlement({
+          business,
+          userId,
+          listingType: 'food',
+        });
+        if (!entitlement.ok) return sendTierPolicyFailure(res, entitlement);
+        subscriptionPlan = entitlement.plan;
+      } else {
+        const subscription = await Subscription.findOne({
+          userId,
+          status: 'active',
+          endDate: { $gte: new Date() },
+        }).sort({ createdAt: -1 });
+        if (!subscription) {
+          return res.status(403).json({
+            success: false,
+            message: 'Valid subscription not found.',
+          });
+        }
+        subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
       }
 
-      const subscriptionPlan = await SubscriptionPlan.findById(subscription.subscriptionPlanId);
-      const galleryImageLimit = getGalleryImageLimit(subscriptionPlan);
-      const currentCount = Number(currentImageCount || 0);
+      if (currentCount === undefined) {
+        const parsedCount = parseCurrentImageCount(currentImageCount);
+        if (!parsedCount.ok) return res.status(parsedCount.status).json(parsedCount);
+        currentCount = parsedCount.count;
+      }
 
-      if (currentCount + 1 > galleryImageLimit) {
-        return res.status(403).json({
-          success: false,
-          message: `Gallery image upload limit reached. Maximum ${galleryImageLimit} gallery images allowed for your plan.`,
-        });
+      const galleryCheck = evaluateGalleryImageCount({
+        listingType: 'food',
+        currentCount,
+        nextCount: currentCount + 1,
+        limit: getGalleryImageLimit(subscriptionPlan),
+        status: 403,
+      });
+      if (!galleryCheck.ok) {
+        return res.status(galleryCheck.status).json(galleryLimitErrorBody(galleryCheck));
       }
     }
 

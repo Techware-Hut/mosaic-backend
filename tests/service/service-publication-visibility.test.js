@@ -5,10 +5,13 @@ const Module = require('node:module');
 
 const serviceControllerPath = path.resolve(__dirname, '../../controllers/serviceController.js');
 const publicListingPath = path.resolve(__dirname, '../../controllers/publicListing.js');
+const listingQuotaServicePath = path.resolve(__dirname, '../../services/listingQuotaService.js');
 
 const ownerId = '507f1f77bcf86cd799439011';
 const businessId = '507f1f77bcf86cd799439012';
 const serviceId = '507f1f77bcf86cd799439013';
+const subscriptionId = '507f1f77bcf86cd799439016';
+const subscriptionPlanId = '507f1f77bcf86cd799439017';
 
 function mockResponse() {
   return {
@@ -40,7 +43,9 @@ function buildServiceDoc(overrides = {}) {
     title: 'Hair Styling',
     description: 'Salon menu',
     isPublished: false,
+    isActive: true,
     services: [{ name: 'Cut', price: 45, durationMinutes: 60 }],
+    images: [],
     price: 45,
     duration: '',
     save: async function save() { return this; },
@@ -49,15 +54,48 @@ function buildServiceDoc(overrides = {}) {
   };
 }
 
+function buildOffering(index = 1) {
+  return {
+    name: `Service ${index}`,
+    price: 40 + index,
+    durationMinutes: 30 + index,
+  };
+}
+
 function loadServiceController(options = {}) {
   const {
     existingService = null,
-    business = { _id: businessId, owner: ownerId, isActive: true, minorityType: 'none' },
-    subscription = { subscriptionPlanId: 'plan-1', status: 'active' },
-    serviceLimit = 10,
+    business = {
+      _id: businessId,
+      owner: ownerId,
+      subscriptionId,
+      isActive: true,
+      minorityType: 'none',
+    },
+    subscription = {
+      _id: subscriptionId,
+      userId: ownerId,
+      businessId,
+      subscriptionPlanId,
+      status: 'active',
+      endDate: new Date('2099-01-01T00:00:00.000Z'),
+    },
+    subscriptionPlan = {
+      _id: subscriptionPlanId,
+      name: 'Silver Plan',
+      limits: {
+        productListings: 10,
+        serviceListings: 5,
+        foodListings: 5,
+        imageLimit: 5,
+      },
+    },
+    fallbackSubscription = subscription,
+    currentPublishedActiveOfferingUsage = 0,
   } = options;
 
   const savedDocs = [];
+  const aggregateCalls = [];
   let createCalled = false;
 
   const Service = {
@@ -83,6 +121,12 @@ function loadServiceController(options = {}) {
         lean: async () => [],
       }),
     }),
+    aggregate: async (pipeline) => {
+      aggregateCalls.push(pipeline);
+      return currentPublishedActiveOfferingUsage > 0
+        ? [{ _id: null, total: currentPublishedActiveOfferingUsage }]
+        : [];
+    },
     findById: () => ({
       populate: () => ({
         populate: () => ({
@@ -133,31 +177,36 @@ function loadServiceController(options = {}) {
         const exec = async () => resolveFindOne(query);
         const chain = {
           select: () => chain,
+          sort: () => chain,
           exec,
           then: (resolve, reject) => exec().then(resolve, reject),
         };
         return chain;
       };
       ServiceExport.find = Service.find;
+      ServiceExport.aggregate = Service.aggregate;
       ServiceExport.findById = () => {
         const refreshed = existingService || buildServiceDoc();
-        return {
-          populate: () => ({
-            populate: async () => refreshed,
-          }),
+        const chain = {
+          populate: () => chain,
+          exec: async () => refreshed,
+          then: (resolve, reject) => Promise.resolve(refreshed).then(resolve, reject),
         };
+        return chain;
       };
       ServiceExport.findByIdAndUpdate = Service.findByIdAndUpdate;
       return ServiceExport;
     }
     if (request.endsWith('models/Business')) {
       return {
-        findOne: () => ({
-          select: () => ({
+        findOne: () => {
+          const chain = {
+            select: () => chain,
             exec: async () => business,
             then: (resolve, reject) => Promise.resolve(business).then(resolve, reject),
-          }),
-        }),
+          };
+          return chain;
+        },
         find: () => ({
           select: () => ({
             lean: async () => [business],
@@ -168,14 +217,23 @@ function loadServiceController(options = {}) {
     }
     if (request.endsWith('models/Subscription')) {
       return {
+        findById: async (id) => (
+          subscription && String(id) === String(subscription._id)
+            ? subscription
+            : null
+        ),
         findOne: () => ({
-          sort: async () => subscription,
+          sort: async () => fallbackSubscription,
         }),
       };
     }
     if (request.endsWith('models/SubscriptionPlan')) {
       return {
-        findById: async () => ({ limits: { serviceListings: serviceLimit, imageLimit: 5 } }),
+        findById: async (id) => (
+          subscriptionPlan && String(id) === String(subscriptionPlan._id)
+            ? subscriptionPlan
+            : null
+        ),
       };
     }
     if (request.endsWith('models/PendingImage')) {
@@ -190,9 +248,10 @@ function loadServiceController(options = {}) {
   };
 
   delete require.cache[serviceControllerPath];
+  delete require.cache[listingQuotaServicePath];
   const controller = require(serviceControllerPath);
   Module._load = originalLoad;
-  return { controller, savedDocs };
+  return { controller, savedDocs, aggregateCalls };
 }
 
 function loadPublicListingController(options = {}) {
@@ -373,6 +432,92 @@ test('createService persists normalized listing features on first save', async (
   assert.deepEqual(res.body.data.service.features, ['Mobile appointments', 'Consultation included']);
 });
 
+test('createService allows a large draft while draft and inactive offerings consume no quota', async () => {
+  const { controller, savedDocs, aggregateCalls } = loadServiceController({
+    existingService: null,
+    currentPublishedActiveOfferingUsage: 5,
+  });
+  const res = mockResponse();
+
+  await controller.createService(
+    {
+      user: { _id: ownerId },
+      body: {
+        businessId,
+        categoryId: '507f1f77bcf86cd799439014',
+        subcategoryId: '507f1f77bcf86cd799439015',
+        title: 'Large Draft Menu',
+        isPublished: false,
+        services: Array.from({ length: 8 }, (_, index) => buildOffering(index + 1)),
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(savedDocs[0].services.length, 8);
+  assert.equal(aggregateCalls.length, 0);
+});
+
+test('createService allows the fifth published Silver offering', async () => {
+  const { controller, savedDocs, aggregateCalls } = loadServiceController({
+    existingService: null,
+    currentPublishedActiveOfferingUsage: 4,
+  });
+  const res = mockResponse();
+
+  await controller.createService(
+    {
+      user: { _id: ownerId },
+      body: {
+        businessId,
+        categoryId: '507f1f77bcf86cd799439014',
+        subcategoryId: '507f1f77bcf86cd799439015',
+        title: 'Published Menu',
+        isPublished: true,
+        services: [buildOffering(1)],
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(savedDocs.length, 1);
+  assert.equal(aggregateCalls.length, 1);
+});
+
+test('createService blocks a sixth published Silver offering with LISTING_LIMIT_REACHED', async () => {
+  const { controller, savedDocs, aggregateCalls } = loadServiceController({
+    existingService: null,
+    currentPublishedActiveOfferingUsage: 5,
+  });
+  const res = mockResponse();
+
+  await controller.createService(
+    {
+      user: { _id: ownerId },
+      body: {
+        businessId,
+        categoryId: '507f1f77bcf86cd799439014',
+        subcategoryId: '507f1f77bcf86cd799439015',
+        title: 'Over Limit Menu',
+        isPublished: true,
+        services: [buildOffering(1)],
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'LISTING_LIMIT_REACHED');
+  assert.equal(res.body.tier, 'Silver');
+  assert.equal(res.body.limit, 5);
+  assert.equal(res.body.current, 5);
+  assert.equal(res.body.attemptedIncrease, 1);
+  assert.equal(savedDocs.length, 0);
+  assert.equal(aggregateCalls.length, 1);
+});
+
 test('public getServiceById excludes unpublished services', async () => {
   const { controller } = loadPublicListingController({
     service: buildServiceDoc({ isPublished: false }),
@@ -420,6 +565,149 @@ test('updateService publish response exposes publication block without duplicate
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.data.publication.isPublished, true);
+});
+
+test('updateService checks every child when publishing a draft service', async () => {
+  const draft = buildServiceDoc({
+    isPublished: false,
+    services: [buildOffering(1), buildOffering(2)],
+  });
+  const { controller, aggregateCalls } = loadServiceController({
+    existingService: draft,
+    currentPublishedActiveOfferingUsage: 4,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: { isPublished: true },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'LISTING_LIMIT_REACHED');
+  assert.equal(res.body.current, 4);
+  assert.equal(res.body.attemptedIncrease, 2);
+  assert.equal(draft.isPublished, false);
+  assert.equal(aggregateCalls.length, 1);
+});
+
+test('updateService blocks a published child increase after downgrade', async () => {
+  const published = buildServiceDoc({
+    isPublished: true,
+    services: [buildOffering(1), buildOffering(2)],
+  });
+  const { controller, aggregateCalls } = loadServiceController({
+    existingService: published,
+    currentPublishedActiveOfferingUsage: 6,
+  });
+  const res = mockResponse();
+
+  await controller.updateService(
+    {
+      user: { _id: ownerId },
+      params: { id: serviceId },
+      body: {
+        services: [buildOffering(1), buildOffering(2), buildOffering(3)],
+      },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'LISTING_LIMIT_REACHED');
+  assert.equal(res.body.limit, 5);
+  assert.equal(res.body.current, 6);
+  assert.equal(res.body.attemptedIncrease, 1);
+  assert.equal(published.services.length, 2);
+  assert.equal(aggregateCalls.length, 1);
+});
+
+test('updateService allows unchanged and reduced edits above a downgraded limit', async (t) => {
+  await t.test('metadata-only edit remains allowed', async () => {
+    const published = buildServiceDoc({
+      isPublished: true,
+      services: [buildOffering(1), buildOffering(2), buildOffering(3)],
+    });
+    const { controller, aggregateCalls } = loadServiceController({
+      existingService: published,
+      currentPublishedActiveOfferingUsage: 7,
+    });
+    const res = mockResponse();
+
+    await controller.updateService(
+      {
+        user: { _id: ownerId },
+        params: { id: serviceId },
+        body: { title: 'Updated without increasing quota' },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(published.title, 'Updated without increasing quota');
+    assert.equal(aggregateCalls.length, 0);
+  });
+
+  await t.test('reducing child offerings remains allowed', async () => {
+    const published = buildServiceDoc({
+      isPublished: true,
+      services: [buildOffering(1), buildOffering(2), buildOffering(3)],
+    });
+    const { controller, aggregateCalls } = loadServiceController({
+      existingService: published,
+      currentPublishedActiveOfferingUsage: 7,
+    });
+    const res = mockResponse();
+
+    await controller.updateService(
+      {
+        user: { _id: ownerId },
+        params: { id: serviceId },
+        body: { services: [buildOffering(1), buildOffering(2)] },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(published.services.length, 2);
+    assert.equal(aggregateCalls.length, 0);
+  });
+});
+
+test('addChildServices does not consume quota for draft or inactive parents', async (t) => {
+  const parentStates = [
+    { label: 'draft', overrides: { isPublished: false, isActive: true } },
+    { label: 'inactive', overrides: { isPublished: true, isActive: false } },
+  ];
+
+  for (const state of parentStates) {
+    await t.test(state.label, async () => {
+      const parent = buildServiceDoc(state.overrides);
+      const { controller, aggregateCalls } = loadServiceController({
+        existingService: parent,
+        currentPublishedActiveOfferingUsage: 5,
+      });
+      const res = mockResponse();
+
+      await controller.addChildServices(
+        {
+          user: { _id: ownerId },
+          body: {
+            parentServiceId: serviceId,
+            childServices: [buildOffering(2)],
+          },
+        },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(aggregateCalls.length, 0);
+    });
+  }
 });
 
 test('updateService returns clear validation when publishing without child services', async () => {
