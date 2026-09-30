@@ -46,6 +46,10 @@ function loadRetrieveIntent({
 } = {}) {
   const orderUpdates = [];
   let inventoryCalls = 0;
+  for (const order of orders) {
+    order.paymentId ||= paymentId;
+    order.statusHistory ||= [{ status: order.status || 'created' }];
+  }
 
   const stripeMock = {
     paymentIntents: {
@@ -87,9 +91,41 @@ function loadRetrieveIntent({
             populate: async () => orders,
           }),
         }),
-        findByIdAndUpdate: async (id, update) => {
-          orderUpdates.push({ id, update });
-          return { _id: id, ...update };
+        findById: async (id) =>
+          orders.find((order) => String(order._id) === String(id)) || null,
+        findOneAndUpdate: async (filter, update) => {
+          orderUpdates.push({ filter, update });
+          const order = orders.find(
+            (candidate) =>
+              String(candidate._id) === String(filter._id) &&
+              candidate.paymentId === filter.paymentId &&
+              candidate.paymentStatus !== 'refunded' &&
+              !(
+                candidate.paymentStatus === 'paid' &&
+                ['rejected', 'cancelled', 'returned', 'refunded'].includes(
+                  candidate.status
+                )
+              )
+          );
+          if (!order) return null;
+
+          const previousPaymentStatus = order.paymentStatus;
+          const previousStatus = order.status;
+          order.paymentStatus = 'paid';
+          if (
+            previousStatus === 'created' ||
+            (previousPaymentStatus === 'failed' && previousStatus === 'cancelled')
+          ) {
+            order.status = 'ordered';
+            order.statusHistory.push({ status: 'ordered' });
+          }
+          return {
+            ...order,
+            items: (order.items || []).map((item) => ({
+              ...item,
+              productId: item.productId?._id || item.productId,
+            })),
+          };
         },
       };
     }
@@ -138,7 +174,11 @@ test('retrieveIntent returns sanitized paymentIntent without Stripe internals', 
     totalAmount: 30,
     currency: 'USD',
     items: [{
-      productId: { _id: productId, title: 'Test Product' },
+      productId: {
+        _id: productId,
+        title: 'Test Product',
+        coverImage: 'https://example.test/product.jpg',
+      },
       quantity: 1,
       price: 25,
       size: 'M',
@@ -162,6 +202,10 @@ test('retrieveIntent returns sanitized paymentIntent without Stripe internals', 
   assert.ok(Array.isArray(res.body.orders));
   assert.equal(res.body.orders[0].status, 'ordered');
   assert.equal(res.body.orders[0].items[0].title, 'Test Product');
+  assert.equal(
+    res.body.orders[0].items[0].coverImage,
+    'https://example.test/product.jpg'
+  );
   assert.equal(res.body.orders[0].userId, undefined);
 });
 
@@ -283,14 +327,14 @@ test('retrieveIntent reconciles pending order and decrements inventory on succee
   assert.equal(orders[0].paymentStatus, 'paid');
   assert.equal(orders[0].status, 'ordered');
   assert.equal(getOrderUpdates().length, 1);
-  assert.equal(getOrderUpdates()[0].update.paymentStatus, 'paid');
-  assert.equal(getOrderUpdates()[0].update.status, 'ordered');
+  assert.equal(getOrderUpdates()[0].filter.paymentId, paymentId);
+  assert.ok(Array.isArray(getOrderUpdates()[0].update));
   assert.equal(getInventoryCalls(), 1);
   assert.equal(res.body.orders[0].paymentStatus, 'paid');
   assert.equal(res.body.orders[0].status, 'ordered');
 });
 
-test('retrieveIntent skips order status rewrite when already paid but still attempts idempotent decrement', async () => {
+test('retrieveIntent atomically revalidates paid state without regressing status', async () => {
   process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
   const orders = [{
     _id: orderId,
@@ -311,7 +355,8 @@ test('retrieveIntent skips order status rewrite when already paid but still atte
   await retrieveIntent({ params: { id: paymentId }, user: { id: userId } }, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(getOrderUpdates().length, 0);
+  assert.equal(getOrderUpdates().length, 1);
+  assert.equal(orders[0].status, 'ordered');
   assert.equal(getInventoryCalls(), 1);
 });
 

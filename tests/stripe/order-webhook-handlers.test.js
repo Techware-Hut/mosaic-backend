@@ -39,8 +39,11 @@ function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
   const emailCalls = [];
   const defaultOrder = orderDoc || {
     _id: ORDER_ID,
+    paymentId: PAYMENT_ID,
     paymentStatus: 'pending',
     status: 'created',
+    statusHistory: [{ status: 'created' }],
+    items: [],
   };
 
   const stripeMock = {
@@ -65,17 +68,13 @@ function loadOrderStatusWebhook({ orderDoc, findByIdAndUpdateImpl } = {}) {
     }
     if (request.endsWith('models/Order')) {
       return {
-        findByIdAndUpdate: async (id, update, opts) => {
-          updates.push({ id, update, opts });
+        findOneAndUpdate: async (filter, update, opts) => {
+          updates.push({ filter, update, opts });
           if (findByIdAndUpdateImpl) {
-            return findByIdAndUpdateImpl(id, update, opts);
+            return findByIdAndUpdateImpl(filter, update, opts);
           }
-          return {
-            ...defaultOrder,
-            ...update,
-            _id: id,
-            items: defaultOrder.items || [],
-          };
+          if (!matchesOrderFilter(defaultOrder, filter)) return null;
+          return applyOrderUpdate(defaultOrder, update);
         },
       };
     }
@@ -214,14 +213,22 @@ function buildOrderForPostPayment(overrides = {}) {
     },
     markModified() {},
     save: async function save() {
+      if (overrides.saveError) throw overrides.saveError;
       this.saveCount = (this.saveCount || 0) + 1;
       return this;
     },
   };
 }
 
-function loadPostPaymentWebhook({ orders = [], charge = {} } = {}) {
+function loadPostPaymentWebhook({
+  orders = [],
+  charge = {},
+  refundBeforeAtomicReconcile = false,
+} = {}) {
   let emailSendCount = 0;
+  let helperCallCount = 0;
+  let inventoryCallCount = 0;
+  let refundInjected = false;
   const defaultCharge = {
     transfer: 'tr_test_001',
     application_fee: 'fee_test_001',
@@ -235,6 +242,7 @@ function loadPostPaymentWebhook({ orders = [], charge = {} } = {}) {
         data: {
           object: {
             id: PAYMENT_ID,
+            status: 'succeeded',
             latest_charge: 'ch_test_001',
             currency: 'usd',
           },
@@ -256,6 +264,15 @@ function loadPostPaymentWebhook({ orders = [], charge = {} } = {}) {
         find: () => ({
           populate: async () => orders,
         }),
+        findOneAndUpdate: async (filter, update) => {
+          if (refundBeforeAtomicReconcile && !refundInjected) {
+            orders[0].paymentStatus = 'refunded';
+            orders[0].status = 'refunded';
+            refundInjected = true;
+          }
+          const order = orders.find((candidate) => matchesOrderFilter(candidate, filter));
+          return order ? applyOrderUpdate(order, update) : null;
+        },
       };
     }
     if (request.endsWith('utils/OrderMail')) {
@@ -267,20 +284,26 @@ function loadPostPaymentWebhook({ orders = [], charge = {} } = {}) {
     }
     if (request.endsWith('utils/sendOrderPaidConfirmation')) {
       return {
-        sendOrderPaidConfirmationIfNeeded: async () => ({
-          sent: false,
-          skipped: true,
-          reason: 'mocked_unused_on_direct_post_payment_path',
-        }),
+        sendOrderPaidConfirmationIfNeeded: async () => {
+          helperCallCount += 1;
+          return {
+            sent: false,
+            skipped: true,
+            reason: 'mocked_shared_paid_confirmation_path',
+          };
+        },
       };
     }
     if (request.endsWith('lib/inventory/orderInventory')) {
       return {
-        decrementInventoryForPaidOrder: async () => ({
-          decremented: true,
-          reason: 'mocked',
-          lines: [],
-        }),
+        decrementInventoryForPaidOrder: async () => {
+          inventoryCallCount += 1;
+          return {
+            decremented: true,
+            reason: 'mocked',
+            lines: [],
+          };
+        },
       };
     }
     return originalLoad(request, parent, isMain);
@@ -293,6 +316,8 @@ function loadPostPaymentWebhook({ orders = [], charge = {} } = {}) {
   return {
     stripePaymentWebhook,
     getEmailSendCount: () => emailSendCount,
+    getHelperCallCount: () => helperCallCount,
+    getInventoryCallCount: () => inventoryCallCount,
   };
 }
 
@@ -310,11 +335,33 @@ function matchesOrderFilter(order, filter) {
     if (expected && typeof expected === 'object' && '$in' in expected) {
       return expected.$in.includes(actual);
     }
+    if (expected && typeof expected === 'object' && '$nin' in expected) {
+      return !expected.$nin.includes(actual);
+    }
     return actual === expected;
   });
 }
 
 function applyOrderUpdate(order, update) {
+  if (Array.isArray(update)) {
+    const previousPaymentStatus = order.paymentStatus;
+    const previousStatus = order.status;
+    order.paymentStatus = 'paid';
+    if (
+      previousStatus === 'created' ||
+      (previousPaymentStatus === 'failed' && previousStatus === 'cancelled')
+    ) {
+      order.status = 'ordered';
+      order.statusHistory ||= [];
+      order.statusHistory.push({ status: 'ordered' });
+    }
+    const itemEvidence = update[0]?.$set?.items?.$map?.in?.$mergeObjects?.[1];
+    if (itemEvidence) {
+      for (const item of order.items || []) Object.assign(item, itemEvidence);
+    }
+    return order;
+  }
+
   const direct = Object.fromEntries(
     Object.entries(update).filter(([key]) => !key.startsWith('$'))
   );
@@ -594,22 +641,26 @@ test('order status webhook marks order paid and ordered on payment_intent.succee
 
   assert.equal(res.statusCode, 200);
   assert.equal(getUpdates().length, 1);
-  assert.equal(getUpdates()[0].update.paymentStatus, 'paid');
-  assert.equal(getUpdates()[0].update.status, 'ordered');
+  assert.equal(getUpdates()[0].filter._id, ORDER_ID);
+  assert.equal(getUpdates()[0].filter.paymentId, PAYMENT_ID);
+  assert.ok(Array.isArray(getUpdates()[0].update));
   assert.equal(getEmailCalls().length, 1);
-  assert.equal(String(getEmailCalls()[0][0]._id || getEmailCalls()[0][0]), ORDER_ID);
+  assert.equal(getEmailCalls()[0][0].paymentStatus, 'paid');
+  assert.equal(getEmailCalls()[0][0].status, 'ordered');
   assert.equal(getEmailCalls()[0][1]?.currency, 'usd');
 });
 
 test('order status webhook duplicate succeed is idempotent', async () => {
   process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
   const { handleStripeWebhook, getUpdates } = loadOrderStatusWebhook({
-    findByIdAndUpdateImpl: async (id, update) => ({
-      _id: id,
+    orderDoc: {
+      _id: ORDER_ID,
+      paymentId: PAYMENT_ID,
       paymentStatus: 'paid',
       status: 'ordered',
-      ...update,
-    }),
+      statusHistory: [{ status: 'created' }, { status: 'ordered' }],
+      items: [],
+    },
   });
   const req = {
     headers: { 'stripe-signature': 'sig_test' },
@@ -624,8 +675,92 @@ test('order status webhook duplicate succeed is idempotent', async () => {
   assert.equal(res1.statusCode, 200);
   assert.equal(res2.statusCode, 200);
   assert.equal(getUpdates().length, 2);
-  assert.equal(getUpdates()[0].update.paymentStatus, 'paid');
-  assert.equal(getUpdates()[1].update.paymentStatus, 'paid');
+  assert.ok(Array.isArray(getUpdates()[0].update));
+  assert.ok(Array.isArray(getUpdates()[1].update));
+});
+
+test('order status webhook requires authoritative PaymentIntent correlation', async () => {
+  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
+  const { handleStripeWebhook, getEmailCalls } = loadOrderStatusWebhook({
+    orderDoc: {
+      _id: ORDER_ID,
+      paymentId: 'pi_different_authoritative_payment',
+      paymentStatus: 'pending',
+      status: 'created',
+      statusHistory: [{ status: 'created' }],
+      items: [],
+    },
+  });
+  const res = mockResponse();
+
+  await handleStripeWebhook(
+    {
+      headers: { 'stripe-signature': 'sig_test' },
+      body: Buffer.from('{}'),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(getEmailCalls().length, 0);
+});
+
+test('order status webhook does not reopen or email a refunded order', async () => {
+  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
+  const order = {
+    _id: ORDER_ID,
+    paymentId: PAYMENT_ID,
+    paymentStatus: 'refunded',
+    status: 'refunded',
+    statusHistory: [{ status: 'refunded' }],
+    items: [],
+  };
+  const { handleStripeWebhook, getEmailCalls } = loadOrderStatusWebhook({
+    orderDoc: order,
+  });
+  const res = mockResponse();
+
+  await handleStripeWebhook(
+    {
+      headers: { 'stripe-signature': 'sig_test' },
+      body: Buffer.from('{}'),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(order.paymentStatus, 'refunded');
+  assert.equal(order.status, 'refunded');
+  assert.equal(getEmailCalls().length, 0);
+});
+
+test('order status webhook preserves an advanced paid fulfillment status', async () => {
+  process.env.STRIPE_ORDER_WEBHOOK_SECRET = 'whsec_order_test';
+  const order = {
+    _id: ORDER_ID,
+    paymentId: PAYMENT_ID,
+    paymentStatus: 'paid',
+    status: 'shipped',
+    statusHistory: [{ status: 'created' }, { status: 'ordered' }, { status: 'shipped' }],
+    items: [],
+  };
+  const { handleStripeWebhook, getEmailCalls } = loadOrderStatusWebhook({
+    orderDoc: order,
+  });
+  const res = mockResponse();
+
+  await handleStripeWebhook(
+    {
+      headers: { 'stripe-signature': 'sig_test' },
+      body: Buffer.from('{}'),
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(order.status, 'shipped');
+  assert.equal(getEmailCalls().length, 1);
+  assert.equal(getEmailCalls()[0][0].status, 'shipped');
 });
 
 test('order status webhook cancels a retryable failed intent and releases inventory', async () => {
@@ -709,6 +844,64 @@ test('post-payment webhook duplicate succeed keeps paid status without corruptio
   assert.equal(order.items[0].chargeId, 'ch_test_001');
   assert.equal(order.items[0].transferId, 'tr_test_001');
   assert.equal(order.items[0].applicationFeeId, 'fee_test_001');
+});
+
+test('concurrent post-payment successes avoid stale versioned document saves', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const versionError = Object.assign(
+    new Error('No matching document found for id after a concurrent save'),
+    { name: 'VersionError' }
+  );
+  const order = buildOrderForPostPayment({ saveError: versionError });
+  const { stripePaymentWebhook } = loadPostPaymentWebhook({ orders: [order] });
+  const request = {
+    headers: { 'stripe-signature': 'sig_test' },
+    body: Buffer.from('{}'),
+  };
+
+  const responses = await Promise.all(
+    [mockResponse(), mockResponse()].map(async (response) => {
+      await stripePaymentWebhook(request, response);
+      return response;
+    })
+  );
+
+  assert.ok(responses.every((response) => response.body?.received === true));
+  assert.equal(order.saveCount, undefined);
+  assert.equal(order.paymentStatus, 'paid');
+  assert.equal(order.status, 'ordered');
+  assert.equal(
+    order.statusHistory.filter((entry) => entry.status === 'ordered').length,
+    1
+  );
+  assert.equal(order.items[0].chargeId, 'ch_test_001');
+  assert.equal(order.items[0].transferId, 'tr_test_001');
+  assert.equal(order.items[0].applicationFeeId, 'fee_test_001');
+});
+
+test('post-payment success loses atomic reconciliation to a concurrent refund', async () => {
+  process.env.STRIPE_ORDER_POST_PAYMENT_WEBHOOK_SECRET = 'whsec_post_payment_test';
+  const order = buildOrderForPostPayment();
+  const harness = loadPostPaymentWebhook({
+    orders: [order],
+    refundBeforeAtomicReconcile: true,
+  });
+  const res = mockResponse();
+
+  await harness.stripePaymentWebhook(
+    {
+      headers: { 'stripe-signature': 'sig_test' },
+      body: Buffer.from('{}'),
+    },
+    res
+  );
+
+  assert.ok(res.body.received);
+  assert.equal(order.paymentStatus, 'refunded');
+  assert.equal(order.status, 'refunded');
+  assert.equal(order.saveCount, undefined);
+  assert.equal(harness.getInventoryCallCount(), 0);
+  assert.equal(harness.getHelperCallCount(), 0);
 });
 
 test('order status webhook ignores stale payment_failed after paid finalization', async () => {
