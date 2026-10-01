@@ -4,7 +4,13 @@ set -euo pipefail
 HTTP_TIMEOUT_SECONDS="${RELEASE_HTTP_TIMEOUT_SECONDS:-15}"
 CURL_BIN="${CURL_BIN:-curl}"
 EXPECTED_STATE="active"
-RELEASE_MODE="release"
+INHERITED_RELEASE_MODE="${RELEASE_MODE-}"
+INHERITED_RELEASE_MODE_SET=false
+if [ "${RELEASE_MODE+x}" = x ]; then
+  INHERITED_RELEASE_MODE_SET=true
+fi
+EXPLICIT_RELEASE_MODE=""
+RELEASE_MODE_FLAG_SET=false
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -16,7 +22,8 @@ while [ "$#" -gt 0 ]; do
       if [ "$1" = "--state" ]; then
         EXPECTED_STATE="$2"
       else
-        RELEASE_MODE="$2"
+        EXPLICIT_RELEASE_MODE="$2"
+        RELEASE_MODE_FLAG_SET=true
       fi
       shift 2
       ;;
@@ -30,11 +37,28 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ "$RELEASE_MODE_FLAG_SET" = true ] \
+  && [ "$INHERITED_RELEASE_MODE_SET" = true ] \
+  && [ "$EXPLICIT_RELEASE_MODE" != "$INHERITED_RELEASE_MODE" ]; then
+  echo "--release-mode disagrees with inherited RELEASE_MODE" >&2
+  exit 2
+fi
+if [ "$RELEASE_MODE_FLAG_SET" = true ]; then
+  RELEASE_MODE="$EXPLICIT_RELEASE_MODE"
+elif [ "$INHERITED_RELEASE_MODE_SET" = true ]; then
+  RELEASE_MODE="$INHERITED_RELEASE_MODE"
+else
+  RELEASE_MODE="release"
+fi
+
 if [ "$EXPECTED_STATE" != "active" ] && [ "$EXPECTED_STATE" != "inactive" ]; then
   echo "--state must be active or inactive" >&2
   exit 2
 fi
-if [ "$RELEASE_MODE" != "release" ] && [ "$RELEASE_MODE" != "focused-baseline" ]; then
+# An inherited rollback uses the existing canonical gate check. Rollback was
+# never an explicit verifier mode, so keep that interface unchanged.
+if [ "$RELEASE_MODE" != "release" ] && [ "$RELEASE_MODE" != "focused-baseline" ] \
+  && { [ "$RELEASE_MODE" != "rollback" ] || [ "$RELEASE_MODE_FLAG_SET" = true ]; }; then
   echo "--release-mode must be release or focused-baseline" >&2
   exit 2
 fi

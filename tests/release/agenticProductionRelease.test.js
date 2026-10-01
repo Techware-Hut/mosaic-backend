@@ -47,10 +47,31 @@ const {
   hasCanonicalPostRoute,
   verifyStatuses: verifyTargetCheckoutStatuses,
 } = require('../../scripts/release/probe-target-checkout-surface');
+const {
+  cliConfiguration: checkoutGateCliConfiguration,
+} = require('../../scripts/release/manage-checkout-gate');
 
 const shaA = 'a'.repeat(40);
 const shaB = 'b'.repeat(40);
 const repository = 'Techware-Hut/mosaic-backend';
+
+const gateArnPrefix = 'arn:aws:elasticloadbalancing:us-east-1:123456789012:';
+const pinnedGateConfiguration = {
+  region: 'us-east-1',
+  loadBalancerArn: `${gateArnPrefix}loadbalancer/app/prod/abc123`,
+  httpRuleArn: `${gateArnPrefix}listener-rule/app/prod/abc123/http80/rule1`,
+  httpsRuleArn: `${gateArnPrefix}listener-rule/app/prod/abc123/https443/rule2`,
+  httpPriority: '1',
+  httpsPriority: '1',
+};
+const gateVerifyArgs = ['verify', '--output', 'gate-evidence.json'];
+const gateEnableArgs = [
+  'enable', '--confirm', 'ENABLE_CHECKOUT_GATE', '--output', 'gate-evidence.json',
+];
+
+function gateCli(args, env = {}) {
+  return checkoutGateCliConfiguration(args, env, pinnedGateConfiguration);
+}
 
 function resolver(overrides = {}) {
   return resolveProductionRelease({
@@ -984,6 +1005,59 @@ test('focused workflow requires exact target CI and source proof but never enter
   assert.match(workflow, /Verify protected focused source and exact two-file provenance[\s\S]*verify-focused-release-source\.js/);
   assert.match(workflow, /production-approval-and-release:[\s\S]*if: \$\{\{[^\n]*release_mode != 'focused-baseline'/);
   assert.match(workflow, /Reassert safe gate after any post-enable failure/);
+});
+
+test('checkout-gate CLI inherits focused mode and rejects live mutation without a flag', () => {
+  assert.equal(gateCli(gateVerifyArgs, { RELEASE_MODE: 'focused-baseline' }).releaseMode, 'focused-baseline');
+  assert.throws(
+    () => gateCli(gateEnableArgs, { RELEASE_MODE: 'focused-baseline' }),
+    /Focused live ALB mutation is disabled/
+  );
+});
+
+test('checkout-gate CLI accepts matching focused flag and environment for verification only', () => {
+  const focusedVerifyArgs = [...gateVerifyArgs, '--release-mode', 'focused-baseline'];
+  const focusedEnableArgs = [...gateEnableArgs, '--release-mode', 'focused-baseline'];
+  assert.equal(gateCli(focusedVerifyArgs, { RELEASE_MODE: 'focused-baseline' }).releaseMode, 'focused-baseline');
+  assert.throws(
+    () => gateCli(focusedEnableArgs, { RELEASE_MODE: 'focused-baseline' }),
+    /Focused live ALB mutation is disabled/
+  );
+});
+
+test('checkout-gate CLI rejects explicit release against inherited focused mode', () => {
+  assert.throws(
+    () => gateCli([...gateVerifyArgs, '--release-mode', 'release'], { RELEASE_MODE: 'focused-baseline' }),
+    /--release-mode must match inherited RELEASE_MODE/
+  );
+});
+
+test('checkout-gate CLI rejects explicit focused mode against inherited release', () => {
+  assert.throws(
+    () => gateCli([...gateVerifyArgs, '--release-mode', 'focused-baseline'], { RELEASE_MODE: 'release' }),
+    /--release-mode must match inherited RELEASE_MODE/
+  );
+});
+
+test('checkout-gate CLI keeps normal release and its documented no-mode default', () => {
+  assert.equal(gateCli(gateEnableArgs, { RELEASE_MODE: 'release' }).releaseMode, 'release');
+  assert.equal(gateCli(gateEnableArgs).releaseMode, 'release');
+  assert.throws(
+    () => gateCli(gateVerifyArgs, { RELEASE_MODE: '' }),
+    /Unsupported checkout gate release mode/
+  );
+  assert.throws(
+    () => gateCli([...gateVerifyArgs, '--release-mode', '']),
+    /Unsupported checkout gate release mode/
+  );
+});
+
+test('checkout-gate CLI keeps inherited rollback on the canonical gate path', () => {
+  assert.equal(gateCli(gateEnableArgs, { RELEASE_MODE: 'rollback' }).releaseMode, 'release');
+  assert.throws(
+    () => gateCli([...gateVerifyArgs, '--release-mode', 'rollback'], { RELEASE_MODE: 'rollback' }),
+    /Unsupported checkout gate release mode/
+  );
 });
 
 test('trusted controller supports historical rollback targets and fail-safe gate recovery', () => {

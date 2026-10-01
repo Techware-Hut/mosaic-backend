@@ -459,6 +459,20 @@ function cliConfiguration(argv, env = process.env, fixtureConfiguration = {}) {
   for (const key of Object.keys(options)) {
     if (!allowed.has(key)) throw new Error(`Unsupported option: ${key}`);
   }
+  const hasExplicitReleaseMode = Object.prototype.hasOwnProperty.call(options, '--release-mode');
+  const hasInheritedReleaseMode = Object.prototype.hasOwnProperty.call(env, 'RELEASE_MODE');
+  const explicitReleaseMode = hasExplicitReleaseMode
+    ? optionalOption(options, '--release-mode', '') : undefined;
+  const inheritedReleaseMode = env.RELEASE_MODE;
+  if (hasExplicitReleaseMode && hasInheritedReleaseMode && explicitReleaseMode !== inheritedReleaseMode) {
+    throw new Error('--release-mode must match inherited RELEASE_MODE');
+  }
+  // Rollback uses the existing canonical checkout gate, as it did before the
+  // environment mode was bound here. An explicit rollback gate mode remains unsupported.
+  const requestedReleaseMode = hasExplicitReleaseMode ? explicitReleaseMode
+    : hasInheritedReleaseMode ? inheritedReleaseMode : 'release';
+  const releaseMode = requestedReleaseMode === 'rollback' && !hasExplicitReleaseMode
+    ? 'release' : requestedReleaseMode;
   const from = (fixtureName, envName, fallback) =>
     fixtureConfiguration[fixtureName] || env[envName] || fallback;
   const disabledPath = exactPath(
@@ -472,7 +486,7 @@ function cliConfiguration(argv, env = process.env, fixtureConfiguration = {}) {
     action,
     output: requireOption(options, '--output'),
     fixture: options['--fixture'],
-    releaseMode: optionalOption(options, '--release-mode', 'release'),
+    releaseMode,
     expectedState: optionalOption(
       options,
       '--expected-state',

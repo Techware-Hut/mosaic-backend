@@ -215,7 +215,7 @@ function bashQuote(value) {
   return "'" + String(value).replaceAll("'", "'\"'\"'") + "'";
 }
 
-function runGateVerifierFixture({ releaseMode, state, orderStatus, legacyStatus, webhookStatus } = {}) {
+function runGateVerifierFixture({ releaseMode, inheritedReleaseMode, state, orderStatus, legacyStatus, webhookStatus } = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-gate-verifier-'));
   const mockCurl = path.join(tempDir, 'mock-curl.sh');
   const verifier = path.resolve(__dirname, '../../scripts/release/verify-checkout-gate.sh');
@@ -239,16 +239,20 @@ function runGateVerifierFixture({ releaseMode, state, orderStatus, legacyStatus,
       MOCK_LEGACY_STATUS: legacyStatus || 503,
       MOCK_WEBHOOK_STATUS: webhookStatus || 400,
     };
+    if (inheritedReleaseMode !== undefined) values.RELEASE_MODE = inheritedReleaseMode;
     const assignments = Object.entries(values)
       .map(([name, value]) => name + '=' + bashQuote(value));
     const args = ['bash', bashQuote(bashPath(verifier))];
-    if (releaseMode) args.push('--release-mode', bashQuote(releaseMode));
+    if (releaseMode !== undefined) args.push('--release-mode', bashQuote(releaseMode));
     if (state) args.push('--state', bashQuote(state));
     args.push(bashQuote('http://release-control.test'));
     args.push(bashQuote('https://release-control.test'));
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.RELEASE_MODE;
     const result = spawnSync('bash', ['-lc', assignments.concat(args).join(' ')], {
       encoding: 'utf8',
       timeout: 15000,
+      env: cleanEnv,
     });
     if (result.error) throw result.error;
     if (result.status !== 0) {
@@ -598,6 +602,53 @@ test('focused-baseline public verifier checks both routes on HTTP and HTTPS', ()
     () => runGateVerifierFixture({ releaseMode: 'unsupported' }),
     (error) => error.status === 2 && /--release-mode must be release or focused-baseline/
       .test(String(error.stderr))
+  );
+});
+
+test('gate verifier binds inherited release mode and rejects flag/environment disagreement', () => {
+  const focusedFromEnvironment = runGateVerifierFixture({ inheritedReleaseMode: 'focused-baseline' });
+  assert.equal(focusedFromEnvironment.split('POST /api/payments/create-payment-intent: HTTP 503').length - 1, 2);
+
+  const matchingFocused = runGateVerifierFixture({
+    releaseMode: 'focused-baseline',
+    inheritedReleaseMode: 'focused-baseline',
+  });
+  assert.equal(matchingFocused.split('POST /api/payments/create-payment-intent: HTTP 503').length - 1, 2);
+
+  for (const [releaseMode, inheritedReleaseMode] of [
+    ['release', 'focused-baseline'],
+    ['focused-baseline', 'release'],
+  ]) {
+    assert.throws(
+      () => runGateVerifierFixture({ releaseMode, inheritedReleaseMode }),
+      (error) => error.status === 2
+        && /--release-mode disagrees with inherited RELEASE_MODE/.test(String(error.stderr)),
+    );
+  }
+
+  for (const options of [
+    { inheritedReleaseMode: 'release' },
+    {},
+    { inheritedReleaseMode: 'rollback' },
+  ]) {
+    const canonicalOnly = runGateVerifierFixture(options);
+    assert.equal(canonicalOnly.split('POST /api/orders/initiate: HTTP 503').length - 1, 2);
+    assert.doesNotMatch(canonicalOnly, /create-payment-intent/);
+  }
+  assert.throws(
+    () => runGateVerifierFixture({ releaseMode: 'rollback', inheritedReleaseMode: 'rollback' }),
+    (error) => error.status === 2
+      && /--release-mode must be release or focused-baseline/.test(String(error.stderr)),
+  );
+  assert.throws(
+    () => runGateVerifierFixture({ inheritedReleaseMode: '' }),
+    (error) => error.status === 2
+      && /--release-mode must be release or focused-baseline/.test(String(error.stderr)),
+  );
+  assert.throws(
+    () => runGateVerifierFixture({ releaseMode: '', inheritedReleaseMode: 'focused-baseline' }),
+    (error) => error.status === 2
+      && /--release-mode disagrees with inherited RELEASE_MODE/.test(String(error.stderr)),
   );
 });
 
