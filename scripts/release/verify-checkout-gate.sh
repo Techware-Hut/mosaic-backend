@@ -12,6 +12,18 @@ fi
 EXPLICIT_RELEASE_MODE=""
 RELEASE_MODE_FLAG_SET=false
 
+# Reject duplicates across the entire invocation before any URL can be probed.
+RELEASE_MODE_FLAG_SEEN=false
+for argument in "$@"; do
+  if [ "$argument" = "--release-mode" ]; then
+    if [ "$RELEASE_MODE_FLAG_SEEN" = true ]; then
+      echo "Duplicate option: --release-mode" >&2
+      exit 2
+    fi
+    RELEASE_MODE_FLAG_SEEN=true
+  fi
+done
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --state|--release-mode)

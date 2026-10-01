@@ -215,12 +215,14 @@ function bashQuote(value) {
   return "'" + String(value).replaceAll("'", "'\"'\"'") + "'";
 }
 
-function runGateVerifierFixture({ releaseMode, inheritedReleaseMode, state, orderStatus, legacyStatus, webhookStatus } = {}) {
+function runGateVerifierFixture({ releaseMode, releaseModeFlags, trailingReleaseMode, inheritedReleaseMode, state, orderStatus, legacyStatus, webhookStatus } = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-gate-verifier-'));
   const mockCurl = path.join(tempDir, 'mock-curl.sh');
+  const mockCurlLog = path.join(tempDir, 'mock-curl.log');
   const verifier = path.resolve(__dirname, '../../scripts/release/verify-checkout-gate.sh');
   fs.writeFileSync(mockCurl, [
     '#!/usr/bin/env bash',
+    'printf "%s\\n" "$*" >> "$MOCK_CURL_LOG"',
     'url="${!#}"',
     'case "$url" in',
     '  */api/orders/initiate|*/api/orders/initiate/|*/API/ORDERS/INITIATE|*/Api/Orders/Initiate/) printf "%s" "${MOCK_ORDER_STATUS:-503}" ;;',
@@ -235,6 +237,7 @@ function runGateVerifierFixture({ releaseMode, inheritedReleaseMode, state, orde
   try {
     const values = {
       CURL_BIN: bashPath(mockCurl),
+      MOCK_CURL_LOG: bashPath(mockCurlLog),
       MOCK_ORDER_STATUS: orderStatus || 503,
       MOCK_LEGACY_STATUS: legacyStatus || 503,
       MOCK_WEBHOOK_STATUS: webhookStatus || 400,
@@ -243,9 +246,11 @@ function runGateVerifierFixture({ releaseMode, inheritedReleaseMode, state, orde
     const assignments = Object.entries(values)
       .map(([name, value]) => name + '=' + bashQuote(value));
     const args = ['bash', bashQuote(bashPath(verifier))];
-    if (releaseMode !== undefined) args.push('--release-mode', bashQuote(releaseMode));
+    const modes = releaseModeFlags || (releaseMode !== undefined ? [releaseMode] : []);
+    for (const mode of modes) args.push('--release-mode', bashQuote(mode));
     if (state) args.push('--state', bashQuote(state));
     args.push(bashQuote('http://release-control.test'));
+    if (trailingReleaseMode !== undefined) args.push('--release-mode', bashQuote(trailingReleaseMode));
     args.push(bashQuote('https://release-control.test'));
     const cleanEnv = { ...process.env };
     delete cleanEnv.RELEASE_MODE;
@@ -259,6 +264,9 @@ function runGateVerifierFixture({ releaseMode, inheritedReleaseMode, state, orde
       const error = new Error('Fixture gate verifier failed');
       error.status = result.status;
       error.stderr = result.stderr;
+      error.httpCalls = fs.existsSync(mockCurlLog)
+        ? fs.readFileSync(mockCurlLog, 'utf8').trim().split('\n').length
+        : 0;
       throw error;
     }
     return result.stdout;
@@ -647,6 +655,68 @@ test('gate verifier binds inherited release mode and rejects flag/environment di
   );
   assert.throws(
     () => runGateVerifierFixture({ releaseMode: '', inheritedReleaseMode: 'focused-baseline' }),
+    (error) => error.status === 2
+      && /--release-mode disagrees with inherited RELEASE_MODE/.test(String(error.stderr)),
+  );
+});
+
+test('gate verifier rejects duplicate release mode flags before any HTTP verification', () => {
+  for (const releaseModeFlags of [
+    ['focused-baseline', 'release'],
+    ['release', 'focused-baseline'],
+    ['focused-baseline', 'focused-baseline'],
+    ['release', 'release'],
+  ]) {
+    for (const inheritedReleaseMode of [undefined, 'focused-baseline', 'release']) {
+      assert.throws(
+        () => runGateVerifierFixture({ releaseModeFlags, inheritedReleaseMode }),
+        (error) => {
+          assert.equal(error.status, 2);
+          assert.match(String(error.stderr), /Duplicate option: --release-mode/);
+          assert.equal(error.httpCalls, 0);
+          return true;
+        },
+        `flags ${releaseModeFlags.join(' then ')}, inherited ${inheritedReleaseMode}`,
+      );
+    }
+  }
+  assert.throws(
+    () => runGateVerifierFixture({
+      releaseMode: 'focused-baseline',
+      trailingReleaseMode: 'release',
+    }),
+    (error) => {
+      assert.equal(error.status, 2);
+      assert.match(String(error.stderr), /Duplicate option: --release-mode/);
+      assert.equal(error.httpCalls, 0);
+      return true;
+    },
+    'duplicate mode flag after first valid BASE_URL',
+  );
+});
+
+test('gate verifier preserves single mode flag and no-flag route coverage', () => {
+  for (const options of [
+    { releaseMode: 'focused-baseline', inheritedReleaseMode: 'focused-baseline' },
+    { releaseMode: 'focused-baseline' },
+    { inheritedReleaseMode: 'focused-baseline' },
+  ]) {
+    const focused = runGateVerifierFixture(options);
+    assert.equal(focused.split('POST /api/orders/initiate: HTTP 503').length - 1, 2);
+    assert.equal(focused.split('POST /api/payments/create-payment-intent: HTTP 503').length - 1, 2);
+  }
+  for (const options of [
+    { releaseMode: 'release', inheritedReleaseMode: 'release' },
+    { inheritedReleaseMode: 'release' },
+    {},
+    { inheritedReleaseMode: 'rollback' },
+  ]) {
+    const canonical = runGateVerifierFixture(options);
+    assert.equal(canonical.split('POST /api/orders/initiate: HTTP 503').length - 1, 2);
+    assert.doesNotMatch(canonical, /create-payment-intent/);
+  }
+  assert.throws(
+    () => runGateVerifierFixture({ releaseMode: 'release', inheritedReleaseMode: 'focused-baseline' }),
     (error) => error.status === 2
       && /--release-mode disagrees with inherited RELEASE_MODE/.test(String(error.stderr)),
   );
