@@ -1,9 +1,11 @@
 // utils/emails/businessProfileEmails.js
 const nodemailer = require('nodemailer');
+const { buildFrontendUrl } = require('./frontendUrl');
 const {
   buildSmtpTransportConfig,
   formatMosaicFromHeader,
 } = require('./smtpTransport');
+const { baseLayout, esc } = require('./emailTemplates/baseLayout');
 
 const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
 
@@ -56,37 +58,84 @@ const sendBusinessProfileReviewEmail = async (userEmail, userName, profileId) =>
 };
 
 // Send approval notification to user
-const sendBusinessProfileApprovalEmail = async (userEmail, userName, badge, totalPoints) => {
+const sendBusinessProfileApprovalEmail = async (userEmailOrOpts, userNameArg, badgeArg, totalPointsArg) => {
   try {
+    const isObject = typeof userEmailOrOpts === 'object' && userEmailOrOpts !== null;
+    const to = isObject ? (userEmailOrOpts.to || userEmailOrOpts.userEmail || userEmailOrOpts.email) : userEmailOrOpts;
+    const rawName = isObject ? (userEmailOrOpts.firstName || userEmailOrOpts.userName || userEmailOrOpts.vendorName || userEmailOrOpts.name) : userNameArg;
+    const badge = isObject ? (userEmailOrOpts.badge || userEmailOrOpts.badgeName) : badgeArg;
+    const totalPoints = isObject ? (userEmailOrOpts.totalPoints || userEmailOrOpts.points) : totalPointsArg;
+
+    const safeFirstName = esc(rawName ? rawName.split(' ')[0] : 'there');
+    const safeBadgeName = badge ? esc(badge) : '';
+    const profileUrl = buildFrontendUrl('/partners/dashboard');
+    const ctaText = 'View Your Profile';
+    const preheader = 'You’ve earned a new vendor badge on Mosaic Biz Hub!';
+    const footerReason = 'You are receiving this email because your business profile and verification details were reviewed and approved on Mosaic Biz Hub.';
+
+    const bodyHtml = `
+      <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+        You’ve Earned a New Vendor Badge!
+      </h1>
+
+      <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+        Hi ${safeFirstName},
+      </p>
+
+      <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">
+        Congratulations! You’ve earned a new vendor badge based on your verified information. It will appear on your profile, highlighting your strengths and attributes while building customer trust.
+      </p>
+      ${safeBadgeName ? `
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+        <tr>
+          <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-left:4px solid #7C3AED;border-radius:4px 8px 8px 4px;padding:16px 20px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.6;">
+              <tr>
+                <td style="width:120px;color:#6B7280;font-weight:500;">Badge Earned:</td>
+                <td style="font-weight:700;color:#7C3AED;font-size:16px;">${safeBadgeName}${totalPoints ? ` (${esc(totalPoints)} pts)` : ''}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>` : ''}
+
+      <!-- CTA Button -->
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+        <tr>
+          <td>
+            <a href="${profileUrl}"
+               style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+              ${ctaText} &rarr;
+            </a>
+          </td>
+        </tr>
+      </table>
+
+      <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+        Thank you for being part of the Mosaic Biz Hub community.
+      </p>
+
+      <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+        Mosaic Biz Hub
+      </p>
+    `;
+
+    const html = baseLayout({
+      preheader,
+      bodyHtml,
+      footerReason,
+    });
+
     const mailOptions = {
       from: formatMosaicFromHeader(),
-      to: userEmail,
-      subject: 'Business Profile Approved - Badge Assigned',
-      html: `
-        <div style="font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;">
-          <h2 style="color:#28a745;">Congratulations! Your Business Profile is Approved</h2>
-          <p>Dear ${userName},</p>
-          
-          <p>Your business profile has been successfully reviewed and approved.</p>
-          
-          <h3>Your Results:</h3>
-          <ul>
-            <li><strong>Badge Earned:</strong> ${badge}</li>
-            <li><strong>Total Points:</strong> ${totalPoints}</li>
-          </ul>
-          
-          <p>You can now access all features available for your tier and start listing your products/services.</p>
-          
-          <p style="margin-top:30px;font-size:12px;color:#777;">
-            Best regards,<br>Mosaic Biz Hub Team
-          </p>
-        </div>
-      `
+      to,
+      subject: 'You’ve Earned a New Vendor Badge!',
+      html,
     };
 
-    await transporter.sendMail(mailOptions);
-    console.log('Business profile approval email sent successfully');
-    
+    const result = await transporter.sendMail(mailOptions);
+    console.log('Business profile badge approval email sent successfully');
+    return result;
   } catch (error) {
     console.error('Failed to send business profile approval email:', error);
     throw error;

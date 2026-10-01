@@ -4,6 +4,7 @@ const {
   buildSmtpTransportConfig,
   formatMosaicFromHeader,
 } = require('./smtpTransport');
+const { baseLayout, esc } = require('./emailTemplates/baseLayout');
 
 const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
 
@@ -208,48 +209,114 @@ exports.sendAdminOnboardingSubmissionEmail = async ({
   applicationId,
   businessName,
   vendorName,
+  tierPlan,
 }) => {
+  const safeAdminEmail = adminEmail || process.env.ADMIN_EMAIL || 'info@mosaicbizhub.com';
+  const safeAppId = esc(applicationId || 'N/A');
+  const safeBizName = esc(businessName || 'N/A');
+  const safeTier = esc(tierPlan || '');
   const submissionDate = new Date().toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
 
+  const ctaUrl = buildFrontendUrl(`/admin/vendor-applications/${applicationId || ''}`);
+  const ctaText = 'Open Admin Dashboard';
+  const preheader = `A vendor has submitted Step 1 and requires review. Application #${safeAppId}`;
+  const footerReason = 'You are receiving this email because you are registered as an administrator for Mosaic Biz Hub.';
+
+  const bodyHtml = `
+    <h1 style="font-family:Arial,sans-serif;font-size:24px;font-weight:700;color:#111827;margin:0 0 16px;line-height:1.3;">
+      Vendor Submission Requires Review
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Hello Admin Team,
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      A vendor has submitted Step 1 and requires review. Please log in to the admin dashboard to approve or block the submission.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+          <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+            Application Details:
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+            <tr>
+              <td style="padding:4px 0;width:160px;color:#6B7280;">Application Number:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${safeAppId}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Business Name:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${safeBizName}</td>
+            </tr>
+            ${safeTier ? `
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Tier Plan:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${safeTier}</td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Submission Date:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${submissionDate}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 24px;line-height:1.6;">
+      Please log in to the Admin Dashboard to review the submitted application and proceed with the verification process.
+    </p>
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${ctaUrl}"
+            style="display:inline-block;background:linear-gradient(135deg,#2563EB 0%,#1D4ED8 100%);color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:8px;letter-spacing:0.01em;line-height:1;">
+            ${esc(ctaText)}
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:#6B7280;margin:0;line-height:1.6;">
+      Best regards,<br/>
+      <strong>Mosaic Biz Hub System Notification</strong>
+    </p>
+  `;
+
+  const textContent = [
+    'Vendor Submission Requires Review',
+    '',
+    'Hello Admin Team,',
+    '',
+    'A vendor has submitted Step 1 and requires review. Please log in to the admin dashboard to approve or block the submission.',
+    '',
+    'Application Details:',
+    `Application Number: ${safeAppId}`,
+    `Business Name: ${safeBizName}`,
+    safeTier ? `Tier Plan: ${safeTier}` : '',
+    `Submission Date: ${submissionDate}`,
+    '',
+    'Please log in to the Admin Dashboard to review the submitted application and proceed with the verification process.',
+    '',
+    `Open Admin Dashboard: ${ctaUrl}`,
+    '',
+    'Best regards,',
+    'Mosaic Biz Hub System Notification',
+  ].filter(Boolean).join('\n');
+
   const mailOptions = {
     from: formatMosaicFromHeader(),
-    to: adminEmail,
-    subject: `New Vendor Application Submitted – Review Required (Application #${applicationId})`,
-    html: `
-      <div style="font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;">
-        <h2 style="color:#333;">Dear Admin,</h2>
-
-        <p>
-          A new vendor application has been successfully submitted on <strong>Mosaic Biz Hub</strong> and is awaiting your review.
-        </p>
-
-        <p><strong>Application Details:</strong></p>
-        <ul>
-          <li><strong>Application Number:</strong> ${applicationId}</li>
-          <li><strong>Business Name:</strong> ${businessName}</li>
-          <li><strong>Submission Date:</strong> ${submissionDate}</li>
-        </ul>
-
-        <p>
-          Please log in to the Admin Dashboard to review the submitted application and proceed with the verification process.
-        </p>
-
-        <a href="${buildFrontendUrl(`/admin/vendor-applications/${applicationId}`)}"
-           style="display:inline-block;margin-top:16px;padding:10px 16px;
-           background:#0d6efd;color:#fff;text-decoration:none;border-radius:4px;">
-           Access Admin Dashboard
-        </a>
-
-        <p style="margin-top:30px;font-size:12px;color:#777;">
-          Best regards,<br/>
-          Mosaic Biz Hub System Notification
-        </p>
-      </div>
-    `,
+    to: safeAdminEmail,
+    subject: `Vendor Submission Requires Review – Application #${safeAppId}`,
+    text: textContent,
+    html: baseLayout({ preheader, bodyHtml, footerReason }),
   };
 
   return transporter.sendMail(mailOptions);
@@ -261,31 +328,68 @@ exports.sendVendorSubmissionConfirmationEmail = async ({
   vendorName,
   applicationId,
 }) => {
+  const safeName = esc(vendorName || 'there');
+  const safeAppId = esc(applicationId || '');
+  const preheader = 'Thank you for applying to Mosaic Biz Hub. Your information is under review.';
+  const footerReason = 'You are receiving this email because you submitted a vendor application on Mosaic Biz Hub.';
+
+  const bodyHtml = `
+    <h1 style="font-family:Arial,sans-serif;font-size:24px;font-weight:700;color:#111827;margin:0 0 16px;line-height:1.3;">
+      Your Application Is Under Review
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Hi ${safeName},
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Thank you for applying to Mosaic Biz Hub. Your information is under review.
+      We’ll email next steps within <strong>3–5 business days</strong>.
+    </p>
+
+    ${safeAppId ? `
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:14px 18px;">
+          <p style="font-family:Arial,sans-serif;font-size:13px;color:#6B7280;margin:0;">
+            <strong style="color:#374151;">Application ID:</strong> ${safeAppId}
+          </p>
+        </td>
+      </tr>
+    </table>` : ''}
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0 0 24px;line-height:1.6;">
+      If you have questions, contact us at
+      <a href="mailto:info@mosaicbizhub.com" style="color:#2563EB;text-decoration:none;font-weight:600;">info@mosaicbizhub.com</a>
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Warm regards,<br/>
+      <strong>The Mosaic Biz Hub Team</strong>
+    </p>
+  `;
+
+  const textContent = [
+    'Your Mosaic Biz Hub Application Is Under Review',
+    '',
+    `Hi ${vendorName || 'there'},`,
+    '',
+    'Thank you for applying to Mosaic Biz Hub. Your information is under review.',
+    'We’ll email next steps within 3–5 business days.',
+    '',
+    safeAppId ? `Application ID: ${safeAppId}` : '',
+    '',
+    'If you have questions, contact us at info@mosaicbizhub.com',
+    '',
+    'Mosaic Biz Hub Team',
+  ].filter(Boolean).join('\n');
+
   const mailOptions = {
     from: formatMosaicFromHeader(),
     to,
     subject: "Your Mosaic Biz Hub Application Is Under Review",
-    html: `
-      <div style="font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;">
-        <h2 style="color:#333;">Hi ${vendorName},</h2>
-
-        <p>
-          Thank you for applying to Mosaic Biz Hub. Your information is under review.
-          We’ll email next steps within <strong>3–5 business days</strong>.
-        </p>
-
-        <p><strong>Application ID:</strong> ${applicationId}</p>
-
-        <p style="margin-top:20px;">
-          If you have questions, contact us at
-          <a href="mailto:info@mosaicbizhub.com">info@mosaicbizhub.com</a>
-        </p>
-
-        <p style="margin-top:30px;font-size:12px;color:#777;">
-          Mosaic Biz Hub Team
-        </p>
-      </div>
-    `,
+    text: textContent,
+    html: baseLayout({ preheader, bodyHtml, footerReason }),
   };
 
   return transporter.sendMail(mailOptions);
@@ -374,35 +478,132 @@ exports.sendPaymentReminderEmail = async (vendorData = {}) => {
 exports.sendVendorApprovedEmail = async ({
   to,
   vendorName,
+  firstName,
+  businessName,
   applicationId,
+  submissionDate,
 }) => {
+  const safeFirstName = esc(firstName || (vendorName ? vendorName.split(' ')[0] : 'there'));
+  const safeAppId = esc(applicationId || 'N/A');
+  const safeBizName = esc(businessName || 'Your Business');
+  const formattedDate = submissionDate
+    ? new Date(submissionDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+    : new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const continueOnboardingUrl = buildFrontendUrl('/login?type=vendor');
+  const ctaUrl = buildFrontendUrl('/partners/dashboard');
+  const ctaText = 'Add Your First Listing';
+  const preheader = `Congratulations ${safeFirstName}! Your business has passed initial verification.`;
+  const footerReason = 'You are receiving this email because your vendor application was approved on Mosaic Biz Hub.';
+
+  const bodyHtml = `
+    <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+      Your Business Has Been Approved!
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Congratulations, ${safeFirstName}!
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Your business has successfully passed our initial verification process. You’re now eligible to choose your subscription tier plan and complete your profile.
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0 0 12px;line-height:1.6;">
+      <strong>Application ID:</strong> ${safeAppId}
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 24px;line-height:1.6;">
+      <a href="${continueOnboardingUrl}" style="color:#2563EB;font-weight:600;text-decoration:none;">Continue Onboarding</a>. Let's keep the momentum going.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+          <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+            Application Details:
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+            <tr>
+              <td style="padding:4px 0;width:160px;color:#6B7280;">Application Number:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${safeAppId}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Business Name:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${safeBizName}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Submission Date:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${formattedDate}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F0FDF4;border-left:4px solid #22C55E;border-radius:0 8px 8px 0;padding:20px 24px;">
+          <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#15803D;margin:0 0 10px;">Next steps:</p>
+          <ul style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0;padding-left:18px;line-height:1.8;">
+            <li>Complete any remaining onboarding questions</li>
+            <li>Add product/service listings</li>
+            <li>Customize your vendor profile</li>
+          </ul>
+        </td>
+      </tr>
+    </table>
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${ctaUrl}"
+            style="display:inline-block;background:linear-gradient(135deg,#2563EB 0%,#1D4ED8 100%);color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:8px;letter-spacing:0.01em;line-height:1;">
+            ${esc(ctaText)}
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Thank you for being part of the Mosaic Biz Hub community.<br/>
+      <strong>The Mosaic Biz Hub Team</strong>
+    </p>
+  `;
+
+  const textContent = [
+    'Your Business Has Been Approved!',
+    '',
+    `Congratulations, ${safeFirstName}!`,
+    '',
+    'Your business has successfully passed our initial verification process. You’re now eligible to choose your subscription tier plan and complete your profile.',
+    '',
+    `Application ID: ${safeAppId}`,
+    `Continue Onboarding: ${continueOnboardingUrl} - Let's keep the momentum going`,
+    '',
+    'Application Details:',
+    `Application Number: ${safeAppId}`,
+    `Business Name: ${safeBizName}`,
+    `Submission Date: ${formattedDate}`,
+    '',
+    'Next steps:',
+    '• Complete any remaining onboarding questions',
+    '• Add product/service listings',
+    '• Customize your vendor profile',
+    '',
+    `Add Your First Listing: ${ctaUrl}`,
+    '',
+    'Thank you for being part of the Mosaic Biz Hub community.',
+    '— The Mosaic Biz Hub Team',
+  ].join('\n');
+
   const mailOptions = {
     from: formatMosaicFromHeader(),
     to,
-    subject: "Your Business Has Been Successfully Verified 🎉",
-    html: `
-      <div style="font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;">
-        <h2 style="color:#28a745;">Congratulations, ${vendorName}!</h2>
-
-        <p>
-          Your business has successfully passed our initial verification process.
-          You’re now eligible to choose your subscription tier and complete
-          your profile.
-        </p>
-
-        <p><strong>Application ID:</strong> ${applicationId}</p>
-
-        <a href="${buildFrontendUrl('/login?type=vendor')}"
-           style="display:inline-block;margin-top:16px;padding:12px 20px;
-           background:#28a745;color:#fff;text-decoration:none;border-radius:4px;">
-            Continue Onboarding
-        </a>
-
-        <p style="margin-top:30px;font-size:12px;color:#777;">
-          Welcome to the Mosaic Biz Hub community!
-        </p>
-      </div>
-    `,
+    subject: "Your Business Has Been Approved!",
+    text: textContent,
+    html: baseLayout({ preheader, bodyHtml, footerReason }),
   };
 
   return transporter.sendMail(mailOptions);
@@ -758,55 +959,77 @@ exports.sendAdminVendorProfileCompletedEmail = async ({
 exports.sendVendorTrustBadgeAssignedEmail = async ({
   to,
   vendorName,
+  firstName,
   badgeName,
+  badge,
 }) => {
-  const dashboardLink = buildFrontendUrl("/login?type=vendor");
+  const safeName = firstName || (vendorName ? vendorName.split(' ')[0] : 'there');
+  const safeFirstName = esc(safeName);
+  const badgeLabel = badgeName || badge;
+  const safeBadgeName = badgeLabel ? esc(badgeLabel) : '';
+  const profileUrl = buildFrontendUrl('/partners/dashboard');
+  const ctaText = 'View Your Profile';
+  const preheader = 'You’ve earned a new vendor badge on Mosaic Biz Hub!';
+  const footerReason = 'You are receiving this email because a vendor badge was assigned to your profile on Mosaic Biz Hub.';
+
+  const bodyHtml = `
+    <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+      You’ve Earned a New Vendor Badge!
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Hi ${safeFirstName},
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Congratulations! You’ve earned a new vendor badge based on your verified information. It will appear on your profile, highlighting your strengths and attributes while building customer trust.
+    </p>
+    ${safeBadgeName ? `
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-left:4px solid #7C3AED;border-radius:4px 8px 8px 4px;padding:16px 20px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.6;">
+            <tr>
+              <td style="width:120px;color:#6B7280;font-weight:500;">Badge Earned:</td>
+              <td style="font-weight:700;color:#7C3AED;font-size:16px;">${safeBadgeName}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>` : ''}
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${profileUrl}"
+             style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            ${ctaText} &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Thank you for being part of the Mosaic Biz Hub community.
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Mosaic Biz Hub
+    </p>
+  `;
+
+  const html = baseLayout({
+    preheader,
+    bodyHtml,
+    footerReason,
+  });
 
   const mailOptions = {
     from: formatMosaicFromHeader(),
     to,
-    subject: "Your Trust Badge Has Been Verified and Activated",
-    html: `
-      <div style="font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;">
-        <h2 style="color:#333;">Dear ${vendorName},</h2>
-
-        <p>
-          We are pleased to inform you that your submitted documentation has been successfully verified.
-        </p>
-
-        <p>
-          Your Trust Badge verification process is now complete, and your account has been upgraded to the 
-          <strong>“${badgeName} Trust Badge.”</strong>
-        </p>
-
-        <p>
-          This badge will reflect on your vendor profile immediately, helping buyers identify your business
-          as a verified and trusted member of the Mosaic Biz Hub marketplace.
-        </p>
-
-        <p>
-          Your badge enhances your credibility and visibility within our ecosystem, allowing customers
-          to engage with your business with greater confidence.
-        </p>
-
-        <p>You can view the update by logging into your vendor dashboard.</p>
-
-        <a href="${dashboardLink}"
-           style="display:inline-block;margin-top:16px;padding:12px 20px;
-           background:#0d6efd;color:#fff;text-decoration:none;border-radius:4px;">
-           Access Your Vendor Account
-        </a>
-
-        <p style="margin-top:30px;font-size:12px;color:#777;">
-          Thank you for being a valued part of the Mosaic Biz Hub community.
-        </p>
-
-        <p style="margin-top:20px;font-size:12px;color:#777;">
-          Best regards,<br/>
-          Mosaic Biz Hub Team
-        </p>
-      </div>
-    `,
+    subject: "You’ve Earned a New Vendor Badge!",
+    html,
   };
 
   return transporter.sendMail(mailOptions);
@@ -825,52 +1048,474 @@ exports.sendAdminVendorCategoryRequestEmail = async ({
   }
 
   const safeRequestId = requestId || "N/A";
-  // const safeBusinessName = businessName || "N/A";
+  const safeBusinessName = businessName || "N/A";
   const safeRequestedCategory = requestedCategory || "N/A";
 
   const dashboardLink = buildFrontendUrl("/admin/category-requests");
+
+  const bodyHtml = `
+    <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+      New Vendor Category Request Submitted
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Dear Admin,
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      A vendor has submitted a new category request on <strong>Mosaic Biz Hub</strong>. The request requires your review and approval before the category can be added to the platform.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+          <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+            Vendor Request Details:
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+            <tr>
+              <td style="padding:4px 0;width:150px;color:#6B7280;">Request ID:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${esc(safeRequestId)}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Business Name:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${esc(safeBusinessName)}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Requested Category:</td>
+              <td style="padding:4px 0;font-weight:600;color:#2563EB;">${esc(safeRequestedCategory)}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${dashboardLink}"
+             style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            Review in Admin Dashboard &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Mosaic Biz Hub System Notification
+    </p>
+  `;
+
+  const html = baseLayout({
+    preheader: `New category request submitted: ${safeRequestedCategory}`,
+    bodyHtml,
+    footerReason: "You are receiving this notification as an administrator of Mosaic Biz Hub.",
+  });
 
   const mailOptions = {
     from: formatMosaicFromHeader(),
     to: safeAdminEmail,
     subject: "New Vendor Category Request Submitted",
-    html: `
-      <div style="font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;">
-        <h2 style="color:#333;">Dear Admin,</h2>
+    html,
+  };
 
-        <p>
-          A vendor has submitted a new category request on <strong>Mosaic Biz Hub</strong>.
-          The request requires your review and approval before the category can be added to the platform.
-        </p>
+  return transporter.sendMail(mailOptions);
+};
 
-        <p><strong>Vendor Request Details:</strong></p>
-        <ul>
-          <li><strong>Request ID:</strong> ${safeRequestId}</li>
-          <li><strong>Business Name:</strong> ${safeBusinessName}</li>
-          <li><strong>Requested Category:</strong> ${safeRequestedCategory}</li>
-        </ul>
+exports.sendVendorCategoryRequestSubmittedEmail = async ({
+  to,
+  firstName,
+  vendorName,
+  categoryName,
+  subcategoryName,
+  requestId,
+}) => {
+  const rawFirstName = firstName || (vendorName ? String(vendorName).split(' ')[0] : 'there');
+  const safeFirstName = esc(rawFirstName);
+  const statusUrl = buildFrontendUrl("/partners/category-requests");
+  const preheader = "We’ve received your category request. Our admin team will review it shortly.";
+  const footerReason = "You are receiving this email because you submitted a category request on Mosaic Biz Hub.";
 
-        <p>
-          Please log in to the Admin Dashboard to review the request and take appropriate action.
-        </p>
+  const bodyHtml = `
+    <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+      Category Request Received
+    </h1>
 
-        <p><strong>Review Request:</strong></p>
-        <a href="${dashboardLink}"
-           style="display:inline-block;margin-top:10px;padding:10px 16px;
-           background:#0d6efd;color:#fff;text-decoration:none;border-radius:4px;">
-           Admin Dashboard Link
-        </a>
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Hi ${safeFirstName},
+    </p>
 
-        <p style="margin-top:20px;">
-          Timely review ensures the platform remains organized and vendors can offer their products or services efficiently.
-        </p>
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      We’ve received your category request. Our admin team will review it shortly.
+    </p>
 
-        <p style="margin-top:30px;font-size:12px;color:#777;">
-          Best regards,<br/>
-          Mosaic Biz Hub System Notification
-        </p>
-      </div>
-    `,
+    ${(categoryName || requestId) ? `
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+          <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+            Request Details:
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+            ${requestId ? `
+            <tr>
+              <td style="padding:4px 0;width:150px;color:#6B7280;">Request ID:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${esc(String(requestId))}</td>
+            </tr>` : ''}
+            ${categoryName ? `
+            <tr>
+              <td style="padding:4px 0;width:150px;color:#6B7280;">Requested Category:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${esc(categoryName)}${subcategoryName ? ` / ${esc(subcategoryName)}` : ''}</td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Status:</td>
+              <td style="padding:4px 0;font-weight:600;color:#D97706;">Pending Review</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>` : ''}
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${statusUrl}"
+             style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            View Request Status &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Thank you for being part of the Mosaic Biz Hub community.
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Mosaic Biz Hub
+    </p>
+  `;
+
+  const html = baseLayout({
+    preheader,
+    bodyHtml,
+    footerReason,
+  });
+
+  const text = [
+    `Hi ${safeFirstName},`,
+    ``,
+    `We’ve received your category request. Our admin team will review it shortly.`,
+    ``,
+    `View Request Status: ${statusUrl}`,
+    ``,
+    `Thank you for being part of the Mosaic Biz Hub community.`,
+    `Mosaic Biz Hub`,
+  ].join("\n");
+
+  const mailOptions = {
+    from: formatMosaicFromHeader(),
+    to,
+    subject: "Category Request Received",
+    html,
+    text,
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+exports.sendCustomerNewCategoryNotificationEmail = async ({
+  to,
+  firstName,
+  customerName,
+  categoryName,
+  categorySlug,
+}) => {
+  const rawFirstName = firstName || (customerName ? String(customerName).split(' ')[0] : 'there');
+  const safeFirstName = esc(rawFirstName);
+  const safeCategoryName = esc(categoryName || '');
+  const exploreUrl = categorySlug
+    ? buildFrontendUrl(`/category/${encodeURIComponent(categorySlug)}`)
+    : buildFrontendUrl('/explore');
+  const preheader = "A new category has been added to Mosaic Biz Hub! Explore fresh listings and discover new vendors today.";
+  const footerReason = "You are receiving this email because you are a registered customer on Mosaic Biz Hub.";
+
+  const bodyHtml = `
+    <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+      New Category Now Available!
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Hi ${safeFirstName},
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      A new category has been added to Mosaic Biz Hub! Explore fresh listings and discover new vendors today.
+    </p>
+
+    ${safeCategoryName ? `
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+          <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0 0 6px;">
+            Newly Added Category:
+          </p>
+          <p style="font-family:Arial,sans-serif;font-size:18px;font-weight:700;color:#111827;margin:0;">
+            ${safeCategoryName}
+          </p>
+        </td>
+      </tr>
+    </table>` : ''}
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${exploreUrl}"
+             style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            Explore New Category &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Thank you for being part of the Mosaic Biz Hub community.
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Mosaic Biz Hub
+    </p>
+  `;
+
+  const html = baseLayout({
+    preheader,
+    bodyHtml,
+    footerReason,
+  });
+
+  const text = [
+    `Hi ${safeFirstName},`,
+    ``,
+    `A new category has been added to Mosaic Biz Hub! Explore fresh listings and discover new vendors today.`,
+    ``,
+    `Explore New Category: ${exploreUrl}`,
+    ``,
+    `Thank you for being part of the Mosaic Biz Hub community.`,
+    `Mosaic Biz Hub`,
+  ].join("\n");
+
+  const mailOptions = {
+    from: formatMosaicFromHeader(),
+    to,
+    subject: "New Category Now Available!",
+    html,
+    text,
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+exports.sendVendorCategoryRequestRejectedEmail = async ({
+  to,
+  firstName,
+  vendorName,
+  categoryName,
+  subcategoryName,
+  adminReason,
+  requestId,
+}) => {
+  const rawFirstName = firstName || (vendorName ? String(vendorName).split(' ')[0] : 'there');
+  const safeFirstName = esc(rawFirstName);
+  const safeAdminReason = esc(adminReason || 'The requested category does not meet our current platform catalog guidelines.');
+  const resubmitUrl = buildFrontendUrl("/partners/category-requests");
+  const preheader = "Your category request was reviewed but could not be approved.";
+  const footerReason = "You are receiving this email regarding your category request on Mosaic Biz Hub.";
+
+  const bodyHtml = `
+    <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+      Your Category Request Was Not Approved
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Hi ${safeFirstName},
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Your category request was reviewed but could not be approved.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#FEF2F2;border:1px solid #FCA5A5;border-left:4px solid #DC2626;border-radius:6px;padding:16px 20px;">
+          ${(categoryName || requestId) ? `
+          <p style="font-family:Arial,sans-serif;font-size:13px;color:#6B7280;margin:0 0 8px;">
+            ${categoryName ? `<strong>Category:</strong> ${esc(categoryName)}${subcategoryName ? ` / ${esc(subcategoryName)}` : ''}` : ''}
+            ${requestId ? ` &bull; <strong>ID:</strong> ${esc(String(requestId))}` : ''}
+          </p>` : ''}
+          <p style="font-family:Arial,sans-serif;font-size:14px;color:#991B1B;margin:0;line-height:1.5;">
+            <strong>Reason:</strong> ${safeAdminReason}
+          </p>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 24px;line-height:1.6;">
+      If you’d like to revise and resubmit, we’re here to help.
+    </p>
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${resubmitUrl}"
+             style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            Resubmit Request &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Thank you for being part of the Mosaic Biz Hub community.
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Mosaic Biz Hub
+    </p>
+  `;
+
+  const html = baseLayout({
+    preheader,
+    bodyHtml,
+    footerReason,
+  });
+
+  const text = [
+    `Hi ${safeFirstName},`,
+    ``,
+    `Your category request was reviewed but could not be approved.`,
+    `Reason: ${adminReason || 'The requested category does not meet our current platform catalog guidelines.'}`,
+    ``,
+    `If you’d like to revise and resubmit, we’re here to help.`,
+    ``,
+    `Resubmit Request: ${resubmitUrl}`,
+    ``,
+    `Thank you for being part of the Mosaic Biz Hub community.`,
+    `Mosaic Biz Hub`,
+  ].join("\n");
+
+  const mailOptions = {
+    from: formatMosaicFromHeader(),
+    to,
+    subject: "Your Category Request Was Not Approved",
+    html,
+    text,
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+exports.sendVendorCategoryRequestApprovedEmail = async ({
+  to,
+  firstName,
+  vendorName,
+  categoryName,
+  subcategoryName,
+  requestId,
+}) => {
+  const rawFirstName = firstName || (vendorName ? String(vendorName).split(' ')[0] : 'there');
+  const safeFirstName = esc(rawFirstName);
+  const safeCategoryName = esc(categoryName || '');
+  const createListingUrl = buildFrontendUrl("/partners/dashboard");
+  const preheader = "Great news — your category request has been approved and added to the marketplace.";
+  const footerReason = "You are receiving this email regarding your category request on Mosaic Biz Hub.";
+
+  const bodyHtml = `
+    <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+      Your Category Request Has Been Approved
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Hi ${safeFirstName},
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Great news &mdash; your category request has been approved and added to the marketplace. You may now create listings under this new category.
+    </p>
+
+    ${(safeCategoryName || requestId) ? `
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+          <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+            Approved Category Details:
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+            ${requestId ? `
+            <tr>
+              <td style="padding:4px 0;width:150px;color:#6B7280;">Request ID:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${esc(String(requestId))}</td>
+            </tr>` : ''}
+            ${safeCategoryName ? `
+            <tr>
+              <td style="padding:4px 0;width:150px;color:#6B7280;">Approved Category:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${safeCategoryName}${subcategoryName ? ` / ${esc(subcategoryName)}` : ''}</td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Status:</td>
+              <td style="padding:4px 0;font-weight:600;color:#15803D;">Approved &bull; Live in Marketplace</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>` : ''}
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${createListingUrl}"
+             style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            Create New Listing &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Thank you for being part of the Mosaic Biz Hub community.
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Mosaic Biz Hub
+    </p>
+  `;
+
+  const html = baseLayout({
+    preheader,
+    bodyHtml,
+    footerReason,
+  });
+
+  const text = [
+    `Hi ${safeFirstName},`,
+    ``,
+    `Great news — your category request has been approved and added to the marketplace. You may now create listings under this new category.`,
+    ``,
+    `Create New Listing: ${createListingUrl}`,
+    ``,
+    `Thank you for being part of the Mosaic Biz Hub community.`,
+    `Mosaic Biz Hub`,
+  ].join("\n");
+
+  const mailOptions = {
+    from: formatMosaicFromHeader(),
+    to,
+    subject: "Your Category Request Has Been Approved",
+    html,
+    text,
   };
 
   return transporter.sendMail(mailOptions);

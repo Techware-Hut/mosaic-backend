@@ -353,18 +353,33 @@ const createCategoryRequest = async (req, res) => {
       description: String(description).trim(),
     });
 
-    // --- Send admin email notification ---
+    // --- Send email notifications ---
     try {
-      const { sendAdminVendorCategoryRequestEmail } = require('../utils/WellcomeMailer'); // adjust path as needed
+      const {
+        sendAdminVendorCategoryRequestEmail,
+        sendVendorCategoryRequestSubmittedEmail,
+      } = require('../utils/WellcomeMailer');
+
       await sendAdminVendorCategoryRequestEmail({
         adminEmail: process.env.ADMIN_EMAIL,
         requestId: categoryRequest._id,
-        businessName: req.user.businessName || 'N/A', // make sure req.user has businessName
+        businessName: req.user.businessName || req.user.name || 'N/A',
         requestedCategory: `${trimmedCategoryName} / ${trimmedSubcategoryName}`,
       });
+
+      if (req.user.email) {
+        await sendVendorCategoryRequestSubmittedEmail({
+          to: req.user.email,
+          firstName: req.user.firstName || req.user.name?.split(' ')[0],
+          vendorName: req.user.name,
+          categoryName: trimmedCategoryName,
+          subcategoryName: trimmedSubcategoryName,
+          requestId: categoryRequest._id,
+        });
+      }
     } catch (emailError) {
-      console.error('Error sending admin email for category request:', emailError);
-      // optionally continue without failing the request
+      console.error('Error sending category request email notifications:', emailError);
+      // continue without failing the request
     }
 
     return res.status(201).json({
@@ -557,6 +572,25 @@ const approveCategoryRequest = async (req, res) => {
       ),
     });
 
+    // Send approval email to the requesting vendor
+    try {
+      const { sendVendorCategoryRequestApprovedEmail } = require('../utils/WellcomeMailer');
+      const vendorUser = approvedRequest.requestedBy;
+      if (vendorUser?.email) {
+        await sendVendorCategoryRequestApprovedEmail({
+          to: vendorUser.email,
+          firstName: vendorUser.firstName || vendorUser.name?.split(' ')[0],
+          vendorName: vendorUser.name,
+          categoryName: categoryRequest.categoryName,
+          subcategoryName: categoryRequest.subcategoryName,
+          requestId: categoryRequest._id,
+        });
+      }
+    } catch (emailError) {
+      console.error('Error sending vendor category approved email:', emailError);
+      // continue without failing the response
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Category request approved successfully',
@@ -628,6 +662,26 @@ const rejectCategoryRequest = async (req, res) => {
       ),
       note: categoryRequest.rejectionReason || null,
     });
+
+    // Send rejection email to the requesting vendor
+    try {
+      const { sendVendorCategoryRequestRejectedEmail } = require('../utils/WellcomeMailer');
+      const vendorUser = rejectedRequest.requestedBy;
+      if (vendorUser?.email) {
+        await sendVendorCategoryRequestRejectedEmail({
+          to: vendorUser.email,
+          firstName: vendorUser.firstName || vendorUser.name?.split(' ')[0],
+          vendorName: vendorUser.name,
+          categoryName: categoryRequest.categoryName,
+          subcategoryName: categoryRequest.subcategoryName,
+          adminReason: categoryRequest.rejectionReason,
+          requestId: categoryRequest._id,
+        });
+      }
+    } catch (emailError) {
+      console.error('Error sending vendor category rejection email:', emailError);
+      // continue without failing the response
+    }
 
     return res.status(200).json({
       success: true,
