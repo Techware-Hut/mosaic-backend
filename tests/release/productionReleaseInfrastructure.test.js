@@ -3,7 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const topologyApi = require('../../scripts/release/aws-release-topology');
 const gateApi = require('../../scripts/release/manage-checkout-gate');
@@ -158,12 +160,12 @@ function topologyOptions(mode = 'preflight', overrides = {}) {
   };
 }
 
-function gateFixture(initialPath = gateApi.DEFAULT_DISABLED_PATH) {
+function gateFixture(initialPath = gateApi.DEFAULT_DISABLED_PATH, releaseMode = 'release') {
   const rule = (ruleArn) => ({
     RuleArn: ruleArn,
     Priority: '1',
     IsDefault: false,
-    Conditions: gateApi.gateConditions(initialPath),
+    Conditions: gateApi.gateConditions(initialPath, releaseMode),
     Actions: [{ Type: 'fixed-response', FixedResponseConfig: { StatusCode: '503' } }],
   });
   return {
@@ -188,8 +190,9 @@ function gateFixture(initialPath = gateApi.DEFAULT_DISABLED_PATH) {
   };
 }
 
-function gateConfig() {
+function gateConfig(releaseMode = 'release') {
   return {
+    releaseMode,
     region: REGION,
     loadBalancerArn: LOAD_BALANCER_ARN,
     httpRuleArn: HTTP_RULE_ARN,
@@ -200,6 +203,64 @@ function gateConfig() {
     tagKey: gateApi.REQUIRED_TAG_KEY,
     tagValue: gateApi.REQUIRED_TAG_VALUE,
   };
+}
+
+function bashPath(filePath) {
+  return process.platform === 'win32'
+    ? '/mnt/' + filePath[0].toLowerCase() + filePath.slice(2).replaceAll('\\', '/')
+    : filePath;
+}
+
+function bashQuote(value) {
+  return "'" + String(value).replaceAll("'", "'\"'\"'") + "'";
+}
+
+function runGateVerifierFixture({ releaseMode, state, orderStatus, legacyStatus, webhookStatus } = {}) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-gate-verifier-'));
+  const mockCurl = path.join(tempDir, 'mock-curl.sh');
+  const verifier = path.resolve(__dirname, '../../scripts/release/verify-checkout-gate.sh');
+  fs.writeFileSync(mockCurl, [
+    '#!/usr/bin/env bash',
+    'url="${!#}"',
+    'case "$url" in',
+    '  */api/orders/initiate|*/api/orders/initiate/|*/API/ORDERS/INITIATE|*/Api/Orders/Initiate/) printf "%s" "${MOCK_ORDER_STATUS:-503}" ;;',
+    '  */api/payments/create-payment-intent|*/api/payments/create-payment-intent/|*/API/PAYMENTS/CREATE-PAYMENT-INTENT|*/Api/Payments/Create-Payment-Intent/) printf "%s" "${MOCK_LEGACY_STATUS:-503}" ;;',
+    '  */api/webhooks/stripe|*/api/stripe/webhook|*/api/stripe/payment/webhook|*/api/subscription/webhook|*/api/vendor-onboarding/webhook/payment) printf "%s" "${MOCK_WEBHOOK_STATUS:-400}" ;;',
+    '  */api/health|*/api/ready|*/api/build-info) printf "200" ;;',
+    '  *) printf "404" ;;',
+    'esac',
+    '',
+  ].join('\n'));
+  fs.chmodSync(mockCurl, 0o755);
+  try {
+    const values = {
+      CURL_BIN: bashPath(mockCurl),
+      MOCK_ORDER_STATUS: orderStatus || 503,
+      MOCK_LEGACY_STATUS: legacyStatus || 503,
+      MOCK_WEBHOOK_STATUS: webhookStatus || 400,
+    };
+    const assignments = Object.entries(values)
+      .map(([name, value]) => name + '=' + bashQuote(value));
+    const args = ['bash', bashQuote(bashPath(verifier))];
+    if (releaseMode) args.push('--release-mode', bashQuote(releaseMode));
+    if (state) args.push('--state', bashQuote(state));
+    args.push(bashQuote('http://release-control.test'));
+    args.push(bashQuote('https://release-control.test'));
+    const result = spawnSync('bash', ['-lc', assignments.concat(args).join(' ')], {
+      encoding: 'utf8',
+      timeout: 15000,
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      const error = new Error('Fixture gate verifier failed');
+      error.status = result.status;
+      error.stderr = result.stderr;
+      throw error;
+    }
+    return result.stdout;
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 function ssmFixture(count = 0, incompletePaid = 0, unresolvedIntents = 0) {
@@ -374,6 +435,170 @@ test('two pinned gate rules transition idempotently and retain exact POST/path/5
   assert.equal(disabled.gateState, 'inactive');
   assert.equal(disabled.operation, 'disabled');
   assert.equal(gateApi.verifyGate(client, 'inactive', gateConfig()).gateState, 'inactive');
+});
+
+test('focused-baseline gate models both checkout routes without broadening unrelated paths', () => {
+  const config = gateConfig('focused-baseline');
+  const regexValues = gateApi.activePathRegexValues(config.releaseMode);
+  assert.equal(regexValues.length, 3);
+  assert.ok(regexValues.every((value) => value.length <= 128));
+  assert.deepEqual(gateApi.activePathRegexValues('release'), [gateApi.ACTIVE_PATH_REGEX]);
+  assert.deepEqual(gateApi.gateConditions(gateApi.ACTIVE_PATH, config.releaseMode)[1]
+    .PathPatternConfig, { RegexValues: regexValues });
+
+  const matches = (pathName) => regexValues.some((value) => new RegExp(value).test(pathName));
+  for (const pathName of [
+    '/api/orders/initiate',
+    '/api/orders/initiate/',
+    '/API/ORDERS/INITIATE',
+    '/Api/Orders/Initiate/',
+    '/api/payments/create-payment-intent',
+    '/api/payments/create-payment-intent/',
+    '/API/PAYMENTS/CREATE-PAYMENT-INTENT',
+    '/Api/Payments/Create-Payment-Intent/',
+  ]) assert.equal(matches(pathName), true, pathName);
+  for (const pathName of [
+    '/api/orders/initiate-extra',
+    '/api/orders/initiate//',
+    '/api/payments/create-payment-intent-extra',
+    '/api/payments/create-payment-intent//',
+    '/api/health',
+    '/api/stripe/webhook',
+  ]) assert.equal(matches(pathName), false, pathName);
+
+  const client = gateApi.createFixtureGateClient(gateFixture());
+  const enabled = gateApi.transitionGate(client, 'active', config);
+  assert.equal(enabled.gateState, 'active');
+  assert.equal(enabled.releaseMode, 'focused-baseline');
+  assert.deepEqual(enabled.targets.map((target) => target.path), [
+    gateApi.ACTIVE_PATH,
+    gateApi.LEGACY_PAYMENT_PATH,
+  ]);
+  assert.equal(gateApi.verifyGate(client, 'active', config).gateState, 'active');
+  for (const listenerArn of [HTTP_LISTENER_ARN, HTTPS_LISTENER_ARN]) {
+    const rule = client.read().rulesByListener[listenerArn].Rules[0];
+    assert.deepEqual(rule.Conditions[1].PathPatternConfig, { RegexValues: regexValues });
+    assert.equal(rule.Actions[0].FixedResponseConfig.StatusCode, '503');
+  }
+  assert.doesNotMatch(JSON.stringify(enabled), /arn:aws/);
+  assert.equal(gateApi.transitionGate(client, 'inactive', config).gateState, 'inactive');
+
+  const awsCalls = [];
+  const awsClient = gateApi.createAwsGateClient({
+    runAws(service, operation, args) { awsCalls.push({ service, operation, args }); },
+    region: REGION,
+    config,
+  });
+  awsClient.modifyRule(HTTP_RULE_ARN, gateApi.ACTIVE_PATH);
+  assert.equal(awsCalls.length, 1);
+  assert.equal(awsCalls[0].operation, 'modify-rule');
+  const conditionArgument = awsCalls[0].args[awsCalls[0].args.indexOf('--conditions') + 1];
+  assert.deepEqual(JSON.parse(conditionArgument)[1].PathPatternConfig.RegexValues, regexValues);
+});
+
+test('focused-baseline gate rejects a canonical-only active rule and an unpinned legacy rule', () => {
+  const config = gateConfig('focused-baseline');
+  assert.throws(
+    () => gateApi.inspectGate(gateFixture(gateApi.ACTIVE_PATH), config),
+    /path condition/
+  );
+
+  const fixture = gateFixture();
+  fixture.rulesByListener[HTTP_LISTENER_ARN].Rules.push({
+    RuleArn: HTTP_RULE_ARN + '-duplicate',
+    Priority: '2',
+    IsDefault: false,
+    Conditions: gateApi.gateConditions(gateApi.LEGACY_PAYMENT_PATH),
+    Actions: [{ Type: 'fixed-response', FixedResponseConfig: { StatusCode: '503' } }],
+  });
+  assert.throws(
+    () => gateApi.inspectGate(fixture, config),
+    /unpinned listener rule/
+  );
+});
+
+test('focused-baseline partial transition failure regates both listeners', () => {
+  const config = gateConfig('focused-baseline');
+  const fixture = gateFixture(gateApi.ACTIVE_PATH, config.releaseMode);
+  fixture.failOnModifyCall = 2;
+  const client = gateApi.createFixtureGateClient(fixture);
+  assert.throws(
+    () => gateApi.transitionGate(client, 'inactive', config),
+    (error) => error.gateState === 'active' && /fail-safe recovery/.test(error.message)
+  );
+  const observed = gateApi.inspectGate(client.read(), config);
+  assert.equal(observed.state, 'active');
+  assert.deepEqual(observed.records.map((record) => record.state), ['active', 'active']);
+});
+
+test('focused-baseline gate CLI mode is explicit and invalid mode fails before AWS access', () => {
+  const args = ['verify', '--release-mode', 'focused-baseline', '--output', 'unused.json'];
+  assert.equal(gateApi.cliConfiguration(args, {}, gateConfig()).releaseMode, 'focused-baseline');
+  assert.throws(
+    () => gateApi.cliConfiguration([
+      'enable', '--release-mode', 'focused-baseline', '--confirm', 'ENABLE_CHECKOUT_GATE',
+      '--output', 'unused.json',
+    ], {}, gateConfig()),
+    /Focused live ALB mutation is disabled/,
+  );
+  assert.equal(gateApi.cliConfiguration(
+    ['verify', '--output', 'unused.json'], {}, gateConfig()
+  ).releaseMode, 'release');
+  assert.throws(
+    () => gateApi.cliConfiguration(
+      ['verify', '--release-mode', 'other', '--output', 'unused.json'],
+      {},
+      gateConfig()
+    ),
+    /Unsupported checkout gate release mode/
+  );
+});
+
+test('focused-baseline public verifier checks both routes on HTTP and HTTPS', () => {
+  const active = runGateVerifierFixture({ releaseMode: 'focused-baseline' });
+  assert.match(active, /Release surface 1/);
+  assert.match(active, /Release surface 2/);
+  for (const pathName of [
+    '/api/orders/initiate',
+    '/api/orders/initiate/',
+    '/API/ORDERS/INITIATE',
+    '/Api/Orders/Initiate/',
+    '/api/payments/create-payment-intent',
+    '/api/payments/create-payment-intent/',
+    '/API/PAYMENTS/CREATE-PAYMENT-INTENT',
+    '/Api/Payments/Create-Payment-Intent/',
+  ]) {
+    assert.equal(active.split('POST ' + pathName + ': HTTP 503').length - 1, 2, pathName);
+  }
+  assert.equal(active.split('GET /api/health: HTTP 200').length - 1, 2);
+  assert.equal(active.split('POST /api/webhooks/stripe (invalid signature): HTTP 400').length - 1, 2);
+
+  assert.throws(
+    () => runGateVerifierFixture({ releaseMode: 'focused-baseline', legacyStatus: 401 }),
+    (error) => error.status === 1 && /expected infrastructure maintenance HTTP 503/
+      .test(String(error.stderr))
+  );
+  assert.throws(
+    () => runGateVerifierFixture({ releaseMode: 'focused-baseline', webhookStatus: 503 }),
+    (error) => error.status === 1 && /maintenance gate also blocks/
+      .test(String(error.stderr))
+  );
+
+  const inactive = runGateVerifierFixture({
+    releaseMode: 'focused-baseline',
+    state: 'inactive',
+    orderStatus: 401,
+    legacyStatus: 401,
+  });
+  assert.equal(inactive.split('POST /api/payments/create-payment-intent: HTTP 401').length - 1, 2);
+
+  const normal = runGateVerifierFixture({ legacyStatus: 404 });
+  assert.doesNotMatch(normal, /create-payment-intent/);
+  assert.throws(
+    () => runGateVerifierFixture({ releaseMode: 'unsupported' }),
+    (error) => error.status === 2 && /--release-mode must be release or focused-baseline/
+      .test(String(error.stderr))
+  );
 });
 
 test('gate transition failure best-effort restores both rules active', () => {

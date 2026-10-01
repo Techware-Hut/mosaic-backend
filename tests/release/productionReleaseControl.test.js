@@ -42,6 +42,22 @@ const {
   queryActiveReservations,
   run: runReservationDiagnostic,
 } = require('../../scripts/release/query-active-reservations');
+const {
+  APPROVED_BASELINE_SHA,
+  analyzeCheckoutSurface,
+  verifyFocusedBaselineProvenance,
+} = require('../../scripts/release/verify-checkout-surface-contract');
+const {
+  hasCanonicalPostRoute,
+  hasLegacyPostRoute,
+  verifyStatuses: verifyTargetCheckoutStatuses,
+} = require('../../scripts/release/probe-target-checkout-surface');
+const {
+  CORS_ORIGINS,
+  WEBHOOK_PATHS,
+  parseArgs: parsePublicArgs,
+  verifyProductionPublicSurfaces,
+} = require('../../scripts/release/verify-production-public-surfaces');
 
 const webhookPaths = [
   '/api/webhooks/stripe',
@@ -371,4 +387,161 @@ test('Stripe raw-body webhook middleware remains mounted before JSON parsing', (
     assert.ok(markerIndex > 0, `missing raw webhook mount ${marker}`);
     assert.ok(markerIndex < jsonIndex, `${marker} must remain before express.json`);
   }
+});
+
+test('focused-baseline source gate requires both approved routes and exact baseline provenance', () => {
+  const appSource = "app.use('/api/orders', orderRoutes); app.use('/api/payments', paymentRoutes);";
+  const orderRoutesSource = "router.post('/initiate', authenticate, isCustomer, initiateOrder);";
+  const paymentRoutesSource = "paymentRouter.post('/create-payment-intent', authenticate, isCustomer, createPaymentIntent);";
+  const baselineProvenance = {
+    verified: true,
+    baselineSha: APPROVED_BASELINE_SHA,
+    targetSha: 'a'.repeat(40),
+  };
+  const inputs = {
+    appSource,
+    orderRoutesSource,
+    paymentRoutesSource,
+    runtimeRouteSources: [appSource, orderRoutesSource, paymentRoutesSource],
+    releaseMode: 'focused-baseline',
+    baselineProvenance,
+  };
+  const result = analyzeCheckoutSurface(inputs);
+  assert.equal(result.status, 'passed');
+  assert.equal(result.legacyPaymentSurface, 'active-authenticated-baseline');
+  assert.equal(result.legacyRegistrationCount, 1);
+  assert.equal(analyzeCheckoutSurface({ ...inputs, baselineProvenance: null }).status, 'blocked');
+  assert.equal(analyzeCheckoutSurface({ ...inputs, paymentRoutesSource: '' }).status, 'blocked');
+  assert.equal(analyzeCheckoutSurface({
+    ...inputs,
+    runtimeRouteSources: [...inputs.runtimeRouteSources, "alternate.post('/create-payment-intent', handler);"],
+  }).status, 'blocked');
+  assert.equal(analyzeCheckoutSurface(inputs).nextAction.includes('retired'), false);
+});
+
+test('focused-baseline provenance compares exact target route tree and legacy controller Git objects', () => {
+  const releaseSha = 'a'.repeat(40);
+  const objectIds = new Map([
+    ['HEAD^{commit}', releaseSha],
+    [`${APPROVED_BASELINE_SHA}^{commit}`, APPROVED_BASELINE_SHA],
+  ]);
+  for (const name of ['app.js', 'routes', 'controllers/paymentController.js']) {
+    objectIds.set(`HEAD:${name}`, 'b'.repeat(40));
+    objectIds.set(`${APPROVED_BASELINE_SHA}:${name}`, 'b'.repeat(40));
+  }
+  const fakeGit = (_binary, args) => `${objectIds.get(args.at(-1)) || ''}\n`;
+  const options = {
+    root: 'target',
+    baselineRepo: 'controller',
+    releaseSha,
+    baselineSha: APPROVED_BASELINE_SHA,
+    git: fakeGit,
+  };
+  const result = verifyFocusedBaselineProvenance(options);
+  assert.equal(result.verified, true);
+  assert.deepEqual(result.comparedObjects, ['app.js', 'routes', 'controllers/paymentController.js']);
+  assert.throws(() => verifyFocusedBaselineProvenance({ ...options, baselineSha: 'c'.repeat(40) }), /approved production SHA/);
+  assert.throws(() => verifyFocusedBaselineProvenance({ ...options, releaseSha: 'c'.repeat(40) }), /HEAD differs/);
+  objectIds.set('HEAD:routes', 'c'.repeat(40));
+  assert.throws(() => verifyFocusedBaselineProvenance(options), /changes approved payment route provenance: routes/);
+  objectIds.delete('HEAD:routes');
+  assert.throws(() => verifyFocusedBaselineProvenance(options), /Git provenance is unavailable/);
+});
+
+test('focused-baseline target route proof requires both actual mounted POST routes', async () => {
+  const mount = (mountPath, routePath) => ({
+    matchers: [(requestPath) => requestPath.startsWith(mountPath)
+      ? { path: mountPath, params: {} }
+      : false],
+    handle: { stack: [{ route: { path: routePath, methods: { post: true } } }] },
+  });
+  const canonical = mount('/api/orders', '/initiate');
+  const legacy = mount('/api/payments', '/create-payment-intent');
+  assert.equal(hasCanonicalPostRoute({ router: { stack: [canonical, legacy] } }), true);
+  assert.equal(hasLegacyPostRoute({ router: { stack: [canonical, legacy] } }), true);
+  assert.equal(hasLegacyPostRoute({ router: { stack: [canonical] } }), false);
+  const passed = await verifyTargetCheckoutStatuses(async () => 401, undefined, 'focused-baseline');
+  assert.equal(passed.status, 'passed');
+  assert.equal(passed.activeLegacy.length, 4);
+  assert.equal(Object.hasOwn(passed, 'retiredLegacy'), false);
+  await assert.rejects(
+    verifyTargetCheckoutStatuses(async (routePath) => routePath.toLowerCase().includes('payments') ? 404 : 401, undefined, 'focused-baseline'),
+    /approved legacy payment route/
+  );
+});
+
+function focusedPublicFetch(observedSha, canonicalStatus, legacyStatus) {
+  return async (url, options = {}) => {
+    const pathname = new URL(url).pathname;
+    const method = options.method || 'GET';
+    let status = 200;
+    let payload = {};
+    if (pathname === '/api/orders/initiate') status = canonicalStatus;
+    else if (pathname === '/api/payments/create-payment-intent') status = legacyStatus;
+    else if (WEBHOOK_PATHS.includes(pathname)) status = 400;
+    else if (pathname === '/api/users/auth/check') status = 401;
+    else if (pathname === '/api/featured-products' && method === 'OPTIONS') status = 204;
+    else if (['/api/health', '/api/ready', '/api/build-info'].includes(pathname)) {
+      payload = { release: {
+        commit: observedSha.slice(0, 7),
+        deploymentVersion: `mosaic-${observedSha}`,
+        environment: 'production',
+      } };
+    } else if (pathname !== '/api/featured-products') {
+      throw new Error(`Unexpected public fixture request: ${method} ${pathname}`);
+    }
+    return {
+      status,
+      headers: { get: (name) => name === 'access-control-allow-origin' && CORS_ORIGINS.includes(options.headers?.Origin)
+        ? options.headers.Origin : null },
+      json: async () => payload,
+    };
+  };
+}
+
+test('focused-baseline public proof distinguishes preflight, gated deployment, and ungated routes', async () => {
+  const releaseSha = 'a'.repeat(40);
+  const cases = [
+    ['preflight', APPROVED_BASELINE_SHA, 401, 401],
+    ['deployed', releaseSha, 503, 503],
+    ['ungated', releaseSha, 401, 401],
+  ];
+  for (const [mode, observedSha, canonicalStatus, legacyStatus] of cases) {
+    const result = await verifyProductionPublicSurfaces({
+      mode,
+      releaseMode: 'focused-baseline',
+      baseUrl: 'https://api.example.test',
+      expectedSha: releaseSha,
+      fetchImpl: focusedPublicFetch(observedSha, canonicalStatus, legacyStatus),
+    });
+    assert.equal(result.legacyPaymentStatus, legacyStatus);
+    assert.equal(result.legacyPaymentSurface, 'active-authenticated-baseline');
+    assert.equal(result.legacyPaymentCutover, null);
+  }
+  await assert.rejects(
+    verifyProductionPublicSurfaces({
+      mode: 'deployed',
+      releaseMode: 'focused-baseline',
+      baseUrl: 'https://api.example.test',
+      expectedSha: releaseSha,
+      fetchImpl: focusedPublicFetch(releaseSha, 503, 401),
+    }),
+    /expected deployed state/
+  );
+  await assert.rejects(
+    verifyProductionPublicSurfaces({
+      mode: 'preflight',
+      releaseMode: 'focused-baseline',
+      baseUrl: 'https://api.example.test',
+      expectedSha: releaseSha,
+      fetchImpl: focusedPublicFetch(APPROVED_BASELINE_SHA, 401, 404),
+    }),
+    /expected preflight state/
+  );
+});
+
+test('focused-baseline CLI does not require retirement attestation; normal preflight still does', () => {
+  const baseArgs = ['--mode', 'preflight', '--base-url', 'https://api.example.test', '--expected-sha', 'a'.repeat(40), '--output', 'fixture.json'];
+  assert.equal(parsePublicArgs([...baseArgs, '--release-mode', 'focused-baseline']).releaseMode, 'focused-baseline');
+  assert.throws(() => parsePublicArgs(baseArgs), /Preflight requires a full legacy-retirement-sha/);
 });

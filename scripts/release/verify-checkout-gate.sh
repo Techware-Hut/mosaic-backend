@@ -4,14 +4,38 @@ set -euo pipefail
 HTTP_TIMEOUT_SECONDS="${RELEASE_HTTP_TIMEOUT_SECONDS:-15}"
 CURL_BIN="${CURL_BIN:-curl}"
 EXPECTED_STATE="active"
+RELEASE_MODE="release"
 
-if [ "${1:-}" = "--state" ]; then
-  EXPECTED_STATE="${2:-}"
-  shift 2 || true
-fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --state|--release-mode)
+      if [ "$#" -lt 2 ]; then
+        echo "$1 requires a value" >&2
+        exit 2
+      fi
+      if [ "$1" = "--state" ]; then
+        EXPECTED_STATE="$2"
+      else
+        RELEASE_MODE="$2"
+      fi
+      shift 2
+      ;;
+    --*)
+      echo "Unsupported option: $1" >&2
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 if [ "$EXPECTED_STATE" != "active" ] && [ "$EXPECTED_STATE" != "inactive" ]; then
   echo "--state must be active or inactive" >&2
+  exit 2
+fi
+if [ "$RELEASE_MODE" != "release" ] && [ "$RELEASE_MODE" != "focused-baseline" ]; then
+  echo "--release-mode must be release or focused-baseline" >&2
   exit 2
 fi
 
@@ -20,7 +44,7 @@ if [ "$#" -eq 0 ] && [ -n "${PRODUCTION_API_URL:-}" ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-  echo "Usage: verify-checkout-gate.sh [--state active|inactive] BASE_URL [BASE_URL ...]" >&2
+  echo "Usage: verify-checkout-gate.sh [--state active|inactive] [--release-mode release|focused-baseline] BASE_URL [BASE_URL ...]" >&2
   exit 2
 fi
 
@@ -77,6 +101,14 @@ checkout_paths=(
   "/API/ORDERS/INITIATE"
   "/Api/Orders/Initiate/"
 )
+if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+  checkout_paths+=(
+    "/api/payments/create-payment-intent"
+    "/api/payments/create-payment-intent/"
+    "/API/PAYMENTS/CREATE-PAYMENT-INTENT"
+    "/Api/Payments/Create-Payment-Intent/"
+  )
+fi
 
 surface_number=0
 for candidate_base_url in "$@"; do

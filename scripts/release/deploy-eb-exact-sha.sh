@@ -8,10 +8,33 @@ EB_APPLICATION_VALUE="${EB_APPLICATION_NAME:-}"
 EB_ENVIRONMENT_VALUE="${EB_ENVIRONMENT_NAME:-}"
 RELEASE_MODE_VALUE="${RELEASE_MODE:-release}"
 AWS_CLI="${AWS_CLI:-aws}"
+APPROVED_FOCUSED_BASELINE_SHA="9bc75c257a9f483a287f122dbd38514b7a4b55d4"
 
 if [[ ! "$RELEASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
   echo "Usage: deploy-eb-exact-sha.sh <full-release-sha> [output-json]" >&2
   exit 2
+fi
+if [ "$RELEASE_MODE_VALUE" = "focused-baseline" ]; then
+  # Declare the exact target contract now, but never package or mutate AWS in
+  # Wave 1. Later work must add protected-branch, OIDC, live dual-route gate,
+  # and payment-liability proofs before this fail-closed stop can be removed.
+  if [ "${FOCUSED_BASELINE_SHA:-}" != "$APPROVED_FOCUSED_BASELINE_SHA" ] \
+    || [[ ! "${FOCUSED_RELEASE_REF:-}" =~ ^refs/heads/release/focused/[a-z0-9]+(-[a-z0-9]+)*$ ]] \
+    || [ "$RELEASE_SHA" = "$APPROVED_FOCUSED_BASELINE_SHA" ]; then
+    echo "Focused target is not bound to the approved production baseline and protected ref" >&2
+    exit 2
+  fi
+  echo "Focused production mutation is disabled until external release gates are complete" >&2
+  exit 1
+fi
+if [ "$RELEASE_MODE_VALUE" = "focused-rollback" ]; then
+  if [ "$RELEASE_SHA" != "$APPROVED_FOCUSED_BASELINE_SHA" ] \
+    || [[ ! "${FOCUSED_RELEASE_SHA:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "Focused rollback must target the pinned production baseline from an exact focused release" >&2
+    exit 2
+  fi
+  echo "Focused rollback mutation is disabled until external release gates are complete" >&2
+  exit 1
 fi
 if [ "$RELEASE_MODE_VALUE" != "release" ] && [ "$RELEASE_MODE_VALUE" != "rollback" ]; then
   echo "RELEASE_MODE must be release or rollback" >&2

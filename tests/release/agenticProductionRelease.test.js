@@ -18,6 +18,7 @@ const infrastructureSetupPath = path.join(
 
 const {
   ROLLBACK_CONFIRMATION,
+  FOCUSED_BASELINE_SHA,
   resolveProductionRelease,
 } = require('../../scripts/release/resolve-production-release');
 const {
@@ -121,6 +122,33 @@ test('old main ancestors are available only through explicit break-glass rollbac
     }),
     /exact confirmation phrase/
   );
+});
+
+test('focused baseline resolves only an exact protected branch tip and approved production baseline', () => {
+  const focused = {
+    event: 'workflow_dispatch',
+    requestedSha: shaB,
+    mode: 'focused-baseline',
+    baselineSha: FOCUSED_BASELINE_SHA,
+    releaseRef: 'refs/heads/release/focused/booking-filter',
+    sourcePr: '290',
+    focusedRefSha: shaB,
+  };
+  const result = resolver(focused);
+  assert.equal(result.releaseSha, shaB);
+  assert.equal(result.sourceRequired, true);
+  assert.equal(result.breakGlass, false);
+  assert.deepEqual(result.focusedSource, {
+    baselineSha: FOCUSED_BASELINE_SHA,
+    releaseRef: focused.releaseRef,
+    sourcePr: 290,
+  });
+  assert.throws(() => resolver({ ...focused, baselineSha: shaA }), /approved production SHA/);
+  assert.throws(() => resolver({ ...focused, focusedRefSha: shaA }), /branch tip/);
+  assert.throws(() => resolver({ ...focused, releaseRef: 'refs/heads/staging' }), /protected release\/focused/);
+  assert.throws(() => resolver({ ...focused, sourcePr: '' }), /merged PR number/);
+  assert.throws(() => resolver({ ...focused, workflowSha: shaB }), /workflow definition is not the exact current main/);
+  assert.throws(() => resolver({ ...focused, event: 'push' }), /Push-triggered releases cannot enter/);
 });
 
 function pullRequest(overrides = {}) {
@@ -749,6 +777,99 @@ test('rollback treats skipped source certification as expected in workflow resul
   assert.equal(evidence.preApproval.sourceCertificate, 'skipped');
 });
 
+test('focused evidence keeps certification separate from deployment and rejects missing source proof', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-focused-evidence-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const focusedSource = {
+    baselineSha: FOCUSED_BASELINE_SHA,
+    releaseRef: 'refs/heads/release/focused/booking-filter',
+    sourcePr: 290,
+  };
+  writeEvidenceFile(directory, 'release-identity.json', {
+    mode: 'focused-baseline', releaseSha: shaA, focusedSource,
+  });
+  writeEvidenceFile(directory, 'workflow-results.json', {
+    schemaVersion: 1, releaseMode: 'focused-baseline',
+    jobs: {
+      resolve: 'success', exactCi: 'success', targetCheckoutSurface: 'success',
+      sourceCertificate: 'success', publicPreflight: 'success', awsPreflight: 'success',
+      readiness: 'success', production: 'skipped',
+    },
+  });
+  let evidence = buildProductionEvidence({
+    directory, releaseSha: shaA, releaseMode: 'focused-baseline', jobStatus: 'success',
+  });
+  assert.equal(evidence.failingPhase, 'focused-source-certificate-artifact');
+  assert.equal(evidence.focusedBaseline.readOnlyPreflightPassed, false);
+  assert.equal(evidence.preApproval.sourceCertificate, 'not-proven');
+  writeEvidenceFile(directory, 'source-certificate.json', {
+    schemaVersion: 1, mode: 'focused-baseline', status: 'passed', repository, releaseSha: shaA,
+    baselineSha: focusedSource.baselineSha, releaseRef: focusedSource.releaseRef,
+    sourcePr: focusedSource.sourcePr, branchTipSha: shaA,
+    sourceSha: 'bcb9f101c58df6d7df994e94442970b91f36e74c',
+    rulesetBypassActorsVisible: false,
+    productionAccepted: false,
+    changedFiles: [
+      { status: 'M', file: 'controllers/bookingController.js' },
+      { status: 'A', file: 'tests/vendor/vendor-booking-type-filter.test.js' },
+    ],
+  });
+  writeEvidenceFile(directory, 'exact-target-checkout-runtime.json', {
+    status: 'passed', releaseMode: 'focused-baseline', releaseSha: shaA,
+    canonicalRouteTableVerified: true, legacyRouteTableVerified: true,
+  });
+  writeEvidenceFile(directory, 'checkout-surface.json', {
+    status: 'passed', releaseMode: 'focused-baseline',
+    baselineProvenance: { verified: true, targetSha: shaA, baselineSha: FOCUSED_BASELINE_SHA },
+  });
+  writeEvidenceFile(directory, 'public-preflight.json', {
+    mode: 'preflight', releaseMode: 'focused-baseline', expectedSha: shaA,
+    observedSha: FOCUSED_BASELINE_SHA, checkoutStatus: 401, legacyPaymentStatus: 401,
+  });
+  writeEvidenceFile(directory, 'aws-preflight.json', {
+    status: 'passed', phase: 'preflight', releaseSha: shaA,
+  });
+  evidence = buildProductionEvidence({
+    directory, releaseSha: shaA, releaseMode: 'focused-baseline', jobStatus: 'success',
+  });
+  assert.equal(evidence.focusedBaseline.readOnlyPreflightPassed, true);
+  assert.equal(evidence.failingPhase, 'focused-external-gates-not-complete');
+  assert.equal(evidence.tests.unit, 'success');
+  assert.equal(evidence.tests.contract, 'success');
+  assert.equal(evidence.tests.integration, 'success');
+  assert.equal(evidence.status, 'blocked');
+  assert.equal(evidence.productionMutation, false);
+  assert.equal(evidence.preApproval.productionApprovalEntered, false);
+  assert.equal(evidence.deployment.attempted, false);
+  assert.equal(evidence.focusedBaseline.externalGates.paymentLiability, 'not-proven');
+  assert.equal(evidence.focusedBaseline.externalGates.protectedRefNoBypass, 'not-proven');
+  writeEvidenceFile(directory, 'workflow-results.json', {
+    schemaVersion: 1, releaseMode: 'focused-baseline',
+    jobs: {
+      resolve: 'success', exactCi: 'failure', targetCheckoutSurface: 'success',
+      sourceCertificate: 'success', publicPreflight: 'success', awsPreflight: 'success',
+      readiness: 'skipped', production: 'skipped',
+    },
+  });
+  evidence = buildProductionEvidence({
+    directory, releaseSha: shaA, releaseMode: 'focused-baseline', jobStatus: 'failure',
+  });
+  assert.equal(evidence.failingPhase, 'exact-sha-ci');
+  assert.equal(evidence.focusedBaseline.readOnlyPreflightPassed, false);
+  assert.equal(evidence.tests.unit, 'failure');
+});
+
+test('focused deploy exits before any AWS or packaging operation', () => {
+  const script = `RELEASE_MODE=focused-baseline FOCUSED_BASELINE_SHA=${FOCUSED_BASELINE_SHA} FOCUSED_RELEASE_REF=refs/heads/release/focused/booking-filter AWS_CLI=this-command-must-never-be-called bash scripts/release/deploy-eb-exact-sha.sh ${shaA}`;
+  const result = spawnSync('bash', ['-c', script], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Focused production mutation is disabled/);
+  assert.doesNotMatch(result.stderr, /this-command-must-never-be-called/);
+});
+
 test('timeout after update remains a blocked attempted but unverified deployment', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-release-evidence-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -845,7 +966,7 @@ test('production workflow is automatic-preflight then one approved serialized re
   assert.match(workflow, /AWS_PREFLIGHT_ROLE_TO_ASSUME/);
   assert.match(workflow, /Checkout fresh exact target for runtime route proof[\s\S]*npm ci --ignore-scripts[\s\S]*probe-target-checkout-surface\.js/);
   assert.match(workflow, /release-readiness:[\s\S]*target-checkout-surface[\s\S]*needs\.target-checkout-surface\.result == 'success'/);
-  assert.match(workflow, /Require exclusive canonical checkout surface in exact target[\s\S]*--root release-target[\s\S]*Observe public production safely/);
+  assert.match(workflow, /Require approved checkout surface in exact target[\s\S]*--root release-target[\s\S]*Observe public production safely/);
   assert.match(workflow, /Bind retirement attestation to deployed and target ancestry[\s\S]*merge-base --is-ancestor/);
   assert.match(workflow, /Checkout exact release commit[\s\S]*persist-credentials: false/);
   assert.match(workflow, /verify-main-release-source\.js/);
@@ -854,6 +975,15 @@ test('production workflow is automatic-preflight then one approved serialized re
   assert.match(workflow, /deploy-eb-exact-sha\.sh/);
   assert.match(workflow, /manage-checkout-gate\.js disable/);
   assert.doesNotMatch(workflow, /gh pr merge|enable-auto-merge|pull_request_target/);
+});
+
+test('focused workflow requires exact target CI and source proof but never enters production mutation', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /focused-baseline[\s\S]*baseline_sha:[\s\S]*release_ref:[\s\S]*source_pr:/);
+  assert.match(workflow, /exact-ci:[\s\S]*ref: \$\{\{ needs\.resolve-release\.outputs\.release_sha \}\}[\s\S]*run: npm ci[\s\S]*run: npm test[\s\S]*run: npm run test:contract[\s\S]*run: npm run test:integration/);
+  assert.match(workflow, /Verify protected focused source and exact two-file provenance[\s\S]*verify-focused-release-source\.js/);
+  assert.match(workflow, /production-approval-and-release:[\s\S]*if: \$\{\{[^\n]*release_mode != 'focused-baseline'/);
+  assert.match(workflow, /Reassert safe gate after any post-enable failure/);
 });
 
 test('trusted controller supports historical rollback targets and fail-safe gate recovery', () => {
