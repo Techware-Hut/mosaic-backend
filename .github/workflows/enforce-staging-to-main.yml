@@ -37,12 +37,8 @@ jobs:
           const approvedRepository = 'Techware-Hut/mosaic-backend';
           const approvedBranch = 'codex/focused-release-wave1';
           const approvedBase = 'da890fbd6741ef2e4c618bed84ef0072ece7932d';
-          const approvedHead = 'd7ff8e041c7ffecd52043e844eb2dac76210e779';
-          const approvedCommits = [
-            'af4146d524b393903a338c617f9d1eed7d42f56d',
-            'b6e3c5285d066c150d292c01258e55bf2448dd52',
-            approvedHead,
-          ];
+          const reviewedHead = 'd7ff8e041c7ffecd52043e844eb2dac76210e779';
+          const reviewedTree = 'e4b6ead713328fc8e67ca53e91cfb14af8008174';
           const approvedFiles = [
             '.github/workflows/deploy-eb-production.yml',
             'docs/release/AGENTIC_RELEASE_OPERATIONS.md',
@@ -62,6 +58,18 @@ jobs:
             'tests/release/productionReleaseControl.test.js',
             'tests/release/productionReleaseInfrastructure.test.js',
           ].sort();
+          const approvedSet = new Set(approvedFiles);
+          const approvedAncestors = new Set();
+          for (const path of approvedFiles) {
+            const parts = path.split('/');
+            for (let index = 1; index < parts.length; index += 1) {
+              approvedAncestors.add(parts.slice(0, index).join('/'));
+            }
+          }
+          const addedFiles = new Set([
+            'scripts/release/verify-focused-release-source.js',
+            'tests/release/focusedReleaseCertificate.test.js',
+          ]);
 
           function reject(message) {
             throw new Error(message);
@@ -71,7 +79,7 @@ jobs:
             try {
               return JSON.parse(execFileSync('gh', ['api', path], {
                 encoding: 'utf8',
-                maxBuffer: 4 * 1024 * 1024,
+                maxBuffer: 8 * 1024 * 1024,
                 stdio: ['ignore', 'pipe', 'pipe'],
               }));
             } catch {
@@ -88,52 +96,145 @@ jobs:
             console.log('The independently required App-owned status supplies trusted certification.');
           }
 
+          function isSha(value) {
+            return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
+          }
+
+          function refSha(ref) {
+            const sha = api('repos/' + repository + '/git/ref/' + ref)?.object?.sha;
+            if (!isSha(sha)) reject('Required live Git ref is missing or malformed.');
+            return sha;
+          }
+
+          function commitAt(sha) {
+            if (!isSha(sha)) reject('Required commit SHA is malformed.');
+            const commit = api('repos/' + repository + '/git/commits/' + sha);
+            if (commit?.sha !== sha || !isSha(commit?.tree?.sha)) {
+              reject('Required Git commit or tree identity is invalid.');
+            }
+            return commit;
+          }
+
+          function treeAt(treeSha) {
+            if (!isSha(treeSha)) reject('Required tree SHA is malformed.');
+            const result = api('repos/' + repository + '/git/trees/' + treeSha + '?recursive=1');
+            if (result?.sha !== treeSha || result?.truncated !== false ||
+                !Array.isArray(result?.tree)) {
+              reject('Required complete Git tree is unavailable.');
+            }
+            const paths = new Set();
+            const entries = new Map();
+            for (const item of result.tree) {
+              if (typeof item?.path !== 'string' || !item.path ||
+                  paths.has(item.path) || !isSha(item?.sha) ||
+                  typeof item?.mode !== 'string' ||
+                  !['tree', 'blob', 'commit'].includes(item?.type)) {
+                reject('Git tree contains an invalid or duplicate entry.');
+              }
+              paths.add(item.path);
+              entries.set(item.path, {
+                sha: item.sha,
+                mode: item.mode,
+                type: item.type,
+              });
+            }
+            return entries;
+          }
+
+          function sameEntry(left, right) {
+            if (left == null || right == null) return left == null && right == null;
+            return left.sha === right.sha && left.mode === right.mode &&
+              left.type === right.type;
+          }
+
+          function assertPullIdentity(pull, headSha) {
+            if (pull?.number !== 293 || pull?.state !== 'open' ||
+                pull?.head?.repo?.full_name !== repository ||
+                pull?.head?.ref !== approvedBranch || pull?.head?.sha !== headSha ||
+                pull?.base?.repo?.full_name !== repository || pull?.base?.ref !== 'main' ||
+                pull?.changed_files !== approvedFiles.length) {
+              reject('Live pull request identity or changed-file count does not match Wave 1.');
+            }
+          }
+
           function verifyPinnedWaveOne() {
             if (repository !== approvedRepository ||
                 process.env.PR_NUMBER !== '293' ||
                 process.env.BASE_REF !== 'main' ||
                 process.env.HEAD_REF !== approvedBranch ||
-                process.env.HEAD_SHA !== approvedHead) {
+                !isSha(process.env.HEAD_SHA)) {
               reject('Pull request does not match the pinned Wave 1 admission tuple.');
             }
 
-            const pull = api(`repos/${repository}/pulls/293`);
-            if (pull?.number !== 293 || pull?.state !== 'open' ||
-                pull?.head?.repo?.full_name !== repository ||
-                pull?.head?.ref !== approvedBranch || pull?.head?.sha !== approvedHead ||
-                pull?.base?.repo?.full_name !== repository || pull?.base?.ref !== 'main' ||
-                pull?.changed_files !== approvedFiles.length) {
-              reject('Live pull request identity or changed-file count does not match Wave 1.');
+            const pullPath = 'repos/' + repository + '/pulls/293';
+            const branchRef = 'heads/' + approvedBranch;
+            const mainSha = refSha('heads/main');
+            const pull = api(pullPath);
+            const headSha = pull?.head?.sha;
+            assertPullIdentity(pull, headSha);
+            if (!isSha(headSha) || process.env.HEAD_SHA !== headSha ||
+                refSha(branchRef) !== headSha) {
+              reject('Wave 1 event, pull request, and live branch heads differ.');
             }
 
-            const branchRef = `repos/${repository}/git/ref/heads/${approvedBranch}`;
-            if (api(branchRef)?.object?.sha !== approvedHead) {
-              reject('Wave 1 branch no longer points to the approved head SHA.');
+            const headCommit = commitAt(headSha);
+            if (!Array.isArray(headCommit.parents) ||
+                headCommit.parents.length !== 2 ||
+                headCommit.parents[0]?.sha !== reviewedHead ||
+                headCommit.parents[1]?.sha !== mainSha) {
+              reject('Wave 1 head is not the single approved main synchronization merge.');
             }
-
-            const comparison = api(`repos/${repository}/compare/${approvedBase}...${approvedHead}`);
+            const comparison = api('repos/' + repository + '/compare/' +
+              mainSha + '...' + headSha);
             if (comparison?.status !== 'ahead' || comparison?.behind_by !== 0 ||
-                comparison?.ahead_by !== approvedCommits.length ||
-                comparison?.total_commits !== approvedCommits.length ||
-                comparison?.base_commit?.sha !== approvedBase ||
-                comparison?.merge_base_commit?.sha !== approvedBase ||
-                !Array.isArray(comparison?.commits) ||
-                comparison.commits.length !== approvedCommits.length) {
-              reject('Wave 1 ancestry is not the approved linear history.');
+                comparison?.base_commit?.sha !== mainSha ||
+                comparison?.merge_base_commit?.sha !== mainSha ||
+                !Number.isInteger(comparison?.ahead_by) || comparison.ahead_by < 1) {
+              reject('Wave 1 head is not descended from the live main tip.');
             }
-            for (let index = 0; index < approvedCommits.length; index += 1) {
-              const commit = comparison.commits[index];
-              const parent = index === 0 ? approvedBase : approvedCommits[index - 1];
-              if (commit?.sha !== approvedCommits[index] ||
-                  !Array.isArray(commit?.parents) || commit.parents.length !== 1 ||
-                  commit.parents[0]?.sha !== parent) {
-                reject('Wave 1 ancestry is not the approved linear history.');
+
+            const baseCommit = commitAt(approvedBase);
+            const reviewedCommit = commitAt(reviewedHead);
+            const mainCommit = commitAt(mainSha);
+            if (reviewedCommit.tree.sha !== reviewedTree) {
+              reject('Reviewed Wave 1 tree does not match its approved identity.');
+            }
+            const originalEntries = treeAt(baseCommit.tree.sha);
+            const reviewedEntries = treeAt(reviewedTree);
+            const mainEntries = treeAt(mainCommit.tree.sha);
+            const headEntries = treeAt(headCommit.tree.sha);
+
+            for (const path of approvedFiles) {
+              const original = originalEntries.get(path);
+              const reviewed = reviewedEntries.get(path);
+              const main = mainEntries.get(path);
+              const current = headEntries.get(path);
+              if (!reviewed || reviewed.type !== 'blob' ||
+                  (addedFiles.has(path) ? original != null : original == null) ||
+                  !sameEntry(main, original) || !sameEntry(current, reviewed)) {
+                reject('Wave 1 approved-path payload or live main baseline changed.');
+              }
+            }
+            for (const path of new Set([...mainEntries.keys(), ...headEntries.keys()])) {
+              if (approvedSet.has(path)) continue;
+              const main = mainEntries.get(path);
+              const current = headEntries.get(path);
+              if (approvedAncestors.has(path)) {
+                // Approved child files change parent tree hashes. Their directory
+                // presence, mode, and type must still match; all other entries
+                // are compared below, including unexpected empty directories.
+                if (!main || !current || main.type !== 'tree' ||
+                    current.type !== 'tree' || main.mode !== current.mode) {
+                  reject('Wave 1 head changes an approved ancestor directory.');
+                }
+              } else if (!sameEntry(main, current)) {
+                reject('Wave 1 head changes an unapproved tree path.');
               }
             }
 
             const files = [];
             for (let page = 1; ; page += 1) {
-              const batch = api(`repos/${repository}/pulls/293/files?per_page=100&page=${page}`);
+              const batch = api(pullPath + '/files?per_page=100&page=' + page);
               if (!Array.isArray(batch) || batch.length > 100) {
                 reject('Wave 1 file pagination is invalid.');
               }
@@ -143,26 +244,31 @@ jobs:
               }
               if (batch.length < 100) break;
             }
-            const actualFiles = files.map((file) => {
-              if (typeof file?.filename !== 'string' ||
-                  !['added', 'modified'].includes(file?.status) ||
-                  file?.previous_filename != null) {
-                reject('Wave 1 includes an unapproved rename or file change.');
+            const actualFiles = new Set();
+            for (const file of files) {
+              const path = file?.filename;
+              const expectedStatus = addedFiles.has(path) ? 'added' : 'modified';
+              if (typeof path !== 'string' || !approvedSet.has(path) ||
+                  actualFiles.has(path) || file?.status !== expectedStatus ||
+                  file?.previous_filename != null ||
+                  file?.sha !== reviewedEntries.get(path)?.sha) {
+                reject('Wave 1 PR files differ from the approved path, status, or blob manifest.');
               }
-              return file.filename;
-            }).sort();
-            if (files.length !== pull.changed_files ||
-                new Set(actualFiles).size !== approvedFiles.length ||
-                actualFiles.some((name, index) => name !== approvedFiles[index])) {
+              actualFiles.add(path);
+            }
+            if (files.length !== approvedFiles.length ||
+                files.length !== pull.changed_files ||
+                actualFiles.size !== approvedFiles.length) {
               reject('Complete Wave 1 changed-file set differs from the approved manifest.');
             }
 
-            if (api(branchRef)?.object?.sha !== approvedHead) {
-              reject('Wave 1 branch moved during policy verification.');
+            if (refSha('heads/main') !== mainSha ||
+                refSha(branchRef) !== headSha) {
+              reject('Main or Wave 1 branch moved during policy verification.');
             }
-            console.log('Exact pinned Wave 1 release-infrastructure source is eligible for promotion.');
+            assertPullIdentity(api(pullPath), headSha);
+            console.log('Reviewed Wave 1 payload is eligible on the exact live main tip.');
           }
-
           try {
             if (process.env.HEAD_REPOSITORY !== repository) {
               reject('Pull requests to main must originate in the canonical repository.');

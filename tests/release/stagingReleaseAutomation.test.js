@@ -60,6 +60,12 @@ const waveOneCommits = [
   'd7ff8e041c7ffecd52043e844eb2dac76210e779',
 ];
 const waveOneBranch = 'codex/focused-release-wave1';
+const synchronizedMain = '1'.repeat(40);
+const synchronizedHead = '2'.repeat(40);
+const baseTreeSha = '3'.repeat(40);
+const mainTreeSha = '4'.repeat(40);
+const synchronizedTreeSha = '5'.repeat(40);
+const reviewedTreeSha = 'e4b6ead713328fc8e67ca53e91cfb14af8008174';
 const waveOneFiles = [
   '.github/workflows/deploy-eb-production.yml',
   'docs/release/AGENTIC_RELEASE_OPERATIONS.md',
@@ -79,6 +85,44 @@ const waveOneFiles = [
   'tests/release/productionReleaseControl.test.js',
   'tests/release/productionReleaseInfrastructure.test.js',
 ];
+const addedWaveOneFiles = new Set([
+  'scripts/release/verify-focused-release-source.js',
+  'tests/release/focusedReleaseCertificate.test.js',
+]);
+const approvedAncestorDirectories = [...new Set(waveOneFiles.flatMap((file) => {
+  const components = file.split('/');
+  return components.slice(1).map((_component, index) => components.slice(0, index + 1).join('/'));
+}))].sort();
+
+function treeEntry(path, sha, mode = '100644', type = 'blob') {
+  return { path, sha, mode, type };
+}
+
+function waveOneTrees() {
+  const base = waveOneFiles.flatMap((file, index) => addedWaveOneFiles.has(file)
+    ? [] : [treeEntry(file, String(index + 1).padStart(40, '0'),
+      file === 'scripts/release/verify-checkout-gate.sh' ? '100755' : '100644')]);
+  const reviewed = waveOneFiles.map((file, index) => treeEntry(
+    file,
+    String(index + 101).padStart(40, '0'),
+    file === 'scripts/release/verify-checkout-gate.sh' ? '100755' : '100644'
+  ));
+  const ordinary = [
+    treeEntry('README.md', '6'.repeat(40)),
+    treeEntry('controllers', '8'.repeat(40), '040000', 'tree'),
+    treeEntry('controllers/bookingController.js', '7'.repeat(40)),
+  ];
+  const baseDirectories = approvedAncestorDirectories.map((directory, index) =>
+    treeEntry(directory, String(index + 201).padStart(40, '0'), '040000', 'tree'));
+  const reviewedDirectories = approvedAncestorDirectories.map((directory, index) =>
+    treeEntry(directory, String(index + 301).padStart(40, '0'), '040000', 'tree'));
+  return {
+    base: [...baseDirectories, ...base, ...ordinary],
+    reviewed: [...reviewedDirectories, ...reviewed, ...ordinary],
+    main: [...baseDirectories, ...base, ...ordinary],
+    synchronized: [...reviewedDirectories, ...reviewed, ...ordinary],
+  };
+}
 
 function sourcePolicyScript() {
   const match = sourcePolicyWorkflow.match(/^ {10}node <<'NODE'\r?\n([\s\S]*?)^ {10}NODE\s*$/m);
@@ -87,31 +131,52 @@ function sourcePolicyScript() {
 }
 
 function waveOneApiFixtures() {
-  const head = waveOneCommits[2];
+  const trees = waveOneTrees();
   return {
     [`repos/${repository}/pulls/293`]: {
       number: 293,
       state: 'open',
-      head: { ref: waveOneBranch, sha: head, repo: { full_name: repository } },
-      base: { ref: 'main', repo: { full_name: repository } },
+      head: { ref: waveOneBranch, sha: synchronizedHead, repo: { full_name: repository } },
+      // PR metadata can lag the live main ref; effective-base proof uses ancestry.
+      base: { ref: 'main', sha: waveOneBase, repo: { full_name: repository } },
       changed_files: waveOneFiles.length,
     },
-    [`repos/${repository}/git/ref/heads/${waveOneBranch}`]: { object: { sha: head } },
-    [`repos/${repository}/compare/${waveOneBase}...${head}`]: {
-      status: 'ahead',
-      ahead_by: 3,
-      behind_by: 0,
-      total_commits: 3,
-      base_commit: { sha: waveOneBase },
-      merge_base_commit: { sha: waveOneBase },
-      commits: waveOneCommits.map((sha, index) => ({
-        sha,
-        parents: [{ sha: index === 0 ? waveOneBase : waveOneCommits[index - 1] }],
-      })),
+    [`repos/${repository}/git/ref/heads/${waveOneBranch}`]: { object: { sha: synchronizedHead } },
+    [`repos/${repository}/git/ref/heads/main`]: { object: { sha: synchronizedMain } },
+    [`repos/${repository}/git/commits/${synchronizedHead}`]: {
+      sha: synchronizedHead,
+      tree: { sha: synchronizedTreeSha },
+      parents: [{ sha: waveOneCommits[2] }, { sha: synchronizedMain }],
     },
+    [`repos/${repository}/git/commits/${synchronizedMain}`]: {
+      sha: synchronizedMain,
+      tree: { sha: mainTreeSha },
+    },
+    [`repos/${repository}/git/commits/${waveOneBase}`]: {
+      sha: waveOneBase,
+      tree: { sha: baseTreeSha },
+    },
+    [`repos/${repository}/git/commits/${waveOneCommits[2]}`]: {
+      sha: waveOneCommits[2],
+      tree: { sha: reviewedTreeSha },
+    },
+    [`repos/${repository}/compare/${synchronizedMain}...${synchronizedHead}`]: {
+      status: 'ahead',
+      ahead_by: 1,
+      behind_by: 0,
+      total_commits: 1,
+      base_commit: { sha: synchronizedMain },
+      merge_base_commit: { sha: synchronizedMain },
+      commits: [{ sha: synchronizedHead }],
+    },
+    [`repos/${repository}/git/trees/${baseTreeSha}?recursive=1`]: { sha: baseTreeSha, truncated: false, tree: trees.base },
+    [`repos/${repository}/git/trees/${reviewedTreeSha}?recursive=1`]: { sha: reviewedTreeSha, truncated: false, tree: trees.reviewed },
+    [`repos/${repository}/git/trees/${mainTreeSha}?recursive=1`]: { sha: mainTreeSha, truncated: false, tree: trees.main },
+    [`repos/${repository}/git/trees/${synchronizedTreeSha}?recursive=1`]: { sha: synchronizedTreeSha, truncated: false, tree: trees.synchronized },
     [`repos/${repository}/pulls/293/files?per_page=100&page=1`]: waveOneFiles.map((filename) => ({
       filename,
-      status: 'modified',
+      status: addedWaveOneFiles.has(filename) ? 'added' : 'modified',
+      sha: trees.reviewed.find((entry) => entry.path === filename).sha,
     })),
   };
 }
@@ -126,7 +191,7 @@ function runSourcePolicy({ env = {}, responses = {}, failApi, mutateApi } = {}) 
       EXPECTED_REPOSITORY: repository,
       HEAD_REPOSITORY: repository,
       HEAD_REF: waveOneBranch,
-      HEAD_SHA: waveOneCommits[2],
+      HEAD_SHA: synchronizedHead,
       BASE_REF: 'main',
       PR_NUMBER: '293',
       ...env,
@@ -329,19 +394,20 @@ test('forked staging fails before any GitHub API read', () => {
   assert.deepEqual(result.calls, []);
 });
 
-test('only the exact pinned Wave 1 PR, live ref, ancestry, and complete manifest pass', () => {
+test('synchronized Wave 1 head passes with stale PR base metadata and reviewed payload', () => {
   const result = runSourcePolicy();
   assert.equal(result.passed, true, result.errors.join('\n'));
   assert.equal(result.calls.filter((path) => path.includes('/files?per_page=100&page=')).length, 1);
   assert.equal(result.calls.filter((path) => path.includes('/git/ref/heads/codex/')).length, 2);
-  assert.match(result.output.join('\n'), /Exact pinned Wave 1/);
+  assert.equal(result.calls.filter((path) => path.endsWith('/git/ref/heads/main')).length, 2);
+  assert.ok(result.calls.includes(`repos/${repository}/git/trees/${reviewedTreeSha}?recursive=1`));
+  assert.match(result.output.join('\n'), /Wave 1/);
 });
 
-test('wrong PR, branch, head SHA, base, or repository cannot use pinned admission', () => {
+test('wrong PR, branch, base, or repository cannot use focused admission', () => {
   const cases = [
     { PR_NUMBER: '294' },
     { HEAD_REF: 'codex/focused-release-wave2' },
-    { HEAD_SHA: shaB },
     { BASE_REF: 'staging' },
     { HEAD_REPOSITORY: 'untrusted/mosaic-backend' },
     { EXPECTED_REPOSITORY: 'untrusted/mosaic-backend', HEAD_REPOSITORY: 'untrusted/mosaic-backend' },
@@ -353,8 +419,9 @@ test('wrong PR, branch, head SHA, base, or repository cannot use pinned admissio
   }
 });
 
-test('live PR identity mismatch fails despite an approved event payload', () => {
+test('event and live PR identity must agree at the synchronized head', () => {
   const pullPath = `repos/${repository}/pulls/293`;
+  assert.equal(runSourcePolicy({ env: { HEAD_SHA: shaB } }).passed, false);
   for (const modify of [
     (pull) => { pull.head.sha = shaB; },
     (pull) => { pull.head.repo.full_name = 'untrusted/mosaic-backend'; },
@@ -371,7 +438,7 @@ test('live PR identity mismatch fails despite an approved event payload', () => 
   }
 });
 
-test('moved Wave 1 branch fails both before and after file verification', () => {
+test('moved Wave 1 branch fails on initial and final ref reads', () => {
   const branchRef = `repos/${repository}/git/ref/heads/${waveOneBranch}`;
   for (const moveOnRead of [1, 2]) {
     const result = runSourcePolicy({
@@ -383,26 +450,162 @@ test('moved Wave 1 branch fails both before and after file verification', () => 
       },
     });
     assert.equal(result.passed, false);
-    assert.match(result.errors.join('\n'), /branch (no longer points|moved during)/);
+    assert.match(result.errors.join('\n'), /branch|ref|head/i);
   }
 });
 
-test('stale or non-linear Wave 1 ancestry fails', () => {
-  const comparisonPath = `repos/${repository}/compare/${waveOneBase}...${waveOneCommits[2]}`;
+test('live main moves before final read fail closed', () => {
+  const mainRef = `repos/${repository}/git/ref/heads/main`;
+  const result = runSourcePolicy({ mutateApi: (path, fixture, calls) => {
+    if (path === mainRef && calls.filter((entry) => entry === mainRef).length === 2) fixture.object.sha = shaB;
+    return fixture;
+  } });
+  assert.equal(result.passed, false);
+});
+
+test('focused head must be exactly one ordered merge of reviewed payload and live main', () => {
+  const commitPath = `repos/${repository}/git/commits/${synchronizedHead}`;
   for (const modify of [
-    (comparison) => { comparison.merge_base_commit.sha = shaB; },
-    (comparison) => { comparison.behind_by = 1; },
-    (comparison) => { comparison.commits[1].parents.push({ sha: shaB }); },
-    (comparison) => { comparison.commits.pop(); },
+    (commit) => { commit.parents[0].sha = shaB; },
+    (commit) => { commit.parents[1].sha = shaB; },
+    (commit) => { commit.parents.reverse(); },
+    (commit) => { commit.parents = [{ sha: synchronizedMain }]; },
+    (commit) => { commit.parents.push({ sha: shaB }); },
   ]) {
     const result = runSourcePolicy({
       mutateApi: (path, fixture) => {
-        if (path === comparisonPath) modify(fixture);
+        if (path === commitPath) modify(fixture);
         return fixture;
       },
     });
     assert.equal(result.passed, false);
-    assert.match(result.errors.join('\n'), /ancestry/);
+  }
+});
+
+test('wrong merge base or non-zero behind count fails despite ordered merge parents', () => {
+  const comparisonPath = `repos/${repository}/compare/${synchronizedMain}...${synchronizedHead}`;
+  for (const modify of [
+    (comparison) => { comparison.merge_base_commit.sha = shaB; },
+    (comparison) => { comparison.behind_by = 1; },
+    (comparison) => { comparison.status = 'diverged'; },
+  ]) {
+    const result = runSourcePolicy({ mutateApi: (path, fixture) => {
+      if (path === comparisonPath) modify(fixture);
+      return fixture;
+    } });
+    assert.equal(result.passed, false);
+  }
+});
+
+test('reviewed source commit must identify the pinned reviewed tree SHA', () => {
+  const reviewedCommit = `repos/${repository}/git/commits/${waveOneCommits[2]}`;
+  const result = runSourcePolicy({ mutateApi: (path, fixture) => {
+    if (path === reviewedCommit) fixture.tree.sha = shaB;
+    return fixture;
+  } });
+  assert.equal(result.passed, false);
+});
+
+test('current unsynchronized PR head is intentionally ineligible before bootstrap rollout', () => {
+  const pullPath = `repos/${repository}/pulls/293`;
+  const refPath = `repos/${repository}/git/ref/heads/${waveOneBranch}`;
+  const result = runSourcePolicy({
+    env: { HEAD_SHA: waveOneCommits[2] },
+    mutateApi: (path, fixture) => {
+      if (path === pullPath) fixture.head.sha = waveOneCommits[2];
+      if (path === refPath) fixture.object.sha = waveOneCommits[2];
+      return fixture;
+    },
+  });
+  assert.equal(result.passed, false);
+});
+
+test('approved synchronized payload rejects changed blob, mode, or object type', () => {
+  const treePath = `repos/${repository}/git/trees/${synchronizedTreeSha}?recursive=1`;
+  for (const modify of [
+    (entry) => { entry.sha = shaB; },
+    (entry) => { entry.mode = '100755'; },
+    (entry) => { entry.type = 'tree'; },
+  ]) {
+    const result = runSourcePolicy({ mutateApi: (path, fixture) => {
+      if (path === treePath) modify(fixture.tree.find((entry) => entry.path === waveOneFiles[0]));
+      return fixture;
+    } });
+    assert.equal(result.passed, false);
+  }
+});
+
+test('live main may not change an approved path from original base', () => {
+  const mainTree = `repos/${repository}/git/trees/${mainTreeSha}?recursive=1`;
+  const result = runSourcePolicy({ mutateApi: (path, fixture) => {
+    if (path === mainTree) fixture.tree.find((entry) => entry.path === waveOneFiles[0]).sha = shaB;
+    return fixture;
+  } });
+  assert.equal(result.passed, false);
+});
+
+test('non-approved synchronized tree entries must match live main exactly', () => {
+  const synchronizedTree = `repos/${repository}/git/trees/${synchronizedTreeSha}?recursive=1`;
+  const result = runSourcePolicy({ mutateApi: (path, fixture) => {
+    if (path === synchronizedTree) {
+      fixture.tree.find((entry) => entry.path === 'controllers/bookingController.js').sha = shaB;
+    }
+    return fixture;
+  } });
+  assert.equal(result.passed, false);
+});
+
+test('unapproved empty directory and unrelated subtree hash changes fail closed', () => {
+  const synchronizedTree = `repos/${repository}/git/trees/${synchronizedTreeSha}?recursive=1`;
+  for (const modify of [
+    (tree) => { tree.tree.push(treeEntry('unexpected-empty-dir', shaB, '040000', 'tree')); },
+    (tree) => { tree.tree.find((entry) => entry.path === 'controllers').sha = shaB; },
+  ]) {
+    const result = runSourcePolicy({ mutateApi: (path, fixture) => {
+      if (path === synchronizedTree) modify(fixture);
+      return fixture;
+    } });
+    assert.equal(result.passed, false);
+  }
+});
+
+test('missing approved and extra synchronized tree entries fail', () => {
+  const synchronizedTree = `repos/${repository}/git/trees/${synchronizedTreeSha}?recursive=1`;
+  for (const modify of [
+    (tree) => { tree.tree = tree.tree.filter((entry) => entry.path !== waveOneFiles[0]); },
+    (tree) => { tree.tree = tree.tree.filter((entry) => entry.path !== 'README.md'); },
+    (tree) => { tree.tree.push(treeEntry('controllers/extra.js', shaB)); },
+    (tree) => { tree.tree.push({ ...tree.tree[0] }); },
+  ]) {
+    const result = runSourcePolicy({ mutateApi: (path, fixture) => {
+      if (path === synchronizedTree) modify(fixture);
+      return fixture;
+    } });
+    assert.equal(result.passed, false);
+  }
+});
+
+test('live PR metadata and source ref are rechecked before success', () => {
+  const pullPath = `repos/${repository}/pulls/293`;
+  const result = runSourcePolicy({ mutateApi: (path, fixture, calls) => {
+    if (path === pullPath && calls.filter((entry) => entry === pullPath).length === 2) {
+      fixture.head.sha = shaB;
+    }
+    return fixture;
+  } });
+  assert.equal(result.passed, false);
+});
+
+test('any truncated tree or required tree API failure fails closed', () => {
+  for (const treeSha of [baseTreeSha, reviewedTreeSha, mainTreeSha, synchronizedTreeSha]) {
+    const treePath = `repos/${repository}/git/trees/${treeSha}?recursive=1`;
+    const truncated = runSourcePolicy({ mutateApi: (path, fixture) => {
+      if (path === treePath) fixture.truncated = true;
+      return fixture;
+    } });
+    assert.equal(truncated.passed, false, treeSha);
+    const missing = runSourcePolicy({ failApi: treePath });
+    assert.equal(missing.passed, false, treeSha);
   }
 });
 
@@ -424,6 +627,21 @@ test('missing, extra, duplicate, and unapproved application files fail exact man
   }
 });
 
+test('file statuses must preserve exactly fifteen modified and two added files', () => {
+  const filesPath = `repos/${repository}/pulls/293/files?per_page=100&page=1`;
+  for (const modify of [
+    (files) => { files[0].status = 'deleted'; },
+    (files) => { files[0].status = 'added'; },
+    (files) => { files.find((file) => addedWaveOneFiles.has(file.filename)).status = 'modified'; },
+  ]) {
+    const result = runSourcePolicy({ mutateApi: (path, fixture) => {
+      if (path === filesPath) modify(fixture);
+      return fixture;
+    } });
+    assert.equal(result.passed, false);
+  }
+});
+
 test('renamed or unapproved prior path fails even when its final name is allowlisted', () => {
   const filesPath = `repos/${repository}/pulls/293/files?per_page=100&page=1`;
   const result = runSourcePolicy({
@@ -436,7 +654,7 @@ test('renamed or unapproved prior path fails even when its final name is allowli
     },
   });
   assert.equal(result.passed, false);
-  assert.match(result.errors.join('\n'), /unapproved rename/);
+  assert.match(result.errors.join('\n'), /PR files differ from the approved path, status, or blob manifest/);
 });
 
 test('GitHub API failure and malformed pagination fail closed', () => {
@@ -452,7 +670,7 @@ test('GitHub API failure and malformed pagination fail closed', () => {
 test('truncated PR-file enumeration fails against the live changed-file count', () => {
   const filesPath = `repos/${repository}/pulls/293/files?per_page=100&page=1`;
   const result = runSourcePolicy({
-    responses: { [filesPath]: waveOneFiles.slice(0, -1).map((filename) => ({ filename, status: 'modified' })) },
+    responses: { [filesPath]: waveOneApiFixtures()[filesPath].slice(0, -1) },
   });
   assert.equal(result.passed, false);
   assert.match(result.errors.join('\n'), /Complete Wave 1 changed-file set differs/);
