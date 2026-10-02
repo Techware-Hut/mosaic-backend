@@ -22,34 +22,37 @@ const CORS_ORIGINS = Object.freeze([
   'https://mosaic-biz-frontend-launch-git-main-digital-builders.vercel.app',
   'https://mosaic-biz-frontend-launch-git-develop-digital-builders.vercel.app',
 ]);
+const RELEASE_MODES = Object.freeze(['release', 'rollback', 'focused-baseline']);
 
 function parseArgs(argv) {
   const values = {};
   for (let index = 0; index < argv.length; index += 2) {
     if (!argv[index]?.startsWith('--') || argv[index + 1] === undefined) {
       throw new Error(
-        'Usage: verify-production-public-surfaces.js --mode preflight|deployed|ungated --base-url <url> --expected-sha <sha> --output <path> [preflight attestation options]'
+        'Usage: verify-production-public-surfaces.js --mode preflight|deployed|ungated [--release-mode release|rollback|focused-baseline] --base-url <url> --expected-sha <sha> --output <path> [preflight attestation options]'
       );
     }
     values[argv[index].slice(2)] = argv[index + 1];
   }
 
   if (!['preflight', 'deployed', 'ungated'].includes(values.mode)
+      || !RELEASE_MODES.includes(values['release-mode'] || 'release')
       || !/^https:\/\/[^\s]+$/i.test(values['base-url'] || '')
       || !FULL_SHA.test(values['expected-sha'] || '')
       || !values.output) {
     throw new Error(
-      'Usage: verify-production-public-surfaces.js --mode preflight|deployed|ungated --base-url <url> --expected-sha <sha> --output <path> [preflight attestation options]'
+      'Usage: verify-production-public-surfaces.js --mode preflight|deployed|ungated [--release-mode release|rollback|focused-baseline] --base-url <url> --expected-sha <sha> --output <path> [preflight attestation options]'
     );
   }
 
   const result = {
     mode: values.mode,
+    releaseMode: values['release-mode'] || 'release',
     baseUrl: values['base-url'].replace(/\/$/, ''),
     expectedSha: values['expected-sha'].toLowerCase(),
     output: values.output,
   };
-  if (result.mode === 'preflight') {
+  if (result.mode === 'preflight' && result.releaseMode !== 'focused-baseline') {
     if (
       !FULL_SHA.test(values['legacy-retirement-sha'] || '')
       || !SHA256.test(values['legacy-reconciliation-sha256'] || '')
@@ -114,12 +117,14 @@ function parseReleaseIdentity(payload, surface) {
 
 async function verifyProductionPublicSurfaces({
   mode,
+  releaseMode = 'release',
   baseUrl,
   expectedSha,
   legacyRetirementSha,
   legacyReconciliationSha256,
   fetchImpl = fetch,
 }) {
+  if (!RELEASE_MODES.includes(releaseMode)) throw new Error('Unsupported release mode');
   const healthResponse = await requireStatus(fetchImpl, baseUrl, 'GET', '/api/health', [200]);
   const readyResponse = await requireStatus(fetchImpl, baseUrl, 'GET', '/api/ready', [200]);
   const buildResponse = await requireStatus(fetchImpl, baseUrl, 'GET', '/api/build-info', [200]);
@@ -156,16 +161,16 @@ async function verifyProductionPublicSurfaces({
   }
 
   let checkoutStatus = null;
-  if (mode === 'preflight' || mode === 'ungated') {
+  if (mode === 'preflight' || mode === 'ungated' || releaseMode === 'focused-baseline') {
     const checkoutResponse = await request(fetchImpl, `${baseUrl}/api/orders/initiate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
     });
     checkoutStatus = checkoutResponse.status;
-    const expectedCheckoutStatuses = mode === 'preflight'
-      ? [400, 401, 403, 422, 503]
-      : [400, 401, 403, 422];
+    const expectedCheckoutStatuses = releaseMode === 'focused-baseline'
+      ? (mode === 'deployed' ? [503] : [401])
+      : (mode === 'preflight' ? [400, 401, 403, 422, 503] : [400, 401, 403, 422]);
     if (!expectedCheckoutStatuses.includes(checkoutStatus)) {
       throw new Error(`Checkout is not in normal application state (HTTP ${checkoutStatus})`);
     }
@@ -178,10 +183,15 @@ async function verifyProductionPublicSurfaces({
     body: '{}',
   });
   legacyPaymentStatus = legacyResponse.status;
-  if (![404, 405].includes(legacyPaymentStatus)) {
-    throw new Error(`Legacy payment-intent route is still reachable (HTTP ${legacyPaymentStatus})`);
+  const expectedLegacyStatuses = releaseMode === 'focused-baseline'
+    ? (mode === 'deployed' ? [503] : [401])
+    : [404, 405];
+  if (!expectedLegacyStatuses.includes(legacyPaymentStatus)) {
+    throw new Error(releaseMode === 'focused-baseline'
+      ? `Approved baseline legacy payment route is not in its expected ${mode} state (HTTP ${legacyPaymentStatus})`
+      : `Legacy payment-intent route is still reachable (HTTP ${legacyPaymentStatus})`);
   }
-  if (mode === 'preflight') {
+  if (mode === 'preflight' && releaseMode !== 'focused-baseline') {
     if (!FULL_SHA.test(legacyRetirementSha || '') || !SHA256.test(legacyReconciliationSha256 || '')) {
       throw new Error('Legacy payment cutover attestation is missing or malformed');
     }
@@ -197,13 +207,17 @@ async function verifyProductionPublicSurfaces({
 
   return {
     mode,
+    releaseMode,
     expectedSha,
     observedSha: build.fullSha,
     alreadyDeployed: build.fullSha === expectedSha,
     checkoutGateObserved: checkoutStatus === 503,
     checkoutStatus,
     legacyPaymentStatus,
-    legacyPaymentCutover: mode === 'preflight' ? {
+    ...(releaseMode === 'focused-baseline' ? {
+      legacyPaymentSurface: 'active-authenticated-baseline',
+    } : {}),
+    legacyPaymentCutover: mode === 'preflight' && releaseMode !== 'focused-baseline' ? {
       retirementSha: legacyRetirementSha,
       reconciliationSha256: legacyReconciliationSha256,
     } : null,
@@ -235,6 +249,7 @@ module.exports = {
   WEBHOOK_PATHS,
   CORS_ORIGINS,
   LEGACY_PAYMENT_PATH,
+  RELEASE_MODES,
   parseArgs,
   parseReleaseIdentity,
   verifyProductionPublicSurfaces,

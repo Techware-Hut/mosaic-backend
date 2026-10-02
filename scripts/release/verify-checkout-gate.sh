@@ -4,14 +4,74 @@ set -euo pipefail
 HTTP_TIMEOUT_SECONDS="${RELEASE_HTTP_TIMEOUT_SECONDS:-15}"
 CURL_BIN="${CURL_BIN:-curl}"
 EXPECTED_STATE="active"
+INHERITED_RELEASE_MODE="${RELEASE_MODE-}"
+INHERITED_RELEASE_MODE_SET=false
+if [ "${RELEASE_MODE+x}" = x ]; then
+  INHERITED_RELEASE_MODE_SET=true
+fi
+EXPLICIT_RELEASE_MODE=""
+RELEASE_MODE_FLAG_SET=false
 
-if [ "${1:-}" = "--state" ]; then
-  EXPECTED_STATE="${2:-}"
-  shift 2 || true
+# Reject duplicates across the entire invocation before any URL can be probed.
+RELEASE_MODE_FLAG_SEEN=false
+for argument in "$@"; do
+  if [ "$argument" = "--release-mode" ]; then
+    if [ "$RELEASE_MODE_FLAG_SEEN" = true ]; then
+      echo "Duplicate option: --release-mode" >&2
+      exit 2
+    fi
+    RELEASE_MODE_FLAG_SEEN=true
+  fi
+done
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --state|--release-mode)
+      if [ "$#" -lt 2 ]; then
+        echo "$1 requires a value" >&2
+        exit 2
+      fi
+      if [ "$1" = "--state" ]; then
+        EXPECTED_STATE="$2"
+      else
+        EXPLICIT_RELEASE_MODE="$2"
+        RELEASE_MODE_FLAG_SET=true
+      fi
+      shift 2
+      ;;
+    --*)
+      echo "Unsupported option: $1" >&2
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [ "$RELEASE_MODE_FLAG_SET" = true ] \
+  && [ "$INHERITED_RELEASE_MODE_SET" = true ] \
+  && [ "$EXPLICIT_RELEASE_MODE" != "$INHERITED_RELEASE_MODE" ]; then
+  echo "--release-mode disagrees with inherited RELEASE_MODE" >&2
+  exit 2
+fi
+if [ "$RELEASE_MODE_FLAG_SET" = true ]; then
+  RELEASE_MODE="$EXPLICIT_RELEASE_MODE"
+elif [ "$INHERITED_RELEASE_MODE_SET" = true ]; then
+  RELEASE_MODE="$INHERITED_RELEASE_MODE"
+else
+  RELEASE_MODE="release"
 fi
 
 if [ "$EXPECTED_STATE" != "active" ] && [ "$EXPECTED_STATE" != "inactive" ]; then
   echo "--state must be active or inactive" >&2
+  exit 2
+fi
+# An inherited rollback uses the existing canonical gate check. Rollback was
+# never an explicit verifier mode, so keep that interface unchanged.
+if [ "$RELEASE_MODE" != "release" ] && [ "$RELEASE_MODE" != "focused-baseline" ] \
+  && { [ "$RELEASE_MODE" != "rollback" ] || [ "$RELEASE_MODE_FLAG_SET" = true ]; }; then
+  echo "--release-mode must be release or focused-baseline" >&2
   exit 2
 fi
 
@@ -20,7 +80,7 @@ if [ "$#" -eq 0 ] && [ -n "${PRODUCTION_API_URL:-}" ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-  echo "Usage: verify-checkout-gate.sh [--state active|inactive] BASE_URL [BASE_URL ...]" >&2
+  echo "Usage: verify-checkout-gate.sh [--state active|inactive] [--release-mode release|focused-baseline] BASE_URL [BASE_URL ...]" >&2
   exit 2
 fi
 
@@ -77,6 +137,14 @@ checkout_paths=(
   "/API/ORDERS/INITIATE"
   "/Api/Orders/Initiate/"
 )
+if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+  checkout_paths+=(
+    "/api/payments/create-payment-intent"
+    "/api/payments/create-payment-intent/"
+    "/API/PAYMENTS/CREATE-PAYMENT-INTENT"
+    "/Api/Payments/Create-Payment-Intent/"
+  )
+fi
 
 surface_number=0
 for candidate_base_url in "$@"; do

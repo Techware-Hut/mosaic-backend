@@ -5,6 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const FULL_SHA = /^[a-f0-9]{40}$/i;
+const FOCUSED_SOURCE_SHA = 'bcb9f101c58df6d7df994e94442970b91f36e74c';
+const FOCUSED_CHANGED_FILES = [
+  { status: 'M', file: 'controllers/bookingController.js' },
+  { status: 'A', file: 'tests/vendor/vendor-booking-type-filter.test.js' },
+];
 
 function parseArgs(argv) {
   const values = {};
@@ -15,7 +20,8 @@ function parseArgs(argv) {
     values[argv[index].slice(2)] = argv[index + 1];
   }
   if (!values.directory || !values.output || !FULL_SHA.test(values['release-sha'] || '')
-      || !['success', 'failure', 'cancelled'].includes(values['job-status'])) {
+      || !['success', 'failure', 'cancelled'].includes(values['job-status'])
+      || (values['release-mode'] && !['release', 'rollback', 'focused-baseline', 'unknown'].includes(values['release-mode']))) {
     throw new Error('Directory, output, full release SHA, and job status are required');
   }
   return values;
@@ -144,14 +150,17 @@ function deriveWorkflowPreApproval(workflowResults) {
       ? result
       : 'unknown';
   }
-  const normalRelease = workflowResults.normalRelease === true;
+  const releaseMode = workflowResults.releaseMode
+    || (workflowResults.normalRelease === true ? 'release' : 'rollback');
+  const normalRelease = releaseMode === 'release';
   let failurePhase = null;
   for (const [key, phase] of PREAPPROVAL_JOB_PHASES) {
-    const expectedSuccess = key === 'sourceCertificate' && !normalRelease
+    const expectedSuccess = key === 'sourceCertificate' && releaseMode === 'rollback'
       ? jobs[key] === 'success' || jobs[key] === 'skipped'
       : jobs[key] === 'success';
     if (!expectedSuccess) {
-      failurePhase = phase;
+      failurePhase = key === 'sourceCertificate' && releaseMode === 'focused-baseline'
+        ? 'focused-source-certificate' : phase;
       break;
     }
   }
@@ -159,6 +168,7 @@ function deriveWorkflowPreApproval(workflowResults) {
     allRequiredPhasesPassed: failurePhase === null,
     failurePhase,
     normalRelease,
+    releaseMode,
     jobs,
   };
 }
@@ -205,11 +215,14 @@ function deriveFailurePhase(state, jobStatus) {
   return 'evidence-finalization';
 }
 
-function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl, now = new Date() }) {
+function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl,
+  releaseMode: releaseModeOverride, now = new Date() }) {
   const normalizedSha = releaseSha.toLowerCase();
   const files = {
     releaseIdentity: readOptionalJson(directory, 'release-identity.json'),
     sourceCertificate: readOptionalJson(directory, 'source-certificate.json'),
+    checkoutSurface: readOptionalJson(directory, 'checkout-surface.json'),
+    targetCheckoutRuntime: readOptionalJson(directory, 'exact-target-checkout-runtime.json'),
     publicPreflight: readOptionalJson(directory, 'public-preflight.json'),
     awsPreflight: readOptionalJson(directory, 'aws-preflight.json'),
     approvedTopology: readOptionalJson(directory, 'aws-approved-preflight.json'),
@@ -229,6 +242,32 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl, now
   };
 
   const gate = deriveGateState(files);
+  if (releaseModeOverride && files.releaseIdentity?.mode
+      && releaseModeOverride !== files.releaseIdentity.mode) {
+    throw new Error('Release mode disagrees with the exact release identity artifact');
+  }
+  if (files.releaseIdentity?.mode && files.workflowResults?.releaseMode
+      && files.releaseIdentity.mode !== files.workflowResults.releaseMode) {
+    throw new Error('Workflow results disagree with the exact release identity mode');
+  }
+  const releaseMode = files.releaseIdentity?.mode || releaseModeOverride
+    || files.workflowResults?.releaseMode || 'unknown';
+  const focusedBaseline = releaseMode === 'focused-baseline';
+  const focusedSource = files.releaseIdentity?.focusedSource || null;
+  const focusedCertificate = files.releaseIdentity?.releaseSha === normalizedSha
+    && files.sourceCertificate?.schemaVersion === 1
+    && files.sourceCertificate?.mode === 'focused-baseline'
+    && files.sourceCertificate?.status === 'passed'
+    && files.sourceCertificate?.repository === 'Techware-Hut/mosaic-backend'
+    && files.sourceCertificate?.releaseSha === normalizedSha
+    && files.sourceCertificate?.baselineSha === focusedSource?.baselineSha
+    && files.sourceCertificate?.releaseRef === focusedSource?.releaseRef
+    && files.sourceCertificate?.sourcePr === focusedSource?.sourcePr
+    && files.sourceCertificate?.branchTipSha === normalizedSha
+    && files.sourceCertificate?.sourceSha === FOCUSED_SOURCE_SHA
+    && files.sourceCertificate?.productionAccepted === false
+    && JSON.stringify(files.sourceCertificate?.changedFiles) === JSON.stringify(FOCUSED_CHANGED_FILES)
+    ? files.sourceCertificate : null;
   const deployment = deriveDeploymentState(files.deployment, normalizedSha);
   const approvedTopologyPassed = exactReleaseEvidence(files.approvedTopology, normalizedSha);
   const reservationsBeforeZero = reservationProof(files.reservationsBefore);
@@ -247,6 +286,32 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl, now
   // production job was admitted. Individual artifacts add detail when this is
   // rebuilt later in the summary job, but are not required in the job-local FS.
   const workflowPreApproval = deriveWorkflowPreApproval(files.workflowResults);
+  const focusedRuntimeProof = files.targetCheckoutRuntime?.status === 'passed'
+    && files.targetCheckoutRuntime?.releaseMode === 'focused-baseline'
+    && files.targetCheckoutRuntime?.releaseSha === normalizedSha
+    && files.targetCheckoutRuntime?.canonicalRouteTableVerified === true
+    && files.targetCheckoutRuntime?.legacyRouteTableVerified === true;
+  const focusedStaticProof = files.checkoutSurface?.status === 'passed'
+    && files.checkoutSurface?.releaseMode === 'focused-baseline'
+    && files.checkoutSurface?.baselineProvenance?.verified === true
+    && files.checkoutSurface?.baselineProvenance?.targetSha === normalizedSha
+    && files.checkoutSurface?.baselineProvenance?.baselineSha === focusedSource?.baselineSha;
+  const focusedPublicProof = files.publicPreflight?.releaseMode === 'focused-baseline'
+    && files.publicPreflight?.mode === 'preflight'
+    && files.publicPreflight?.expectedSha === normalizedSha
+    && files.publicPreflight?.observedSha === focusedSource?.baselineSha
+    && files.publicPreflight?.checkoutStatus === 401
+    && files.publicPreflight?.legacyPaymentStatus === 401;
+  const focusedAwsProof = files.awsPreflight?.status === 'passed'
+    && files.awsPreflight?.phase === 'preflight'
+    && files.awsPreflight?.releaseSha === normalizedSha;
+  const focusedPreflightPassed = Boolean(focusedBaseline
+    && workflowPreApproval?.allRequiredPhasesPassed === true
+    && Boolean(focusedCertificate)
+    && focusedRuntimeProof
+    && focusedStaticProof
+    && focusedPublicProof
+    && focusedAwsProof);
   const preApprovalPassed = workflowPreApproval
     ? workflowPreApproval.allRequiredPhasesPassed && approvedTopologyPassed
     : approvedTopologyPassed;
@@ -263,7 +328,9 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl, now
     && gate.finalState === 'inactive'
     && publicUngatedPassed
   );
-  const released = jobStatus === 'success' && releaseSafetyComplete;
+  // Wave 1 has no approved focused production job. No combination of local
+  // artifacts may turn a focused preflight into a production-release claim.
+  const released = !focusedBaseline && jobStatus === 'success' && releaseSafetyComplete;
   const state = {
     preApprovalPassed,
     preApprovalFailurePhase,
@@ -276,15 +343,43 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl, now
     publicUngatedPassed,
     releaseSafetyComplete,
   };
-  const failurePhase = deriveFailurePhase(state, jobStatus);
   const productionMutation = gate.attempted || deployment.attempted;
+  const failurePhase = focusedBaseline && !productionMutation
+    && workflowPreApproval?.allRequiredPhasesPassed === true
+    ? !focusedCertificate ? 'focused-source-certificate-artifact'
+      : !focusedRuntimeProof ? 'focused-exact-target-route-artifact'
+        : !focusedStaticProof ? 'focused-static-checkout-artifact'
+          : !focusedPublicProof ? 'focused-public-baseline-proof'
+            : !focusedAwsProof ? 'focused-aws-preflight-artifact'
+              : 'focused-external-gates-not-complete'
+    : deriveFailurePhase(state, jobStatus);
   const exactTestStatus = workflowPreApproval?.jobs.exactCi
     || (preApprovalPassed ? 'success' : 'unknown');
 
   return {
     schemaVersion: 2,
     repository: process.env.GITHUB_REPOSITORY || 'Techware-Hut/mosaic-backend',
+    releaseMode,
     releaseSha: normalizedSha,
+    focusedBaseline: focusedBaseline ? {
+      baselineSha: focusedSource?.baselineSha || null,
+      releaseRef: focusedSource?.releaseRef || null,
+      sourcePr: focusedSource?.sourcePr || null,
+      changedFiles: focusedCertificate?.changedFiles || null,
+      approvedCorrectionSourceSha: focusedCertificate?.sourceSha || null,
+      branchTipSha: focusedCertificate?.branchTipSha || null,
+      rulesetBypassActorsVisible: focusedCertificate?.rulesetBypassActorsVisible ?? null,
+      readOnlyPreflightPassed: focusedPreflightPassed,
+      externalGates: {
+        protectedRefNoBypass: 'not-proven',
+        githubEnvironment: 'not-proven',
+        awsOidc: 'not-proven',
+        liveDualRouteGate: 'not-proven',
+        paymentLiability: 'not-proven',
+      },
+      productionApproval: 'not-entered',
+      deployment: 'not-authorized',
+    } : null,
     workflowRunUrl: runUrl || null,
     generatedAt: now.toISOString(),
     workflowConclusion: jobStatus,
@@ -294,11 +389,21 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl, now
     workflowFailed: jobStatus === 'failure',
     workflowCancelled: jobStatus === 'cancelled',
     failingPhase: failurePhase,
-    source: files.sourceCertificate ? {
-      stagingSha: files.sourceCertificate.sourceStagingSha,
-      releasePullRequest: files.sourceCertificate.releasePullRequest,
-      certification: files.sourceCertificate.stagingCertification,
-    } : null,
+    source: focusedBaseline
+      ? focusedCertificate ? {
+        type: 'focused-baseline',
+        baselineSha: focusedCertificate.baselineSha,
+        releaseRef: focusedCertificate.releaseRef,
+        sourcePr: focusedCertificate.sourcePr,
+        changedFiles: focusedCertificate.changedFiles,
+        sourceSha: focusedCertificate.sourceSha,
+        rulesetBypassActorsVisible: focusedCertificate.rulesetBypassActorsVisible,
+      } : null
+      : files.sourceCertificate ? {
+        stagingSha: files.sourceCertificate.sourceStagingSha,
+        releasePullRequest: files.sourceCertificate.releasePullRequest,
+        certification: files.sourceCertificate.stagingCertification,
+      } : null,
     preApproval: {
       allRequiredPhasesPassed: preApprovalPassed,
       failingPhase: preApprovalFailurePhase,
@@ -309,7 +414,9 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl, now
         : workflowPreApproval ? 'exact workflow job results' : 'not proven',
       workflowJobs: workflowPreApproval?.jobs || null,
       exactShaTests: workflowPreApproval?.jobs.exactCi || (preApprovalPassed ? 'success' : 'unknown'),
-      sourceCertificate: files.sourceCertificate
+      sourceCertificate: focusedBaseline
+        ? focusedCertificate ? 'success' : 'not-proven'
+        : files.sourceCertificate
         ? 'success'
         : files.releaseIdentity?.breakGlass === true
           ? 'not-required-break-glass'
@@ -317,14 +424,14 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl, now
             preApprovalPassed ? 'success-by-job-reachability' : 'unknown'
           ),
       publicPreflight: files.publicPreflight
-        ? 'success'
+        ? focusedBaseline ? focusedPublicProof ? 'success' : 'not-proven' : 'success'
         : workflowPreApproval?.jobs.publicPreflight
           || (preApprovalPassed ? 'success-by-job-reachability' : 'unknown'),
       awsPreflight: files.awsPreflight?.status === 'passed'
-        ? 'success'
+        ? focusedBaseline ? focusedAwsProof ? 'success' : 'not-proven' : 'success'
         : workflowPreApproval?.jobs.awsPreflight
           || (preApprovalPassed ? 'success-by-job-reachability' : 'unknown'),
-      productionApprovalEntered: Boolean(files.approvedTopology),
+      productionApprovalEntered: !focusedBaseline && Boolean(files.approvedTopology),
     },
     tests: {
       unit: exactTestStatus,
@@ -375,11 +482,17 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl, now
       afterVerifiedZero: reservationsAfterZero,
     },
     probes: {
-      preflight: files.publicPreflight ? 'success' : preApprovalPassed ? 'success-by-job-reachability' : 'not-complete',
+      preflight: focusedBaseline
+        ? focusedPublicProof ? 'success' : 'not-complete'
+        : files.publicPreflight ? 'success' : preApprovalPassed ? 'success-by-job-reachability' : 'not-complete',
       deployed: publicDeployedPassed ? 'success' : 'not-complete',
       ungated: publicUngatedPassed ? 'success' : 'not-complete',
     },
-    nextAction: released
+    nextAction: focusedBaseline && !productionMutation
+      ? focusedPreflightPassed
+        ? 'Focused preflight is code-only; complete protected-ref, GitHub Environment, AWS OIDC, live dual-route gate, and payment-liability proofs before production approval.'
+        : 'Resolve the focused preflight failure or missing artifact, then rerun the exact candidate without production mutation.'
+      : released
       ? 'Perform the issue-specific production UAT checklist.'
       : gate.finalState !== 'inactive' || !gate.finalStateVerified
         ? 'Treat checkout as gated; inspect the failing phase and reconcile or rollback under break-glass control.'
@@ -396,6 +509,13 @@ function renderSummary(evidence) {
     `## ${evidence.result}`,
     '',
     `- Release SHA: \`${evidence.releaseSha}\``,
+    `- Release mode: ${evidence.releaseMode}`,
+    ...(evidence.focusedBaseline ? [
+      `- Production baseline SHA: ${evidence.focusedBaseline.baselineSha || 'unknown'}`,
+      `- Protected focused ref: ${evidence.focusedBaseline.releaseRef || 'unknown'}`,
+      `- Source PR: ${evidence.focusedBaseline.sourcePr || 'unknown'}`,
+      `- Focused production approval/deployment: ${evidence.focusedBaseline.productionApproval} / ${evidence.focusedBaseline.deployment}`,
+    ] : []),
     `- Failing phase: ${evidence.failingPhase || 'none'}`,
     `- Production mutation attempted: ${evidence.productionMutation ? 'YES' : 'NO'}`,
     `- Gate mutation attempted: ${evidence.gate.mutationAttempted ? 'YES' : 'NO'}`,
@@ -416,6 +536,7 @@ function main(argv = process.argv.slice(2)) {
     releaseSha: args['release-sha'],
     jobStatus: args['job-status'],
     runUrl: args['run-url'],
+    releaseMode: args['release-mode'],
   });
   fs.mkdirSync(path.dirname(path.resolve(args.output)), { recursive: true });
   fs.writeFileSync(args.output, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });

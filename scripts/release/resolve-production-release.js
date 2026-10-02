@@ -7,6 +7,8 @@ const { execFileSync } = require('node:child_process');
 
 const FULL_SHA = /^[a-f0-9]{40}$/i;
 const ROLLBACK_CONFIRMATION = 'BREAK GLASS ROLLBACK EXACT SHA';
+const FOCUSED_BASELINE_SHA = '9bc75c257a9f483a287f122dbd38514b7a4b55d4';
+const FOCUSED_REF = /^refs\/heads\/release\/focused\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function git(args, options = {}) {
   return execFileSync('git', args, {
@@ -25,7 +27,7 @@ function parseArgs(argv) {
     values[argv[index].slice(2)] = argv[index + 1];
   }
   if (!['push', 'workflow_dispatch'].includes(values.event)
-      || !['release', 'rollback'].includes(values.mode)
+      || !['release', 'rollback', 'focused-baseline'].includes(values.mode)
       || !values.output) {
     throw new Error('Release event, mode, and output are required');
   }
@@ -39,6 +41,10 @@ function resolveProductionRelease({
   requestedSha,
   mode,
   confirmation,
+  baselineSha,
+  releaseRef,
+  sourcePr,
+  focusedRefSha,
   currentMainSha,
   commitExists,
   isAncestor,
@@ -51,7 +57,7 @@ function resolveProductionRelease({
   }
 
   if (event === 'push' && mode !== 'release') {
-    throw new Error('Push-triggered releases cannot enter break-glass rollback mode');
+    throw new Error('Push-triggered releases cannot enter rollback or focused mode');
   }
 
   const candidate = (event === 'push' ? eventSha : requestedSha || '').toLowerCase();
@@ -62,17 +68,45 @@ function resolveProductionRelease({
     throw new Error('Release candidate is not present in this repository');
   }
 
+  let focusedSource = null;
   if (mode === 'release') {
     if (candidate !== currentMainSha.toLowerCase()) {
       throw new Error('Normal production release candidate must equal the exact current main tip');
     }
-  } else {
+  } else if (mode === 'rollback') {
     if (event !== 'workflow_dispatch' || confirmation !== ROLLBACK_CONFIRMATION) {
       throw new Error('Break-glass rollback requires the exact confirmation phrase');
     }
     if (!isAncestor(candidate, currentMainSha.toLowerCase())) {
       throw new Error('Rollback candidate must remain reachable from current main');
     }
+  } else {
+    const normalizedBaseline = String(baselineSha || '').toLowerCase();
+    const normalizedRefSha = String(focusedRefSha || '').toLowerCase();
+    const parsedPr = Number(sourcePr);
+    if (event !== 'workflow_dispatch') {
+      throw new Error('Focused release requires manual dispatch');
+    }
+    if (normalizedBaseline !== FOCUSED_BASELINE_SHA) {
+      throw new Error('Focused release baseline does not match the approved production SHA');
+    }
+    if (!FOCUSED_REF.test(releaseRef || '')) {
+      throw new Error('Focused release ref must be a protected release/focused branch');
+    }
+    if (!Number.isSafeInteger(parsedPr) || parsedPr <= 0 || String(parsedPr) !== String(sourcePr)) {
+      throw new Error('Focused release requires one positive merged PR number');
+    }
+    if (!FULL_SHA.test(normalizedRefSha) || normalizedRefSha !== candidate) {
+      throw new Error('Focused release branch tip does not match the exact candidate SHA');
+    }
+    if (candidate === normalizedBaseline || candidate === currentMainSha.toLowerCase()) {
+      throw new Error('Focused release must be a new production-baseline candidate');
+    }
+    focusedSource = {
+      baselineSha: normalizedBaseline,
+      releaseRef,
+      sourcePr: parsedPr,
+    };
   }
 
   return {
@@ -82,12 +116,25 @@ function resolveProductionRelease({
     mode,
     normalRelease: mode === 'release',
     breakGlass: mode === 'rollback',
+    sourceRequired: mode !== 'rollback',
+    focusedBaseline: mode === 'focused-baseline',
+    focusedSource,
   };
 }
 
 function resolveWithGit(args) {
   git(['fetch', '--no-tags', 'origin', 'main']);
   const currentMainSha = git(['rev-parse', 'refs/remotes/origin/main']);
+  let focusedRefSha;
+  if (args.mode === 'focused-baseline') {
+    if (!FOCUSED_REF.test(args['release-ref'] || '')) {
+      throw new Error('Focused release ref must be a protected release/focused branch');
+    }
+    const branch = args['release-ref'].slice('refs/heads/'.length);
+    git(['fetch', '--no-tags', 'origin',
+      `+${args['release-ref']}:refs/remotes/origin/${branch}`]);
+    focusedRefSha = git(['rev-parse', `refs/remotes/origin/${branch}`]);
+  }
   return resolveProductionRelease({
     event: args.event,
     eventSha: args['event-sha'],
@@ -95,6 +142,10 @@ function resolveWithGit(args) {
     requestedSha: args['requested-sha'],
     mode: args.mode,
     confirmation: args.confirmation,
+    baselineSha: args['baseline-sha'],
+    releaseRef: args['release-ref'],
+    sourcePr: args['source-pr'],
+    focusedRefSha,
     currentMainSha,
     commitExists(candidate) {
       try {
@@ -128,6 +179,11 @@ function main(argv = process.argv.slice(2)) {
       `current_main_sha=${result.currentMainSha}`,
       `release_mode=${result.mode}`,
       `normal_release=${String(result.normalRelease)}`,
+      `source_required=${String(result.sourceRequired)}`,
+      `focused_baseline=${String(result.focusedBaseline)}`,
+      `baseline_sha=${result.focusedSource?.baselineSha || ''}`,
+      `release_ref=${result.focusedSource?.releaseRef || ''}`,
+      `source_pr=${result.focusedSource?.sourcePr || ''}`,
     ].join('\n') + '\n');
   }
   console.log(`Resolved ${result.mode} candidate ${result.releaseSha}.`);
@@ -145,6 +201,8 @@ if (require.main === module) {
 module.exports = {
   FULL_SHA,
   ROLLBACK_CONFIRMATION,
+  FOCUSED_BASELINE_SHA,
+  FOCUSED_REF,
   parseArgs,
   resolveProductionRelease,
   resolveWithGit,

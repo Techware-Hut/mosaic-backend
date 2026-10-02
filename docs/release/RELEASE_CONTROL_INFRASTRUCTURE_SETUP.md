@@ -77,6 +77,39 @@ infrastructure change record without including secrets.
 The release automation does not auto-merge. A green exact-SHA certificate only
 makes the canonical `staging` to `main` PR reviewable.
 
+### Focused release branch readiness (separate approval)
+
+Wave 1 adds code to certify a future `refs/heads/release/focused/*` target;
+it does not create or protect a branch. Before dispatch, an infrastructure
+owner must prove an **active**, no-bypass branch ruleset with pull-request
+merges only, at least one independent human approval, stale-review dismissal,
+resolved review threads, and deletion/non-fast-forward blocks. The verifier
+reads the live GitHub ruleset, merged PR and reviews, and branch tip. The
+focused target must be a reviewed two-parent merge of the pinned production
+baseline and one approved booking-correction cherry-pick, with exactly two
+approved changed files and identical Git blobs to the approved source commit.
+GitHub hides the `bypass_actors` field from read-only ruleset API callers. A
+source certificate therefore records whether that field was visible and
+rejects any visible bypass, while a separate infrastructure-owner record must
+prove no bypass actors before production approval. The exact reviewed-PR and
+merge-graph checks reject a direct push even when the field is hidden.
+
+The `production-preflight` Environment and its read-only AWS OIDC role must
+be configured and independently verified for the workflow's current-`main`
+controller. The `production-release-control` Environment, named reviewer,
+self-review prevention, production OIDC role, and release-controller App
+remain separate infrastructure gates. Their existence is not inferred from
+repository code. Wave 1 does not enter that production Environment even when
+focused preflight passes. The deploy script also has an unconditional focused
+stop before any AWS operation.
+
+Before a later focused deployment can be authorized, the live HTTP and HTTPS
+ALB gate must be independently proven to cover both checkout initiation
+routes, including application-equivalent case and trailing-slash forms, while
+health and webhook paths remain reachable. Payment owners must separately
+prove the treatment of already-issued legacy Stripe PaymentIntents and other
+liabilities. The focused preflight cannot establish either live control.
+
 ### Protected Environments
 
 Create `production-preflight` with no required reviewer and a custom deployment

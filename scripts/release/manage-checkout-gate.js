@@ -20,9 +20,25 @@ const ACTIVE_PATH = '/api/orders/initiate';
 // mixed-case and trailing-slash checkout routes open. This bounded regex
 // covers only those application-equivalent spellings of the one route.
 const ACTIVE_PATH_REGEX = '^/[aA][pP][iI]/[oO][rR][dD][eE][rR][sS]/[iI][nN][iI][tT][iI][aA][tT][eE]/?$';
+const LEGACY_PAYMENT_PATH = '/api/payments/create-payment-intent';
+// ALB limits each RegexValues entry to 128 characters. The legacy route needs
+// separate no-slash/slash entries to cover Express aliases without exceeding it.
+const LEGACY_PAYMENT_REGEX_BASE = '^/[aA][pP][iI]/[pP][aA][yY][mM][eE][nN][tT][sS]/[cC][rR][eE][aA][tT][eE]-[pP][aA][yY][mM][eE][nN][tT]-[iI][nN][tT][eE][nN][tT]';
+const LEGACY_PAYMENT_PATH_REGEX = LEGACY_PAYMENT_REGEX_BASE + '$';
+const LEGACY_PAYMENT_SLASH_REGEX = LEGACY_PAYMENT_REGEX_BASE + '/$';
 const DEFAULT_DISABLED_PATH = '/__mosaic_release_control/checkout_gate_disabled__';
 const REQUIRED_TAG_KEY = 'mosaic:release-control';
 const REQUIRED_TAG_VALUE = 'checkout-initiation';
+
+function activePathRegexValues(releaseMode = 'release') {
+  if (releaseMode === 'release') return [ACTIVE_PATH_REGEX];
+  if (releaseMode === 'focused-baseline') {
+    // Three path evaluations plus one exact method evaluation remain within
+    // ALB's per-condition (3) and per-rule (5) match-evaluation limits.
+    return [ACTIVE_PATH_REGEX, LEGACY_PAYMENT_PATH_REGEX, LEGACY_PAYMENT_SLASH_REGEX];
+  }
+  throw new Error('Unsupported checkout gate release mode');
+}
 
 function one(values, label) {
   if (!Array.isArray(values) || values.length !== 1) {
@@ -152,7 +168,8 @@ function validateRuleShape(rule, expectedPriority, config, label) {
   }
   const matcher = pathMatcher(pathConditions[0]);
   const active = matcher.values.length === 0
-    && JSON.stringify(matcher.regexValues) === JSON.stringify([ACTIVE_PATH_REGEX]);
+    && JSON.stringify(matcher.regexValues) ===
+      JSON.stringify(activePathRegexValues(config.releaseMode));
   const inactive = matcher.regexValues.length === 0
     && JSON.stringify(matcher.values) === JSON.stringify([config.disabledPath]);
   if (!active && !inactive) {
@@ -173,19 +190,21 @@ function hasRequiredTag(tags, config) {
   return tags.some((tag) => tag.Key === config.tagKey && tag.Value === config.tagValue);
 }
 
-function isCanonicalGateRule(rule) {
+function isProtectedGateRule(rule, releaseMode) {
   const method = (rule.Conditions || []).find((entry) => entry.Field === 'http-request-method');
   const path = (rule.Conditions || []).find((entry) => entry.Field === 'path-pattern');
   const matcher = pathMatcher(path || {});
-  return (
-    JSON.stringify(conditionValues(method || {})) === JSON.stringify(['POST']) &&
-    matcher.values.length === 0 &&
-    JSON.stringify(matcher.regexValues) === JSON.stringify([ACTIVE_PATH_REGEX])
-  );
+  if (JSON.stringify(conditionValues(method || {})) !== JSON.stringify(['POST'])) return false;
+  const protectedPaths = releaseMode === 'focused-baseline'
+    ? [ACTIVE_PATH, LEGACY_PAYMENT_PATH]
+    : [ACTIVE_PATH];
+  return matcher.values.some((value) => protectedPaths.includes(value)) ||
+    matcher.regexValues.some((value) => activePathRegexValues(releaseMode).includes(value));
 }
 
 function inspectGate(snapshot, config, clock, options = {}) {
   requireFirstPriority(config);
+  activePathRegexValues(config.releaseMode);
   const loadBalancer = one(
     snapshot.loadBalancers && snapshot.loadBalancers.LoadBalancers,
     'LoadBalancers'
@@ -221,7 +240,9 @@ function inspectGate(snapshot, config, clock, options = {}) {
     }
     const rule = response.Rules.find((candidate) => candidate.RuleArn === item.ruleArn);
     if (!rule) throw new Error(`Pinned ${item.protocol}/${item.port} gate rule is unavailable`);
-    const duplicateTargets = response.Rules.filter(isCanonicalGateRule);
+    const duplicateTargets = response.Rules.filter((candidate) =>
+      isProtectedGateRule(candidate, config.releaseMode)
+    );
     canonicalByListener.push({ port: item.port, duplicates: duplicateTargets.length });
     const state = validateRuleShape(
       rule,
@@ -245,7 +266,7 @@ function inspectGate(snapshot, config, clock, options = {}) {
     throw new Error('HTTP and HTTPS must use two distinct pinned gate rules');
   }
   if (records.some((record) => canonicalByListener.find((entry) => entry.port === record.port).duplicates > (record.state === 'active' ? 1 : 0))) {
-    throw new Error('An unpinned listener rule also targets canonical checkout initiation');
+    throw new Error('An unpinned listener rule also targets a protected checkout path');
   }
   const states = [...new Set(records.map((record) => record.state))];
   if (states.length !== 1 && !options.allowMixed) {
@@ -262,6 +283,11 @@ function inspectGate(snapshot, config, clock, options = {}) {
       checkedAt: nowIso(clock),
       gateState: state,
       target: { method: 'POST', path: ACTIVE_PATH, fixedResponseStatus: 503 },
+      releaseMode: config.releaseMode || 'release',
+      targets: (config.releaseMode === 'focused-baseline'
+        ? [ACTIVE_PATH, LEGACY_PAYMENT_PATH]
+        : [ACTIVE_PATH]
+      ).map((path) => ({ method: 'POST', path, fixedResponseStatus: 503 })),
       loadBalancerRef: resourceRef(config.loadBalancerArn, 'alb'),
       rules: records.map((record) => ({
         ruleRef: resourceRef(record.ruleArn, `rule-${record.port}`),
@@ -273,9 +299,10 @@ function inspectGate(snapshot, config, clock, options = {}) {
   };
 }
 
-function gateConditions(pathValue) {
+function gateConditions(pathValue, releaseMode = 'release') {
+  const activeRegexValues = activePathRegexValues(releaseMode);
   const pathPatternConfig = pathValue === ACTIVE_PATH
-    ? { RegexValues: [ACTIVE_PATH_REGEX] }
+    ? { RegexValues: activeRegexValues }
     : { Values: [pathValue] };
   return [
     {
@@ -314,10 +341,10 @@ function createAwsGateClient({ runAws, region, config }) {
       ]);
       return { loadBalancers, listeners, rulesByListener, tags };
     },
-    modifyRule(ruleArn, pathValue) {
+    modifyRule(ruleArn, pathValue, releaseMode = config.releaseMode) {
       runAws('elbv2', 'modify-rule', [
         '--rule-arn', ruleArn,
-        '--conditions', JSON.stringify(gateConditions(pathValue)),
+        '--conditions', JSON.stringify(gateConditions(pathValue, releaseMode)),
         ...regionArgs,
       ]);
     },
@@ -331,7 +358,7 @@ function createFixtureGateClient(fixture) {
     read() {
       return snapshot;
     },
-    modifyRule(ruleArn, pathValue) {
+    modifyRule(ruleArn, pathValue, releaseMode = 'release') {
       modificationCount += 1;
       if (snapshot.failOnModifyCall === modificationCount) {
         throw new Error('Injected fixture mutation failure');
@@ -339,7 +366,7 @@ function createFixtureGateClient(fixture) {
       for (const response of Object.values(snapshot.rulesByListener || {})) {
         const rule = (response.Rules || []).find((candidate) => candidate.RuleArn === ruleArn);
         if (rule) {
-          rule.Conditions = gateConditions(pathValue);
+          rule.Conditions = gateConditions(pathValue, releaseMode);
           return;
         }
       }
@@ -353,7 +380,7 @@ function forceActive(client, config) {
   // HTTPS is the canonical public surface, so activate it before HTTP.
   for (const ruleArn of [config.httpsRuleArn, config.httpRuleArn]) {
     try {
-      client.modifyRule(ruleArn, ACTIVE_PATH);
+      client.modifyRule(ruleArn, ACTIVE_PATH, config.releaseMode);
     } catch (_error) {
       mutationFailed = true;
     }
@@ -393,7 +420,7 @@ function transitionGate(client, desiredState, config, clock) {
       desiredState === 'active' ? right.port - left.port : left.port - right.port
     );
     for (const record of transitionOrder) {
-      client.modifyRule(record.ruleArn, desiredPath);
+      client.modifyRule(record.ruleArn, desiredPath, config.releaseMode);
     }
     const after = inspectGate(client.read(), config, clock);
     if (after.state !== desiredState) throw new Error('Gate did not reach its requested state');
@@ -426,21 +453,40 @@ function cliConfiguration(argv, env = process.env, fixtureConfiguration = {}) {
       'Usage: manage-checkout-gate.js enable|disable|verify --output <json> [options]'
     );
   }
-  const allowed = new Set(['_', '--output', '--fixture', '--expected-state', '--confirm']);
+  const allowed = new Set([
+    '_', '--output', '--fixture', '--expected-state', '--confirm', '--release-mode',
+  ]);
   for (const key of Object.keys(options)) {
     if (!allowed.has(key)) throw new Error(`Unsupported option: ${key}`);
   }
+  const hasExplicitReleaseMode = Object.prototype.hasOwnProperty.call(options, '--release-mode');
+  const hasInheritedReleaseMode = Object.prototype.hasOwnProperty.call(env, 'RELEASE_MODE');
+  const explicitReleaseMode = hasExplicitReleaseMode
+    ? optionalOption(options, '--release-mode', '') : undefined;
+  const inheritedReleaseMode = env.RELEASE_MODE;
+  if (hasExplicitReleaseMode && hasInheritedReleaseMode && explicitReleaseMode !== inheritedReleaseMode) {
+    throw new Error('--release-mode must match inherited RELEASE_MODE');
+  }
+  // Rollback uses the existing canonical checkout gate, as it did before the
+  // environment mode was bound here. An explicit rollback gate mode remains unsupported.
+  const requestedReleaseMode = hasExplicitReleaseMode ? explicitReleaseMode
+    : hasInheritedReleaseMode ? inheritedReleaseMode : 'release';
+  const releaseMode = requestedReleaseMode === 'rollback' && !hasExplicitReleaseMode
+    ? 'release' : requestedReleaseMode;
   const from = (fixtureName, envName, fallback) =>
     fixtureConfiguration[fixtureName] || env[envName] || fallback;
   const disabledPath = exactPath(
     from('disabledPath', 'CHECKOUT_GATE_DISABLED_PATH', DEFAULT_DISABLED_PATH),
     'disabled gate path'
   );
-  if (disabledPath === ACTIVE_PATH) throw new Error('Disabled gate path must differ from checkout path');
+  if (disabledPath === ACTIVE_PATH || disabledPath === LEGACY_PAYMENT_PATH) {
+    throw new Error('Disabled gate path must differ from checkout paths');
+  }
   const config = {
     action,
     output: requireOption(options, '--output'),
     fixture: options['--fixture'],
+    releaseMode,
     expectedState: optionalOption(
       options,
       '--expected-state',
@@ -475,7 +521,11 @@ function cliConfiguration(argv, env = process.env, fixtureConfiguration = {}) {
   if (!['active', 'inactive'].includes(config.expectedState)) {
     throw new Error('--expected-state must be active or inactive');
   }
+  activePathRegexValues(config.releaseMode);
   validatePinnedArnSet(config);
+  if (config.releaseMode === 'focused-baseline' && !config.fixture && action !== 'verify') {
+    throw new Error('Focused live ALB mutation is disabled until external release gates are approved');
+  }
   if (!config.fixture && action !== 'verify') {
     const expectedConfirmation = action === 'enable' ? 'ENABLE_CHECKOUT_GATE' : 'DISABLE_CHECKOUT_GATE';
     if (config.confirmation !== expectedConfirmation) {
@@ -551,9 +601,13 @@ if (require.main === module) {
 module.exports = {
   ACTIVE_PATH,
   ACTIVE_PATH_REGEX,
+  LEGACY_PAYMENT_PATH,
+  LEGACY_PAYMENT_PATH_REGEX,
+  LEGACY_PAYMENT_SLASH_REGEX,
   DEFAULT_DISABLED_PATH,
   REQUIRED_TAG_KEY,
   REQUIRED_TAG_VALUE,
+  activePathRegexValues,
   cliConfiguration,
   conditionValues,
   createAwsGateClient,
