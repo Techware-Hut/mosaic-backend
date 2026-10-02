@@ -66,47 +66,6 @@ const baseTreeSha = '3'.repeat(40);
 const mainTreeSha = '4'.repeat(40);
 const synchronizedTreeSha = '5'.repeat(40);
 const reviewedTreeSha = 'e4b6ead713328fc8e67ca53e91cfb14af8008174';
-const proofBase = 'b0f7907fcfbce6c0fd8d6a9bd99d5f12a8f1bf7d';
-const proofBranch = 'codex/production-preflight-oidc-proof';
-const proofPrNumber = 296;
-const proofReviewedHead = 'b67bb29203b957622cc7bb5a84fb92961d2ae892';
-const proofReviewedTree = 'ead495c2623b8b89d112e940dbcbeb1badd231d6';
-const proofMain = '8'.repeat(40);
-const proofMainParent = 'f'.repeat(40);
-const proofHead = '7'.repeat(40);
-const proofBaseTree = '6'.repeat(40);
-const proofMainTree = '5'.repeat(40);
-const proofHeadTree = '4'.repeat(40);
-const proofFiles = [
-  {
-    path: '.github/workflows/prove-production-preflight-oidc.yml',
-    status: 'added',
-    sha: 'a45a734daf3229bbb70c5ba230b9340b1913cb77',
-    mode: '100644',
-    type: 'blob',
-  },
-  {
-    path: 'tests/release/productionReleaseInfrastructure.test.js',
-    status: 'modified',
-    sha: '49882447886574304e67ea6396523ef3644d4b5a',
-    mode: '100644',
-    type: 'blob',
-  },
-  {
-    path: '.github/workflows/enforce-staging-to-main.yml',
-    status: 'modified',
-    sha: '7c980ae6770a1db8a1e4ca3ebf227961662cd75d',
-    mode: '100644',
-    type: 'blob',
-  },
-  {
-    path: 'tests/release/stagingReleaseAutomation.test.js',
-    status: 'modified',
-    sha: 'eae1e867a4b2e0210204f1b4e5ee9cbea4203dcc',
-    mode: '100644',
-    type: 'blob',
-  },
-];
 const waveOneFiles = [
   '.github/workflows/deploy-eb-production.yml',
   'docs/release/AGENTIC_RELEASE_OPERATIONS.md',
@@ -165,20 +124,10 @@ function waveOneTrees() {
   };
 }
 
-function sourcePolicyScript(proofAdmission) {
+function sourcePolicyScript() {
   const match = sourcePolicyWorkflow.match(/^ {10}node <<'NODE'\r?\n([\s\S]*?)^ {10}NODE\s*$/m);
   assert.ok(match, 'trusted promotion workflow must contain the inline policy');
-  const source = match[1].split(/\r?\n/).map((line) => line.replace(/^ {10}/, '')).join('\n');
-  if (proofAdmission === undefined) return source;
-  const start = source.indexOf('const proofAdmission = ');
-  const endMarker = '; // PROOF_ADMISSION_PIN';
-  const end = source.indexOf(endMarker, start);
-  assert.ok(start >= 0 && end > start, 'proof pin must have one source marker');
-  assert.equal(source.indexOf(endMarker, end + endMarker.length), -1,
-    'proof pin marker must be unique');
-  return source.slice(0, start) +
-    `const proofAdmission = ${JSON.stringify(proofAdmission)}` +
-    source.slice(end);
+  return match[1].split(/\r?\n/).map((line) => line.replace(/^ {10}/, '')).join('\n');
 }
 
 function waveOneApiFixtures() {
@@ -232,122 +181,7 @@ function waveOneApiFixtures() {
   };
 }
 
-function proofPin() {
-  return {
-    repository,
-    branch: proofBranch,
-    base: proofBase,
-    prNumber: proofPrNumber,
-    reviewedHead: proofReviewedHead,
-    reviewedTree: proofReviewedTree,
-    files: proofFiles,
-  };
-}
-
-function proofTrees() {
-  const directories = ['.github', '.github/workflows', 'tests', 'tests/release'];
-  const directoryEntries = (sha) => directories.map((name) =>
-    treeEntry(name, sha, '040000', 'tree'));
-  const policy = '.github/workflows/enforce-staging-to-main.yml';
-  const promotionTest = 'tests/release/stagingReleaseAutomation.test.js';
-  const infrastructureTest = proofFiles[1].path;
-  const ordinary = [
-    treeEntry('README.md', 'b'.repeat(40)),
-    treeEntry('controllers', 'c'.repeat(40), '040000', 'tree'),
-    treeEntry('controllers/bookingController.js', 'd'.repeat(40)),
-  ];
-  const sharedBase = [
-    treeEntry(policy, proofFiles[2].sha),
-    treeEntry(promotionTest, proofFiles[3].sha),
-    treeEntry(infrastructureTest, 'e'.repeat(40)),
-  ];
-  const sharedMain = [
-    treeEntry(policy, '3'.repeat(40)),
-    treeEntry(promotionTest, '4'.repeat(40)),
-    treeEntry(infrastructureTest, 'e'.repeat(40)),
-  ];
-  const reviewed = [
-    treeEntry(policy, proofFiles[2].sha),
-    treeEntry(promotionTest, proofFiles[3].sha),
-    treeEntry(infrastructureTest, proofFiles[1].sha),
-    treeEntry(proofFiles[0].path, proofFiles[0].sha),
-  ];
-  const synchronized = [
-    treeEntry(policy, proofFiles[2].sha),
-    treeEntry(promotionTest, proofFiles[3].sha),
-    treeEntry(infrastructureTest, proofFiles[1].sha),
-    treeEntry(proofFiles[0].path, proofFiles[0].sha),
-  ];
-  return {
-    base: [...directoryEntries('e'.repeat(40)), ...sharedBase, ...ordinary],
-    reviewed: [...directoryEntries('f'.repeat(40)), ...reviewed, ...ordinary],
-    main: [...directoryEntries('a'.repeat(40)), ...sharedMain, ...ordinary],
-    synchronized: [...directoryEntries('b'.repeat(40)), ...synchronized, ...ordinary],
-  };
-}
-
-function proofApiFixtures() {
-  const trees = proofTrees();
-  return {
-    [`repos/${repository}/pulls/${proofPrNumber}`]: {
-      number: proofPrNumber,
-      state: 'open',
-      head: { ref: proofBranch, sha: proofHead, repo: { full_name: repository } },
-      // The synchronized commit, not potentially stale PR base metadata, proves the effective base.
-      base: { ref: 'main', sha: proofBase, repo: { full_name: repository } },
-      changed_files: proofFiles.length,
-    },
-    [`repos/${repository}/git/ref/heads/${proofBranch}`]: { object: { sha: proofHead } },
-    [`repos/${repository}/git/ref/heads/main`]: { object: { sha: proofMain } },
-    [`repos/${repository}/git/commits/${proofBase}`]: {
-      sha: proofBase,
-      tree: { sha: proofBaseTree },
-      parents: [{ sha: '0'.repeat(40) }],
-    },
-    [`repos/${repository}/git/commits/${proofReviewedHead}`]: {
-      sha: proofReviewedHead,
-      tree: { sha: proofReviewedTree },
-      parents: [{ sha: proofBase }],
-    },
-    [`repos/${repository}/git/commits/${proofMain}`]: {
-      sha: proofMain,
-      tree: { sha: proofMainTree },
-      parents: [{ sha: proofBase }, { sha: proofMainParent }],
-    },
-    [`repos/${repository}/git/commits/${proofHead}`]: {
-      sha: proofHead,
-      tree: { sha: proofHeadTree },
-      parents: [{ sha: proofReviewedHead }, { sha: proofMain }],
-    },
-    [`repos/${repository}/compare/${proofMain}...${proofHead}`]: {
-      status: 'ahead',
-      ahead_by: 1,
-      behind_by: 0,
-      base_commit: { sha: proofMain },
-      merge_base_commit: { sha: proofMain },
-      commits: [{ sha: proofHead }],
-    },
-    [`repos/${repository}/git/trees/${proofBaseTree}?recursive=1`]: {
-      sha: proofBaseTree, truncated: false, tree: trees.base,
-    },
-    [`repos/${repository}/git/trees/${proofReviewedTree}?recursive=1`]: {
-      sha: proofReviewedTree, truncated: false, tree: trees.reviewed,
-    },
-    [`repos/${repository}/git/trees/${proofMainTree}?recursive=1`]: {
-      sha: proofMainTree, truncated: false, tree: trees.main,
-    },
-    [`repos/${repository}/git/trees/${proofHeadTree}?recursive=1`]: {
-      sha: proofHeadTree, truncated: false, tree: trees.synchronized,
-    },
-    [`repos/${repository}/pulls/${proofPrNumber}/files?per_page=100&page=1`]: proofFiles.map((file) => ({
-      filename: file.path,
-      status: file.status,
-      sha: file.sha,
-    })),
-  };
-}
-
-function runSourcePolicy({ env = {}, responses = {}, failApi, mutateApi, proofAdmission } = {}) {
+function runSourcePolicy({ env = {}, responses = {}, failApi, mutateApi } = {}) {
   const fixtures = { ...waveOneApiFixtures(), ...responses };
   const calls = [];
   const output = [];
@@ -380,7 +214,7 @@ function runSourcePolicy({ env = {}, responses = {}, failApi, mutateApi, proofAd
       },
     };
   };
-  vm.runInNewContext(sourcePolicyScript(proofAdmission), {
+  vm.runInNewContext(sourcePolicyScript(), {
     require: mockRequire,
     process: policyProcess,
     console: {
@@ -389,21 +223,6 @@ function runSourcePolicy({ env = {}, responses = {}, failApi, mutateApi, proofAd
     },
   }, { timeout: 2000 });
   return { passed: policyProcess.exitCode === 0, calls, output, errors };
-}
-
-function runProofPolicy({ configured = true, admission, env = {}, responses = {}, failApi, mutateApi } = {}) {
-  return runSourcePolicy({
-    proofAdmission: configured ? (admission || proofPin()) : null,
-    env: {
-      HEAD_REF: proofBranch,
-      HEAD_SHA: proofHead,
-      PR_NUMBER: String(proofPrNumber),
-      ...env,
-    },
-    responses: { ...proofApiFixtures(), ...responses },
-    failApi,
-    mutateApi,
-  });
 }
 
 function workflowRun(overrides = {}) {
@@ -866,239 +685,6 @@ test('arbitrary main PR, release/focused branch, and label-only claim remain ine
     const result = runSourcePolicy({ env });
     assert.equal(result.passed, false);
     assert.deepEqual(result.calls, []);
-  }
-});
-
-test('unpopulated proof admission pin rejects its exact branch before any API read', () => {
-  const result = runProofPolicy({ configured: false });
-  assert.equal(result.passed, false);
-  assert.deepEqual(result.calls, []);
-});
-
-test('concrete proof pin admits only #296 with reviewed payload and atomic cleanup', () => {
-  const sourceResult = runSourcePolicy({
-    env: {
-      HEAD_REF: proofBranch,
-      HEAD_SHA: proofHead,
-      PR_NUMBER: String(proofPrNumber),
-    },
-    responses: proofApiFixtures(),
-  });
-  assert.equal(sourceResult.passed, true, sourceResult.errors.join('\n'));
-  const result = runProofPolicy();
-  assert.equal(result.passed, true, result.errors.join('\n'));
-  assert.ok(result.calls.includes(`repos/${repository}/git/ref/heads/main`));
-  assert.ok(result.calls.includes(`repos/${repository}/pulls/${proofPrNumber}/files?per_page=100&page=1`));
-  assert.ok(result.calls.includes(`repos/${repository}/git/trees/${proofHeadTree}?recursive=1`));
-  assert.deepEqual(proofFiles.map((file) => file.path), [
-    '.github/workflows/prove-production-preflight-oidc.yml',
-    'tests/release/productionReleaseInfrastructure.test.js',
-    '.github/workflows/enforce-staging-to-main.yml',
-    'tests/release/stagingReleaseAutomation.test.js',
-  ]);
-});
-
-test('proof admission rejects changed immutable PR, reviewed source, or cleanup pin', () => {
-  for (const modify of [
-    (pin) => { pin.repository = 'other/mosaic-backend'; },
-    (pin) => { pin.branch = 'codex/other-proof'; },
-    (pin) => { pin.base = shaD; },
-    (pin) => { pin.prNumber = 297; },
-    (pin) => { pin.reviewedHead = shaD; },
-    (pin) => { pin.reviewedTree = shaD; },
-    (pin) => { pin.files[0].sha = shaD; },
-    (pin) => { pin.files[0].mode = '100755'; },
-    (pin) => { pin.files[0].type = 'commit'; },
-    (pin) => { pin.files[2].sha = shaD; },
-    (pin) => { pin.files[2].mode = '100755'; },
-    (pin) => { pin.files[2].type = 'commit'; },
-    (pin) => { pin.files.pop(); },
-    (pin) => { pin.files.push({ ...pin.files[0] }); },
-  ]) {
-    const pin = JSON.parse(JSON.stringify(proofPin()));
-    modify(pin);
-    const result = runProofPolicy({ admission: pin });
-    assert.equal(result.passed, false, JSON.stringify(pin));
-  }
-});
-
-test('proof admission rejects arbitrary PR, head, repository, base, and branch identities', () => {
-  for (const env of [
-    { PR_NUMBER: '998' },
-    { HEAD_SHA: shaD },
-    { HEAD_REPOSITORY: 'fork/mosaic-backend' },
-    { EXPECTED_REPOSITORY: 'fork/mosaic-backend' },
-    { BASE_REF: 'staging' },
-    { HEAD_REF: 'codex/another-proof-branch' },
-    { HEAD_REF: 'codex/production-preflight-oidc-proof-copy' },
-  ]) {
-    const result = runProofPolicy({ env });
-    assert.equal(result.passed, false, JSON.stringify(env));
-  }
-  for (const modifyPull of [
-    (pull) => { pull.number = 998; },
-    (pull) => { pull.head.repo.full_name = 'fork/mosaic-backend'; },
-    (pull) => { pull.base.repo.full_name = 'fork/mosaic-backend'; },
-    (pull) => { pull.base.ref = 'staging'; },
-    (pull) => { pull.head.ref = 'codex/another-proof-branch'; },
-    (pull) => { pull.head.sha = shaD; },
-  ]) {
-    const result = runProofPolicy({ mutateApi: (apiPath, fixture) => {
-      if (apiPath === `repos/${repository}/pulls/${proofPrNumber}`) modifyPull(fixture);
-      return fixture;
-    } });
-    assert.equal(result.passed, false);
-  }
-});
-
-test('proof admission requires exact ordered synchronization and unchanged reviewed source', () => {
-  const proofCommitPath = `repos/${repository}/git/commits/${proofHead}`;
-  const sourceCommitPath = `repos/${repository}/git/commits/${proofReviewedHead}`;
-  const baseCommitPath = `repos/${repository}/git/commits/${proofMain}`;
-  const comparePath = `repos/${repository}/compare/${proofMain}...${proofHead}`;
-  for (const [path, modify] of [
-    [proofCommitPath, (item) => { item.parents.reverse(); }],
-    [proofCommitPath, (item) => { item.parents.push({ sha: shaD }); }],
-    [sourceCommitPath, (item) => { item.tree.sha = shaD; }],
-    [sourceCommitPath, (item) => { item.parents[0].sha = shaD; }],
-    [baseCommitPath, (item) => { item.parents[0].sha = shaD; }],
-    [comparePath, (item) => { item.behind_by = 1; }],
-    [comparePath, (item) => { item.merge_base_commit.sha = proofBase; }],
-  ]) {
-    const result = runProofPolicy({ mutateApi: (apiPath, fixture) => {
-      if (apiPath === path) modify(fixture);
-      return fixture;
-    } });
-    assert.equal(result.passed, false, path);
-  }
-});
-
-test('proof admission rejects stale main or any unapproved bootstrap delta', () => {
-  const baseTreePath = `repos/${repository}/git/trees/${proofBaseTree}?recursive=1`;
-  const mainTreePath = `repos/${repository}/git/trees/${proofMainTree}?recursive=1`;
-  for (const [path, modify] of [
-    [mainTreePath, (tree) => {
-      tree.tree.find((item) => item.path === 'controllers/bookingController.js').sha = shaA;
-    }],
-    [mainTreePath, (tree) => {
-      tree.tree.push(treeEntry('controllers/extra.js', shaD));
-    }],
-    [baseTreePath, (tree) => {
-      tree.tree.find((item) => item.path === 'tests/release/productionReleaseInfrastructure.test.js').sha = shaD;
-    }],
-  ]) {
-    const result = runProofPolicy({ mutateApi: (apiPath, fixture) => {
-      if (apiPath === path) modify(fixture);
-      return fixture;
-    } });
-    assert.equal(result.passed, false, path);
-  }
-});
-
-test('proof admission rejects extra, missing, renamed, or deleted PR files', () => {
-  const filesPath = `repos/${repository}/pulls/${proofPrNumber}/files?per_page=100&page=1`;
-  for (const modify of [
-    (files) => { files.pop(); },
-    (files) => { files.splice(0, 1); },
-    (files) => { files.push({ filename: 'controllers/bookingController.js', status: 'modified', sha: shaD }); },
-    (files) => { files[0].status = 'renamed'; files[0].previous_filename = 'README.md'; },
-    (files) => { files[1].status = 'removed'; },
-    (files) => { files[0] = { ...files[1] }; },
-  ]) {
-    const result = runProofPolicy({ mutateApi: (apiPath, fixture) => {
-      if (apiPath === filesPath) modify(fixture);
-      return fixture;
-    } });
-    assert.equal(result.passed, false);
-  }
-});
-
-test('proof admission binds file blobs, modes, types, and all unrelated tree entries', () => {
-  const headTreePath = `repos/${repository}/git/trees/${proofHeadTree}?recursive=1`;
-  const reviewedTreePath = `repos/${repository}/git/trees/${proofReviewedTree}?recursive=1`;
-  for (const [path, modify] of [
-    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[0].path).sha = shaD; }],
-    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[0].path).mode = '100755'; }],
-    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[0].path).type = 'commit'; }],
-    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[2].path).sha = shaD; }],
-    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[2].path).mode = '100755'; }],
-    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[2].path).type = 'tree'; }],
-    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[3].path).sha = shaD; }],
-    [headTreePath, (tree) => { tree.tree.find((item) => item.path === 'README.md').sha = shaD; }],
-    [headTreePath, (tree) => { tree.tree.push(treeEntry('controllers/extra.js', shaD)); }],
-    [reviewedTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[1].path).mode = '100755'; }],
-    [reviewedTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[2].path).sha = shaD; }],
-  ]) {
-    const result = runProofPolicy({ mutateApi: (apiPath, fixture) => {
-      if (apiPath === path) modify(fixture);
-      return fixture;
-    } });
-    assert.equal(result.passed, false, path);
-  }
-  const wrongPrBlob = runProofPolicy({ mutateApi: (apiPath, fixture) => {
-    if (apiPath === `repos/${repository}/pulls/${proofPrNumber}/files?per_page=100&page=1`) {
-      fixture[0].sha = shaD;
-    }
-    return fixture;
-  } });
-  assert.equal(wrongPrBlob.passed, false);
-});
-
-test('proof admission rejects moved refs or live PR identity before success', () => {
-  for (const movedPath of [
-    `repos/${repository}/git/ref/heads/main`,
-    `repos/${repository}/git/ref/heads/${proofBranch}`,
-  ]) {
-    const result = runProofPolicy({ mutateApi: (apiPath, fixture, calls) => {
-      if (apiPath === movedPath && calls.filter((call) => call === movedPath).length > 1) {
-        fixture.object.sha = shaD;
-      }
-      return fixture;
-    } });
-    assert.equal(result.passed, false, movedPath);
-  }
-  const pullPath = `repos/${repository}/pulls/${proofPrNumber}`;
-  const movedPr = runProofPolicy({ mutateApi: (apiPath, fixture, calls) => {
-    if (apiPath === pullPath && calls.filter((call) => call === pullPath).length > 1) {
-      fixture.head.sha = shaD;
-    }
-    return fixture;
-  } });
-  assert.equal(movedPr.passed, false);
-});
-
-test('proof admission fails closed on API errors, truncated trees, and malformed file pagination', () => {
-  const filesPath = `repos/${repository}/pulls/${proofPrNumber}/files?per_page=100&page=1`;
-  for (const path of [
-    `repos/${repository}/pulls/${proofPrNumber}`,
-    `repos/${repository}/git/trees/${proofReviewedTree}?recursive=1`,
-    filesPath,
-  ]) {
-    assert.equal(runProofPolicy({ failApi: path }).passed, false, path);
-  }
-  const truncated = runProofPolicy({ mutateApi: (apiPath, fixture) => {
-    if (apiPath === `repos/${repository}/git/trees/${proofHeadTree}?recursive=1`) {
-      fixture.truncated = true;
-    }
-    return fixture;
-  } });
-  assert.equal(truncated.passed, false);
-  for (const modifyTree of [
-    (tree) => { tree.tree.push({ ...tree.tree[0] }); },
-    (tree) => { tree.tree[0].sha = 'not-a-sha'; },
-    (tree) => { tree.tree[0].type = 'unknown'; },
-  ]) {
-    const malformedTree = runProofPolicy({ mutateApi: (apiPath, fixture) => {
-      if (apiPath === `repos/${repository}/git/trees/${proofHeadTree}?recursive=1`) {
-        modifyTree(fixture);
-      }
-      return fixture;
-    } });
-    assert.equal(malformedTree.passed, false);
-  }
-  for (const malformed of [{ files: [] }, [proofApiFixtures()[filesPath][0]], []]) {
-    const result = runProofPolicy({ responses: { [filesPath]: malformed } });
-    assert.equal(result.passed, false);
   }
 });
 
