@@ -40,25 +40,29 @@ jobs:
           set +x
           umask 077
           fail() {
-            printf '%s\n' 'FAIL: production-preflight OIDC/topology proof'
+            printf 'FAIL: %s\n' "$1"
             exit 1
           }
-          [[ -n "${ROLE_TO_ASSUME:-}" && -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" && -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]] || fail
-          [[ -n "${AWS_REGION:-}" && -n "${EB_APPLICATION_NAME:-}" && -n "${EB_ENVIRONMENT_NAME:-}" ]] || fail
+          [[ -n "${ROLE_TO_ASSUME:-}" ]] || fail 'masked role binding'
+          printf '%s\n' 'PASS: masked role binding present'
 
-          proof_dir="$(mktemp -d "$RUNNER_TEMP/preflight-oidc.XXXXXX" 2>/dev/null)" || fail
+          [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" && -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]] || fail 'GitHub OIDC token'
+
+          oidc_token="$(curl --fail --silent --show-error \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            --get --data-urlencode 'audience=sts.amazonaws.com' \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL" 2>/dev/null | jq -er '.value' 2>/dev/null)" || fail 'GitHub OIDC token'
+          [[ -n "$oidc_token" ]] || fail 'GitHub OIDC token'
+          printf '%s\n' 'PASS: GitHub OIDC token issued'
+
+          [[ -n "${AWS_REGION:-}" ]] || fail 'AWS role assumption'
+          proof_dir="$(mktemp -d "$RUNNER_TEMP/preflight-oidc.XXXXXX" 2>/dev/null)" || fail 'AWS role assumption'
           trap 'rm -rf "$proof_dir"' EXIT
           : > "$proof_dir/empty"
           export AWS_SHARED_CREDENTIALS_FILE="$proof_dir/empty"
           export AWS_CONFIG_FILE="$proof_dir/empty"
           export AWS_EC2_METADATA_DISABLED=true
           unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_DEFAULT_PROFILE
-
-          oidc_token="$(curl --fail --silent --show-error \
-            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            --get --data-urlencode 'audience=sts.amazonaws.com' \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL" 2>/dev/null | jq -er '.value' 2>/dev/null)" || fail
-          [[ -n "$oidc_token" ]] || fail
 
           credentials="$(aws sts assume-role-with-web-identity \
             --role-arn "$ROLE_TO_ASSUME" \
@@ -67,29 +71,53 @@ jobs:
             --web-identity-token "$oidc_token" \
             --duration-seconds 900 \
             --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-            --output text 2>/dev/null)" || fail
+            --output text 2>/dev/null)" || fail 'AWS role assumption'
           unset oidc_token
           read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN <<< "$credentials"
           unset credentials
-          [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" && -n "${AWS_SESSION_TOKEN:-}" ]] || fail
+          [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" && -n "${AWS_SESSION_TOKEN:-}" ]] || fail 'AWS role assumption'
           export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          printf '%s\n' 'PASS: AWS role assumption'
 
-          if ! node 2>/dev/null <<'NODE'
+          [[ -n "${EB_APPLICATION_NAME:-}" && -n "${EB_ENVIRONMENT_NAME:-}" ]] || fail 'read-only AWS topology collection'
+          node 2>/dev/null <<'NODE'
           'use strict';
-          const { collectAwsTopology } = require('./scripts/release/aws-release-topology');
-          const { createAwsCliRunner } = require('./scripts/release/release-control-utils');
-          try {
-            collectAwsTopology({
-              runAws: createAwsCliRunner(),
-              region: process.env.AWS_REGION,
-              applicationName: process.env.EB_APPLICATION_NAME,
-              environmentName: process.env.EB_ENVIRONMENT_NAME,
-            });
-          } catch (_) {
-            process.exitCode = 1;
+          function prove() {
+            let payload;
+            let validateTopology;
+            try {
+              const topology = require('./scripts/release/aws-release-topology');
+              const { createAwsCliRunner } = require('./scripts/release/release-control-utils');
+              validateTopology = topology.validateTopology;
+              payload = topology.collectAwsTopology({
+                runAws: createAwsCliRunner(),
+                region: process.env.AWS_REGION,
+                applicationName: process.env.EB_APPLICATION_NAME,
+                environmentName: process.env.EB_ENVIRONMENT_NAME,
+              });
+            } catch (_) {
+              console.log('FAIL: read-only AWS topology collection');
+              return false;
+            }
+            console.log('PASS: read-only AWS topology collection');
+
+            try {
+              if (!/^[0-9a-f]{40}$/.test(process.env.GITHUB_SHA || '')) {
+                throw new Error('Invalid exact main SHA');
+              }
+              validateTopology(payload, {
+                applicationName: process.env.EB_APPLICATION_NAME,
+                environmentName: process.env.EB_ENVIRONMENT_NAME,
+                mode: 'preflight',
+                releaseSha: process.env.GITHUB_SHA,
+                mixedVersionSafe: false,
+              });
+            } catch (_) {
+              console.log('FAIL: topology validation');
+              return false;
+            }
+            console.log('PASS: topology validation');
+            return true;
           }
+          if (!prove()) process.exitCode = 1;
           NODE
-          then
-            fail
-          fi
-          printf '%s\n' 'PASS: production-preflight OIDC/topology proof'

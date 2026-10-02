@@ -1058,14 +1058,57 @@ test('isolated preflight topology proof is limited to approved reads and identif
   assert.doesNotMatch(workflow, /actions\/upload-artifact|\.github\/workflows\/deploy-eb-production|gh\s+workflow\s+run/i);
   assert.doesNotMatch(workflow, /\b(?:ssm|s3api|s3|elasticbeanstalk\s+(?:update|create|terminate)|elbv2\s+(?:modify|create|delete)|autoscaling\s+(?:update|create|delete))\b/i);
   assert.doesNotMatch(workflow, /\b(?:contents|pull-requests|deployments): write\b/);
-  assert.doesNotMatch(workflow, /\becho\b[^\n]*(?:\$\{?AWS_|\$\{?ROLE_|arn:aws|AccountId|LoadBalancerArn|InstanceId|TargetGroupArn)/i);
+  assert.doesNotMatch(workflow, /(?:printf|console\.log|console\.error|process\.stdout\.write)[^\n]*(?:\$\{?AWS_|\$\{?ROLE_|arn:aws|AccountId|LoadBalancerArn|InstanceId|TargetGroupArn|error\.message)/i);
+  assert.doesNotMatch(workflow, /console\.error|process\.stderr\.write|\baws\s+sts\s+get-caller-identity\b/i);
   const messages = [...workflow.matchAll(/printf '%s\\n' '([^']+)'/g)].map((match) => match[1]);
   assert.deepEqual(messages, [
     'FAIL: main ref required',
     'PASS: main ref',
-    'FAIL: production-preflight OIDC/topology proof',
-    'PASS: production-preflight OIDC/topology proof',
+    'PASS: masked role binding present',
+    'PASS: GitHub OIDC token issued',
+    'PASS: AWS role assumption',
   ]);
   assert.match(workflow, /set \+x/);
   assert.match(workflow, /2>\/dev\/null/);
+});
+
+test('isolated preflight proof reports fixed stage results and validates collected topology', () => {
+  const workflow = preflightProofSource();
+  assert.match(workflow, /fail\(\)\s*\{\s*printf 'FAIL: %s\\n' "\$1"\s*exit 1\s*\}/);
+  const failureStages = [...workflow.matchAll(/\bfail '([^']+)'/g)].map((match) => match[1]);
+  assert.deepEqual([...new Set(failureStages)], [
+    'masked role binding',
+    'GitHub OIDC token',
+    'AWS role assumption',
+    'read-only AWS topology collection',
+  ]);
+  const nodeMarkers = [...workflow.matchAll(/console\.log\('([^']+)'\)/g)].map((match) => match[1]);
+  assert.deepEqual(nodeMarkers, [
+    'FAIL: read-only AWS topology collection',
+    'PASS: read-only AWS topology collection',
+    'FAIL: topology validation',
+    'PASS: topology validation',
+  ]);
+  assert.doesNotMatch(workflow, /FAIL: production-preflight OIDC\/topology proof/);
+
+  const successMarkers = [
+    'PASS: masked role binding present',
+    'PASS: GitHub OIDC token issued',
+    'PASS: AWS role assumption',
+    'PASS: read-only AWS topology collection',
+    'PASS: topology validation',
+  ];
+  const positions = successMarkers.map((marker) => workflow.indexOf(marker));
+  assert.ok(positions.every((position) => position >= 0));
+  assert.deepEqual(positions, [...positions].sort((left, right) => left - right));
+
+  const collection = workflow.indexOf('payload = topology.collectAwsTopology(');
+  const validation = workflow.indexOf('validateTopology(payload, {');
+  assert.ok(collection >= 0 && validation > collection, 'validation must follow collection');
+  assert.match(workflow, /mode: 'preflight'/);
+  assert.match(workflow, /releaseSha: process\.env\.GITHUB_SHA/);
+  assert.match(workflow, /mixedVersionSafe: false/);
+  assert.match(workflow, /\^\[0-9a-f\]\{40\}\$/);
+  assert.match(workflow, /node 2>\/dev\/null <<'NODE'/);
+  assert.match(workflow, /--output text 2>\/dev\/null/);
 });
