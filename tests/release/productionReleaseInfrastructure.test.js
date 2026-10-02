@@ -977,3 +977,95 @@ test('pinned reservation tool emits only the three release-blocking counts', asy
   assert.match(documentSource, /8#\$mode & 022/);
   assert.doesNotMatch(documentSource, /\/var\/app\/current|scripts\/release\/query-active-reservations/);
 });
+
+const preflightProofWorkflowPath = path.join(
+  __dirname,
+  '../../.github/workflows/prove-production-preflight-oidc.yml'
+);
+
+function preflightProofSource() {
+  return fs.readFileSync(preflightProofWorkflowPath, 'utf8');
+}
+
+test('isolated production-preflight proof is manual, single-job, and read-only at GitHub', () => {
+  const workflow = preflightProofSource();
+  const triggerBlock = workflow.match(/^on:\s*\r?\n([\s\S]*?)(?=^[^\s#])/m);
+  assert.ok(triggerBlock, 'workflow must declare its own event block');
+  assert.match(triggerBlock[1], /^  workflow_dispatch:\s*(?:\{\})?\s*$/m);
+  assert.equal(
+    [...triggerBlock[1].matchAll(/^  ([a-z_]+):/gm)].map((match) => match[1]).join(','),
+    'workflow_dispatch'
+  );
+
+  const jobNames = [...workflow.matchAll(/^  ([a-z][a-z0-9_-]*):\s*$/gm)]
+    .filter((match) => match.index > workflow.indexOf('\njobs:'))
+    .map((match) => match[1]);
+  assert.equal(jobNames.length, 1, 'proof must have exactly one job');
+  assert.match(workflow, /^permissions:\s*\r?\n  contents: read\s*\r?\n  id-token: write\s*$/m);
+  assert.doesNotMatch(workflow, /^(?:  |    |      )(?:actions|checks|contents|deployments|issues|packages|pull-requests|statuses|workflows): write\s*$/m);
+  assert.match(workflow, /environment:\s*(?:\r?\n\s+name:\s*)?production-preflight\s*$/m);
+  assert.doesNotMatch(workflow, /\b(?:push|pull_request|pull_request_target|workflow_run|repository_dispatch):/);
+});
+
+test('isolated preflight proof rejects non-main refs before OIDC and uses a masked role binding', () => {
+  const workflow = preflightProofSource();
+  const guardStart = workflow.indexOf('- name: Require main ref');
+  const checkoutStart = workflow.indexOf('- name: Check out exact main commit');
+  const guard = workflow.slice(guardStart, checkoutStart);
+  const oidcRequest = workflow.indexOf('ACTIONS_ID_TOKEN_REQUEST_URL');
+  const roleAssumption = workflow.indexOf('assume-role-with-web-identity');
+  assert.ok(guardStart >= 0 && checkoutStart > guardStart, 'main guard must be the first step');
+  assert.match(guard, /\$GITHUB_REF[^\n]*refs\/heads\/main/);
+  assert.match(guard, /exit 1/);
+  assert.ok(oidcRequest >= 0 && roleAssumption >= 0, 'OIDC role assumption is required');
+  assert.ok(checkoutStart < oidcRequest && guardStart < roleAssumption);
+  assert.match(workflow, /uses: actions\/checkout@[0-9a-f]{40}/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /secrets\.AWS_PREFLIGHT_ROLE_TO_ASSUME/);
+  assert.doesNotMatch(workflow, /vars\.AWS_PREFLIGHT_ROLE_TO_ASSUME/);
+  assert.match(workflow, /vars\.AWS_REGION\s*\|\|\s*'us-east-1'/);
+  assert.doesNotMatch(workflow, /\b(?:aws\s+sts\s+get-caller-identity|set-output)\b/i);
+});
+
+test('isolated preflight topology proof is limited to approved reads and identifier-free evidence', () => {
+  const workflow = preflightProofSource();
+  const topologySource = fs.readFileSync(path.join(
+    __dirname,
+    '../../scripts/release/aws-release-topology.js'
+  ), 'utf8');
+  assert.match(workflow, /collectAwsTopology/);
+  assert.match(workflow, /createAwsCliRunner/);
+  const collectionStart = topologySource.indexOf('function collectAwsTopology(');
+  const collectionEnd = topologySource.indexOf('function cliConfiguration(', collectionStart);
+  assert.ok(collectionStart >= 0 && collectionEnd > collectionStart,
+    'bound the operation review to collectAwsTopology');
+  const collection = topologySource.slice(collectionStart, collectionEnd);
+  const operations = [...collection.matchAll(/runAws\(\s*'([^']+)',\s*'([^']+)'/g)]
+    .map((match) => `${match[1]}:${match[2]}`)
+    .sort();
+  assert.deepEqual(operations, [
+    'autoscaling:describe-auto-scaling-groups',
+    'elasticbeanstalk:describe-configuration-settings',
+    'elasticbeanstalk:describe-environment-resources',
+    'elasticbeanstalk:describe-environments',
+    'elasticbeanstalk:describe-instances-health',
+    'elbv2:describe-listeners',
+    'elbv2:describe-load-balancer-attributes',
+    'elbv2:describe-load-balancers',
+    'elbv2:describe-target-groups',
+    'elbv2:describe-target-health',
+  ]);
+  assert.doesNotMatch(workflow, /actions\/upload-artifact|\.github\/workflows\/deploy-eb-production|gh\s+workflow\s+run/i);
+  assert.doesNotMatch(workflow, /\b(?:ssm|s3api|s3|elasticbeanstalk\s+(?:update|create|terminate)|elbv2\s+(?:modify|create|delete)|autoscaling\s+(?:update|create|delete))\b/i);
+  assert.doesNotMatch(workflow, /\b(?:contents|pull-requests|deployments): write\b/);
+  assert.doesNotMatch(workflow, /\becho\b[^\n]*(?:\$\{?AWS_|\$\{?ROLE_|arn:aws|AccountId|LoadBalancerArn|InstanceId|TargetGroupArn)/i);
+  const messages = [...workflow.matchAll(/printf '%s\\n' '([^']+)'/g)].map((match) => match[1]);
+  assert.deepEqual(messages, [
+    'FAIL: main ref required',
+    'PASS: main ref',
+    'FAIL: production-preflight OIDC/topology proof',
+    'PASS: production-preflight OIDC/topology proof',
+  ]);
+  assert.match(workflow, /set \+x/);
+  assert.match(workflow, /2>\/dev\/null/);
+});
