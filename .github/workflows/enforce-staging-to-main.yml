@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   enforce-staging-source:
@@ -23,25 +24,158 @@ jobs:
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EXPECTED_REPOSITORY: ${{ github.repository }}
+          BASE_REF: ${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+          node <<'NODE'
+          'use strict';
 
-          if [ "$HEAD_REPOSITORY" != "$EXPECTED_REPOSITORY" ]; then
-            echo "::error::Pull requests to main must originate in the canonical repository."
-            exit 1
-          fi
-          if [ "$HEAD_REF" != "staging" ]; then
-            echo "::error::Pull requests to main must originate from the staging branch."
-            exit 1
-          fi
+          const { execFileSync } = require('node:child_process');
 
-          canonical_sha=$(gh api \
-            "repos/$EXPECTED_REPOSITORY/git/ref/heads/staging" \
-            --jq '.object.sha')
-          if [ "$HEAD_SHA" != "$canonical_sha" ]; then
-            echo "::error::Pull request head is not the exact current canonical staging SHA."
-            exit 1
-          fi
+          const repository = process.env.EXPECTED_REPOSITORY;
+          const approvedRepository = 'Techware-Hut/mosaic-backend';
+          const approvedBranch = 'codex/focused-release-wave1';
+          const approvedBase = 'da890fbd6741ef2e4c618bed84ef0072ece7932d';
+          const approvedHead = 'd7ff8e041c7ffecd52043e844eb2dac76210e779';
+          const approvedCommits = [
+            'af4146d524b393903a338c617f9d1eed7d42f56d',
+            'b6e3c5285d066c150d292c01258e55bf2448dd52',
+            approvedHead,
+          ];
+          const approvedFiles = [
+            '.github/workflows/deploy-eb-production.yml',
+            'docs/release/AGENTIC_RELEASE_OPERATIONS.md',
+            'docs/release/CHECKOUT_GATE_OPERATIONS.md',
+            'docs/release/RELEASE_CONTROL_INFRASTRUCTURE_SETUP.md',
+            'scripts/release/build-production-evidence.js',
+            'scripts/release/deploy-eb-exact-sha.sh',
+            'scripts/release/manage-checkout-gate.js',
+            'scripts/release/probe-target-checkout-surface.js',
+            'scripts/release/resolve-production-release.js',
+            'scripts/release/verify-checkout-gate.sh',
+            'scripts/release/verify-checkout-surface-contract.js',
+            'scripts/release/verify-focused-release-source.js',
+            'scripts/release/verify-production-public-surfaces.js',
+            'tests/release/agenticProductionRelease.test.js',
+            'tests/release/focusedReleaseCertificate.test.js',
+            'tests/release/productionReleaseControl.test.js',
+            'tests/release/productionReleaseInfrastructure.test.js',
+          ].sort();
 
-          echo "Exact canonical staging source is eligible for promotion."
-          echo "The independently required App-owned status supplies trusted certification."
+          function reject(message) {
+            throw new Error(message);
+          }
+
+          function api(path) {
+            try {
+              return JSON.parse(execFileSync('gh', ['api', path], {
+                encoding: 'utf8',
+                maxBuffer: 4 * 1024 * 1024,
+                stdio: ['ignore', 'pipe', 'pipe'],
+              }));
+            } catch {
+              reject('Required GitHub API evidence is unavailable or malformed.');
+            }
+          }
+
+          function verifyCanonicalStaging() {
+            const canonical = api(`repos/${repository}/git/ref/heads/staging`);
+            if (process.env.HEAD_SHA !== canonical?.object?.sha) {
+              reject('Pull request head is not the exact current canonical staging SHA.');
+            }
+            console.log('Exact canonical staging source is eligible for promotion.');
+            console.log('The independently required App-owned status supplies trusted certification.');
+          }
+
+          function verifyPinnedWaveOne() {
+            if (repository !== approvedRepository ||
+                process.env.PR_NUMBER !== '293' ||
+                process.env.BASE_REF !== 'main' ||
+                process.env.HEAD_REF !== approvedBranch ||
+                process.env.HEAD_SHA !== approvedHead) {
+              reject('Pull request does not match the pinned Wave 1 admission tuple.');
+            }
+
+            const pull = api(`repos/${repository}/pulls/293`);
+            if (pull?.number !== 293 || pull?.state !== 'open' ||
+                pull?.head?.repo?.full_name !== repository ||
+                pull?.head?.ref !== approvedBranch || pull?.head?.sha !== approvedHead ||
+                pull?.base?.repo?.full_name !== repository || pull?.base?.ref !== 'main' ||
+                pull?.changed_files !== approvedFiles.length) {
+              reject('Live pull request identity or changed-file count does not match Wave 1.');
+            }
+
+            const branchRef = `repos/${repository}/git/ref/heads/${approvedBranch}`;
+            if (api(branchRef)?.object?.sha !== approvedHead) {
+              reject('Wave 1 branch no longer points to the approved head SHA.');
+            }
+
+            const comparison = api(`repos/${repository}/compare/${approvedBase}...${approvedHead}`);
+            if (comparison?.status !== 'ahead' || comparison?.behind_by !== 0 ||
+                comparison?.ahead_by !== approvedCommits.length ||
+                comparison?.total_commits !== approvedCommits.length ||
+                comparison?.base_commit?.sha !== approvedBase ||
+                comparison?.merge_base_commit?.sha !== approvedBase ||
+                !Array.isArray(comparison?.commits) ||
+                comparison.commits.length !== approvedCommits.length) {
+              reject('Wave 1 ancestry is not the approved linear history.');
+            }
+            for (let index = 0; index < approvedCommits.length; index += 1) {
+              const commit = comparison.commits[index];
+              const parent = index === 0 ? approvedBase : approvedCommits[index - 1];
+              if (commit?.sha !== approvedCommits[index] ||
+                  !Array.isArray(commit?.parents) || commit.parents.length !== 1 ||
+                  commit.parents[0]?.sha !== parent) {
+                reject('Wave 1 ancestry is not the approved linear history.');
+              }
+            }
+
+            const files = [];
+            for (let page = 1; ; page += 1) {
+              const batch = api(`repos/${repository}/pulls/293/files?per_page=100&page=${page}`);
+              if (!Array.isArray(batch) || batch.length > 100) {
+                reject('Wave 1 file pagination is invalid.');
+              }
+              files.push(...batch);
+              if (files.length > approvedFiles.length) {
+                reject('Wave 1 includes an unapproved file.');
+              }
+              if (batch.length < 100) break;
+            }
+            const actualFiles = files.map((file) => {
+              if (typeof file?.filename !== 'string' ||
+                  !['added', 'modified'].includes(file?.status) ||
+                  file?.previous_filename != null) {
+                reject('Wave 1 includes an unapproved rename or file change.');
+              }
+              return file.filename;
+            }).sort();
+            if (files.length !== pull.changed_files ||
+                new Set(actualFiles).size !== approvedFiles.length ||
+                actualFiles.some((name, index) => name !== approvedFiles[index])) {
+              reject('Complete Wave 1 changed-file set differs from the approved manifest.');
+            }
+
+            if (api(branchRef)?.object?.sha !== approvedHead) {
+              reject('Wave 1 branch moved during policy verification.');
+            }
+            console.log('Exact pinned Wave 1 release-infrastructure source is eligible for promotion.');
+          }
+
+          try {
+            if (process.env.HEAD_REPOSITORY !== repository) {
+              reject('Pull requests to main must originate in the canonical repository.');
+            }
+            if (process.env.HEAD_REF === 'staging') {
+              verifyCanonicalStaging();
+            } else if (process.env.HEAD_REF === approvedBranch) {
+              verifyPinnedWaveOne();
+            } else {
+              reject('Pull requests to main must originate from staging or the pinned Wave 1 source.');
+            }
+          } catch (error) {
+            console.error(`::error::${error.message}`);
+            process.exitCode = 1;
+          }
+          NODE

@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '../..');
 const workflow = fs.readFileSync(
@@ -52,6 +53,112 @@ const shaB = 'b'.repeat(40);
 const shaC = 'c'.repeat(40);
 const shaD = 'd'.repeat(40);
 const repository = 'Techware-Hut/mosaic-backend';
+const waveOneBase = 'da890fbd6741ef2e4c618bed84ef0072ece7932d';
+const waveOneCommits = [
+  'af4146d524b393903a338c617f9d1eed7d42f56d',
+  'b6e3c5285d066c150d292c01258e55bf2448dd52',
+  'd7ff8e041c7ffecd52043e844eb2dac76210e779',
+];
+const waveOneBranch = 'codex/focused-release-wave1';
+const waveOneFiles = [
+  '.github/workflows/deploy-eb-production.yml',
+  'docs/release/AGENTIC_RELEASE_OPERATIONS.md',
+  'docs/release/CHECKOUT_GATE_OPERATIONS.md',
+  'docs/release/RELEASE_CONTROL_INFRASTRUCTURE_SETUP.md',
+  'scripts/release/build-production-evidence.js',
+  'scripts/release/deploy-eb-exact-sha.sh',
+  'scripts/release/manage-checkout-gate.js',
+  'scripts/release/probe-target-checkout-surface.js',
+  'scripts/release/resolve-production-release.js',
+  'scripts/release/verify-checkout-gate.sh',
+  'scripts/release/verify-checkout-surface-contract.js',
+  'scripts/release/verify-focused-release-source.js',
+  'scripts/release/verify-production-public-surfaces.js',
+  'tests/release/agenticProductionRelease.test.js',
+  'tests/release/focusedReleaseCertificate.test.js',
+  'tests/release/productionReleaseControl.test.js',
+  'tests/release/productionReleaseInfrastructure.test.js',
+];
+
+function sourcePolicyScript() {
+  const match = sourcePolicyWorkflow.match(/^ {10}node <<'NODE'\r?\n([\s\S]*?)^ {10}NODE\s*$/m);
+  assert.ok(match, 'trusted promotion workflow must contain the inline policy');
+  return match[1].split(/\r?\n/).map((line) => line.replace(/^ {10}/, '')).join('\n');
+}
+
+function waveOneApiFixtures() {
+  const head = waveOneCommits[2];
+  return {
+    [`repos/${repository}/pulls/293`]: {
+      number: 293,
+      state: 'open',
+      head: { ref: waveOneBranch, sha: head, repo: { full_name: repository } },
+      base: { ref: 'main', repo: { full_name: repository } },
+      changed_files: waveOneFiles.length,
+    },
+    [`repos/${repository}/git/ref/heads/${waveOneBranch}`]: { object: { sha: head } },
+    [`repos/${repository}/compare/${waveOneBase}...${head}`]: {
+      status: 'ahead',
+      ahead_by: 3,
+      behind_by: 0,
+      total_commits: 3,
+      base_commit: { sha: waveOneBase },
+      merge_base_commit: { sha: waveOneBase },
+      commits: waveOneCommits.map((sha, index) => ({
+        sha,
+        parents: [{ sha: index === 0 ? waveOneBase : waveOneCommits[index - 1] }],
+      })),
+    },
+    [`repos/${repository}/pulls/293/files?per_page=100&page=1`]: waveOneFiles.map((filename) => ({
+      filename,
+      status: 'modified',
+    })),
+  };
+}
+
+function runSourcePolicy({ env = {}, responses = {}, failApi, mutateApi } = {}) {
+  const fixtures = { ...waveOneApiFixtures(), ...responses };
+  const calls = [];
+  const output = [];
+  const errors = [];
+  const policyProcess = {
+    env: {
+      EXPECTED_REPOSITORY: repository,
+      HEAD_REPOSITORY: repository,
+      HEAD_REF: waveOneBranch,
+      HEAD_SHA: waveOneCommits[2],
+      BASE_REF: 'main',
+      PR_NUMBER: '293',
+      ...env,
+    },
+    exitCode: 0,
+  };
+  const mockRequire = (name) => {
+    assert.equal(name, 'node:child_process');
+    return {
+      execFileSync(command, args) {
+        assert.equal(command, 'gh');
+        assert.equal(args[0], 'api');
+        const apiPath = args[1];
+        calls.push(apiPath);
+        if (apiPath === failApi || !Object.hasOwn(fixtures, apiPath)) {
+          throw new Error('mock API failure');
+        }
+        const fixture = JSON.parse(JSON.stringify(fixtures[apiPath]));
+        return JSON.stringify(mutateApi ? mutateApi(apiPath, fixture, calls) : fixture);
+      },
+    };
+  };
+  vm.runInNewContext(sourcePolicyScript(), {
+    require: mockRequire,
+    process: policyProcess,
+    console: {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+    },
+  }, { timeout: 2000 });
+  return { passed: policyProcess.exitCode === 0, calls, output, errors };
+}
 
 function workflowRun(overrides = {}) {
   return {
@@ -186,10 +293,181 @@ test('workflow and PR helper cannot merge or auto-merge a release PR', () => {
 test('main source policy runs from trusted base-branch code without checking out PR code', () => {
   assert.match(sourcePolicyWorkflow, /pull_request_target:[\s\S]*branches:[\s\S]*- main/);
   assert.match(sourcePolicyWorkflow, /permissions:\s*\n\s+contents: read/);
+  assert.match(sourcePolicyWorkflow, /pull-requests: read/);
   assert.match(sourcePolicyWorkflow, /HEAD_REPOSITORY[\s\S]*HEAD_REF[\s\S]*HEAD_SHA/);
   assert.match(sourcePolicyWorkflow, /git\/ref\/heads\/staging/);
   assert.doesNotMatch(sourcePolicyWorkflow, /mosaic\/trusted-staging-certification|statuses:|sleep /);
   assert.doesNotMatch(sourcePolicyWorkflow, /actions\/checkout|npm ci|node .*scripts/);
+  assert.doesNotMatch(sourcePolicyWorkflow, /github\.event\.pull_request\.labels|\/merge|gh pr merge/);
+});
+
+test('canonical staging tip still passes and reads only the live staging ref', () => {
+  const stagingRef = `repos/${repository}/git/ref/heads/staging`;
+  const result = runSourcePolicy({
+    env: { HEAD_REF: 'staging', HEAD_SHA: shaC },
+    responses: { [stagingRef]: { object: { sha: shaC } } },
+  });
+  assert.equal(result.passed, true, result.errors.join('\n'));
+  assert.deepEqual(result.calls, [stagingRef]);
+  assert.match(result.output.join('\n'), /Exact canonical staging source is eligible/);
+});
+
+test('canonical stale staging tip still fails', () => {
+  const result = runSourcePolicy({
+    env: { HEAD_REF: 'staging', HEAD_SHA: shaB },
+    responses: { [`repos/${repository}/git/ref/heads/staging`]: { object: { sha: shaC } } },
+  });
+  assert.equal(result.passed, false);
+  assert.match(result.errors.join('\n'), /not the exact current canonical staging SHA/);
+});
+
+test('forked staging fails before any GitHub API read', () => {
+  const result = runSourcePolicy({
+    env: { HEAD_REF: 'staging', HEAD_REPOSITORY: 'untrusted/mosaic-backend' },
+  });
+  assert.equal(result.passed, false);
+  assert.deepEqual(result.calls, []);
+});
+
+test('only the exact pinned Wave 1 PR, live ref, ancestry, and complete manifest pass', () => {
+  const result = runSourcePolicy();
+  assert.equal(result.passed, true, result.errors.join('\n'));
+  assert.equal(result.calls.filter((path) => path.includes('/files?per_page=100&page=')).length, 1);
+  assert.equal(result.calls.filter((path) => path.includes('/git/ref/heads/codex/')).length, 2);
+  assert.match(result.output.join('\n'), /Exact pinned Wave 1/);
+});
+
+test('wrong PR, branch, head SHA, base, or repository cannot use pinned admission', () => {
+  const cases = [
+    { PR_NUMBER: '294' },
+    { HEAD_REF: 'codex/focused-release-wave2' },
+    { HEAD_SHA: shaB },
+    { BASE_REF: 'staging' },
+    { HEAD_REPOSITORY: 'untrusted/mosaic-backend' },
+    { EXPECTED_REPOSITORY: 'untrusted/mosaic-backend', HEAD_REPOSITORY: 'untrusted/mosaic-backend' },
+  ];
+  for (const env of cases) {
+    const result = runSourcePolicy({ env });
+    assert.equal(result.passed, false, JSON.stringify(env));
+    assert.deepEqual(result.calls, [], JSON.stringify(env));
+  }
+});
+
+test('live PR identity mismatch fails despite an approved event payload', () => {
+  const pullPath = `repos/${repository}/pulls/293`;
+  for (const modify of [
+    (pull) => { pull.head.sha = shaB; },
+    (pull) => { pull.head.repo.full_name = 'untrusted/mosaic-backend'; },
+    (pull) => { pull.base.ref = 'staging'; },
+    (pull) => { pull.changed_files = 16; },
+  ]) {
+    const result = runSourcePolicy({
+      mutateApi: (path, fixture) => {
+        if (path === pullPath) modify(fixture);
+        return fixture;
+      },
+    });
+    assert.equal(result.passed, false);
+  }
+});
+
+test('moved Wave 1 branch fails both before and after file verification', () => {
+  const branchRef = `repos/${repository}/git/ref/heads/${waveOneBranch}`;
+  for (const moveOnRead of [1, 2]) {
+    const result = runSourcePolicy({
+      mutateApi: (path, fixture, calls) => {
+        if (path === branchRef && calls.filter((entry) => entry === branchRef).length === moveOnRead) {
+          fixture.object.sha = shaB;
+        }
+        return fixture;
+      },
+    });
+    assert.equal(result.passed, false);
+    assert.match(result.errors.join('\n'), /branch (no longer points|moved during)/);
+  }
+});
+
+test('stale or non-linear Wave 1 ancestry fails', () => {
+  const comparisonPath = `repos/${repository}/compare/${waveOneBase}...${waveOneCommits[2]}`;
+  for (const modify of [
+    (comparison) => { comparison.merge_base_commit.sha = shaB; },
+    (comparison) => { comparison.behind_by = 1; },
+    (comparison) => { comparison.commits[1].parents.push({ sha: shaB }); },
+    (comparison) => { comparison.commits.pop(); },
+  ]) {
+    const result = runSourcePolicy({
+      mutateApi: (path, fixture) => {
+        if (path === comparisonPath) modify(fixture);
+        return fixture;
+      },
+    });
+    assert.equal(result.passed, false);
+    assert.match(result.errors.join('\n'), /ancestry/);
+  }
+});
+
+test('missing, extra, duplicate, and unapproved application files fail exact manifest check', () => {
+  const filesPath = `repos/${repository}/pulls/293/files?per_page=100&page=1`;
+  for (const modify of [
+    (files) => { files.pop(); },
+    (files) => { files.push({ filename: 'controllers/bookingController.js', status: 'modified' }); },
+    (files) => { files[0] = { ...files[1] }; },
+    (files) => { files[0].filename = 'controllers/bookingController.js'; },
+  ]) {
+    const result = runSourcePolicy({
+      mutateApi: (path, fixture) => {
+        if (path === filesPath) modify(fixture);
+        return fixture;
+      },
+    });
+    assert.equal(result.passed, false);
+  }
+});
+
+test('renamed or unapproved prior path fails even when its final name is allowlisted', () => {
+  const filesPath = `repos/${repository}/pulls/293/files?per_page=100&page=1`;
+  const result = runSourcePolicy({
+    mutateApi: (path, fixture) => {
+      if (path === filesPath) {
+        fixture[0].status = 'renamed';
+        fixture[0].previous_filename = 'controllers/bookingController.js';
+      }
+      return fixture;
+    },
+  });
+  assert.equal(result.passed, false);
+  assert.match(result.errors.join('\n'), /unapproved rename/);
+});
+
+test('GitHub API failure and malformed pagination fail closed', () => {
+  const filesPath = `repos/${repository}/pulls/293/files?per_page=100&page=1`;
+  const failed = runSourcePolicy({ failApi: filesPath });
+  assert.equal(failed.passed, false);
+  assert.match(failed.errors.join('\n'), /API evidence is unavailable/);
+  const malformed = runSourcePolicy({ responses: { [filesPath]: { files: waveOneFiles } } });
+  assert.equal(malformed.passed, false);
+  assert.match(malformed.errors.join('\n'), /pagination is invalid/);
+});
+
+test('truncated PR-file enumeration fails against the live changed-file count', () => {
+  const filesPath = `repos/${repository}/pulls/293/files?per_page=100&page=1`;
+  const result = runSourcePolicy({
+    responses: { [filesPath]: waveOneFiles.slice(0, -1).map((filename) => ({ filename, status: 'modified' })) },
+  });
+  assert.equal(result.passed, false);
+  assert.match(result.errors.join('\n'), /Complete Wave 1 changed-file set differs/);
+});
+
+test('arbitrary main PR, release/focused branch, and label-only claim remain ineligible', () => {
+  for (const env of [
+    { HEAD_REF: 'feature/new-main-change' },
+    { HEAD_REF: 'release/focused/example' },
+    { HEAD_REF: 'feature/new-main-change', LABELS: 'focused-release-approved' },
+  ]) {
+    const result = runSourcePolicy({ env });
+    assert.equal(result.passed, false);
+    assert.deepEqual(result.calls, []);
+  }
 });
 
 test('backend staging automation has no frontend dispatch, promotion, or deployment capability', () => {
