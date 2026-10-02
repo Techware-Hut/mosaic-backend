@@ -68,9 +68,9 @@ const synchronizedTreeSha = '5'.repeat(40);
 const reviewedTreeSha = 'e4b6ead713328fc8e67ca53e91cfb14af8008174';
 const proofBase = 'b0f7907fcfbce6c0fd8d6a9bd99d5f12a8f1bf7d';
 const proofBranch = 'codex/production-preflight-oidc-proof';
-const proofPrNumber = 999;
-const proofReviewedHead = '9'.repeat(40);
-const proofReviewedTree = 'a'.repeat(40);
+const proofPrNumber = 296;
+const proofReviewedHead = 'b67bb29203b957622cc7bb5a84fb92961d2ae892';
+const proofReviewedTree = 'ead495c2623b8b89d112e940dbcbeb1badd231d6';
 const proofMain = '8'.repeat(40);
 const proofMainParent = 'f'.repeat(40);
 const proofHead = '7'.repeat(40);
@@ -81,14 +81,28 @@ const proofFiles = [
   {
     path: '.github/workflows/prove-production-preflight-oidc.yml',
     status: 'added',
-    sha: '1'.repeat(40),
+    sha: 'a45a734daf3229bbb70c5ba230b9340b1913cb77',
     mode: '100644',
     type: 'blob',
   },
   {
     path: 'tests/release/productionReleaseInfrastructure.test.js',
     status: 'modified',
-    sha: '2'.repeat(40),
+    sha: '49882447886574304e67ea6396523ef3644d4b5a',
+    mode: '100644',
+    type: 'blob',
+  },
+  {
+    path: '.github/workflows/enforce-staging-to-main.yml',
+    status: 'modified',
+    sha: '7c980ae6770a1db8a1e4ca3ebf227961662cd75d',
+    mode: '100644',
+    type: 'blob',
+  },
+  {
+    path: 'tests/release/stagingReleaseAutomation.test.js',
+    status: 'modified',
+    sha: 'eae1e867a4b2e0210204f1b4e5ee9cbea4203dcc',
     mode: '100644',
     type: 'blob',
   },
@@ -156,10 +170,15 @@ function sourcePolicyScript(proofAdmission) {
   assert.ok(match, 'trusted promotion workflow must contain the inline policy');
   const source = match[1].split(/\r?\n/).map((line) => line.replace(/^ {10}/, '')).join('\n');
   if (proofAdmission === undefined) return source;
-  const marker = 'const proofAdmission = null; // PROOF_ADMISSION_PIN';
-  assert.equal(source.split(marker).length, 2, 'proof pin must have one inert source marker');
-  return source.replace(marker,
-    `const proofAdmission = ${JSON.stringify(proofAdmission)}; // PROOF_ADMISSION_PIN`);
+  const start = source.indexOf('const proofAdmission = ');
+  const endMarker = '; // PROOF_ADMISSION_PIN';
+  const end = source.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, 'proof pin must have one source marker');
+  assert.equal(source.indexOf(endMarker, end + endMarker.length), -1,
+    'proof pin marker must be unique');
+  return source.slice(0, start) +
+    `const proofAdmission = ${JSON.stringify(proofAdmission)}` +
+    source.slice(end);
 }
 
 function waveOneApiFixtures() {
@@ -215,6 +234,9 @@ function waveOneApiFixtures() {
 
 function proofPin() {
   return {
+    repository,
+    branch: proofBranch,
+    base: proofBase,
     prNumber: proofPrNumber,
     reviewedHead: proofReviewedHead,
     reviewedTree: proofReviewedTree,
@@ -235,8 +257,8 @@ function proofTrees() {
     treeEntry('controllers/bookingController.js', 'd'.repeat(40)),
   ];
   const sharedBase = [
-    treeEntry(policy, '0'.repeat(40)),
-    treeEntry(promotionTest, '1'.repeat(40)),
+    treeEntry(policy, proofFiles[2].sha),
+    treeEntry(promotionTest, proofFiles[3].sha),
     treeEntry(infrastructureTest, 'e'.repeat(40)),
   ];
   const sharedMain = [
@@ -245,14 +267,14 @@ function proofTrees() {
     treeEntry(infrastructureTest, 'e'.repeat(40)),
   ];
   const reviewed = [
-    treeEntry(policy, '0'.repeat(40)),
-    treeEntry(promotionTest, '1'.repeat(40)),
+    treeEntry(policy, proofFiles[2].sha),
+    treeEntry(promotionTest, proofFiles[3].sha),
     treeEntry(infrastructureTest, proofFiles[1].sha),
     treeEntry(proofFiles[0].path, proofFiles[0].sha),
   ];
   const synchronized = [
-    treeEntry(policy, '3'.repeat(40)),
-    treeEntry(promotionTest, '4'.repeat(40)),
+    treeEntry(policy, proofFiles[2].sha),
+    treeEntry(promotionTest, proofFiles[3].sha),
     treeEntry(infrastructureTest, proofFiles[1].sha),
     treeEntry(proofFiles[0].path, proofFiles[0].sha),
   ];
@@ -369,9 +391,9 @@ function runSourcePolicy({ env = {}, responses = {}, failApi, mutateApi, proofAd
   return { passed: policyProcess.exitCode === 0, calls, output, errors };
 }
 
-function runProofPolicy({ configured = true, env = {}, responses = {}, failApi, mutateApi } = {}) {
+function runProofPolicy({ configured = true, admission, env = {}, responses = {}, failApi, mutateApi } = {}) {
   return runSourcePolicy({
-    proofAdmission: configured ? proofPin() : undefined,
+    proofAdmission: configured ? (admission || proofPin()) : null,
     env: {
       HEAD_REF: proofBranch,
       HEAD_SHA: proofHead,
@@ -853,12 +875,51 @@ test('unpopulated proof admission pin rejects its exact branch before any API re
   assert.deepEqual(result.calls, []);
 });
 
-test('synthetic exact proof pin admits only the reviewed payload synchronized onto live main', () => {
+test('concrete proof pin admits only #296 with reviewed payload and atomic cleanup', () => {
+  const sourceResult = runSourcePolicy({
+    env: {
+      HEAD_REF: proofBranch,
+      HEAD_SHA: proofHead,
+      PR_NUMBER: String(proofPrNumber),
+    },
+    responses: proofApiFixtures(),
+  });
+  assert.equal(sourceResult.passed, true, sourceResult.errors.join('\n'));
   const result = runProofPolicy();
   assert.equal(result.passed, true, result.errors.join('\n'));
   assert.ok(result.calls.includes(`repos/${repository}/git/ref/heads/main`));
   assert.ok(result.calls.includes(`repos/${repository}/pulls/${proofPrNumber}/files?per_page=100&page=1`));
   assert.ok(result.calls.includes(`repos/${repository}/git/trees/${proofHeadTree}?recursive=1`));
+  assert.deepEqual(proofFiles.map((file) => file.path), [
+    '.github/workflows/prove-production-preflight-oidc.yml',
+    'tests/release/productionReleaseInfrastructure.test.js',
+    '.github/workflows/enforce-staging-to-main.yml',
+    'tests/release/stagingReleaseAutomation.test.js',
+  ]);
+});
+
+test('proof admission rejects changed immutable PR, reviewed source, or cleanup pin', () => {
+  for (const modify of [
+    (pin) => { pin.repository = 'other/mosaic-backend'; },
+    (pin) => { pin.branch = 'codex/other-proof'; },
+    (pin) => { pin.base = shaD; },
+    (pin) => { pin.prNumber = 297; },
+    (pin) => { pin.reviewedHead = shaD; },
+    (pin) => { pin.reviewedTree = shaD; },
+    (pin) => { pin.files[0].sha = shaD; },
+    (pin) => { pin.files[0].mode = '100755'; },
+    (pin) => { pin.files[0].type = 'commit'; },
+    (pin) => { pin.files[2].sha = shaD; },
+    (pin) => { pin.files[2].mode = '100755'; },
+    (pin) => { pin.files[2].type = 'commit'; },
+    (pin) => { pin.files.pop(); },
+    (pin) => { pin.files.push({ ...pin.files[0] }); },
+  ]) {
+    const pin = JSON.parse(JSON.stringify(proofPin()));
+    modify(pin);
+    const result = runProofPolicy({ admission: pin });
+    assert.equal(result.passed, false, JSON.stringify(pin));
+  }
 });
 
 test('proof admission rejects arbitrary PR, head, repository, base, and branch identities', () => {
@@ -938,6 +999,7 @@ test('proof admission rejects extra, missing, renamed, or deleted PR files', () 
   const filesPath = `repos/${repository}/pulls/${proofPrNumber}/files?per_page=100&page=1`;
   for (const modify of [
     (files) => { files.pop(); },
+    (files) => { files.splice(0, 1); },
     (files) => { files.push({ filename: 'controllers/bookingController.js', status: 'modified', sha: shaD }); },
     (files) => { files[0].status = 'renamed'; files[0].previous_filename = 'README.md'; },
     (files) => { files[1].status = 'removed'; },
@@ -958,9 +1020,14 @@ test('proof admission binds file blobs, modes, types, and all unrelated tree ent
     [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[0].path).sha = shaD; }],
     [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[0].path).mode = '100755'; }],
     [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[0].path).type = 'commit'; }],
+    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[2].path).sha = shaD; }],
+    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[2].path).mode = '100755'; }],
+    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[2].path).type = 'tree'; }],
+    [headTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[3].path).sha = shaD; }],
     [headTreePath, (tree) => { tree.tree.find((item) => item.path === 'README.md').sha = shaD; }],
     [headTreePath, (tree) => { tree.tree.push(treeEntry('controllers/extra.js', shaD)); }],
     [reviewedTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[1].path).mode = '100755'; }],
+    [reviewedTreePath, (tree) => { tree.tree.find((item) => item.path === proofFiles[2].path).sha = shaD; }],
   ]) {
     const result = runProofPolicy({ mutateApi: (apiPath, fixture) => {
       if (apiPath === path) modify(fixture);
@@ -1016,6 +1083,19 @@ test('proof admission fails closed on API errors, truncated trees, and malformed
     return fixture;
   } });
   assert.equal(truncated.passed, false);
+  for (const modifyTree of [
+    (tree) => { tree.tree.push({ ...tree.tree[0] }); },
+    (tree) => { tree.tree[0].sha = 'not-a-sha'; },
+    (tree) => { tree.tree[0].type = 'unknown'; },
+  ]) {
+    const malformedTree = runProofPolicy({ mutateApi: (apiPath, fixture) => {
+      if (apiPath === `repos/${repository}/git/trees/${proofHeadTree}?recursive=1`) {
+        modifyTree(fixture);
+      }
+      return fixture;
+    } });
+    assert.equal(malformedTree.passed, false);
+  }
   for (const malformed of [{ files: [] }, [proofApiFixtures()[filesPath][0]], []]) {
     const result = runProofPolicy({ responses: { [filesPath]: malformed } });
     assert.equal(result.passed, false);

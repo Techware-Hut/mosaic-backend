@@ -38,9 +38,44 @@ jobs:
           const approvedBranch = 'codex/focused-release-wave1';
           const proofBranch = 'codex/production-preflight-oidc-proof';
           const proofBase = 'b0f7907fcfbce6c0fd8d6a9bd99d5f12a8f1bf7d';
-          // This tuple must be replaced with one reviewed PR number, head/tree,
-          // and exact file manifest before this path can admit anything.
-          const proofAdmission = null; // PROOF_ADMISSION_PIN
+          const proofAdmission = {
+            repository: 'Techware-Hut/mosaic-backend',
+            branch: 'codex/production-preflight-oidc-proof',
+            base: 'b0f7907fcfbce6c0fd8d6a9bd99d5f12a8f1bf7d',
+            prNumber: 296,
+            reviewedHead: 'b67bb29203b957622cc7bb5a84fb92961d2ae892',
+            reviewedTree: 'ead495c2623b8b89d112e940dbcbeb1badd231d6',
+            files: [
+              {
+                path: '.github/workflows/prove-production-preflight-oidc.yml',
+                status: 'added',
+                sha: 'a45a734daf3229bbb70c5ba230b9340b1913cb77',
+                mode: '100644',
+                type: 'blob',
+              },
+              {
+                path: 'tests/release/productionReleaseInfrastructure.test.js',
+                status: 'modified',
+                sha: '49882447886574304e67ea6396523ef3644d4b5a',
+                mode: '100644',
+                type: 'blob',
+              },
+              {
+                path: '.github/workflows/enforce-staging-to-main.yml',
+                status: 'modified',
+                sha: '7c980ae6770a1db8a1e4ca3ebf227961662cd75d',
+                mode: '100644',
+                type: 'blob',
+              },
+              {
+                path: 'tests/release/stagingReleaseAutomation.test.js',
+                status: 'modified',
+                sha: 'eae1e867a4b2e0210204f1b4e5ee9cbea4203dcc',
+                mode: '100644',
+                type: 'blob',
+              },
+            ],
+          }; // PROOF_ADMISSION_PIN
           const approvedBase = 'da890fbd6741ef2e4c618bed84ef0072ece7932d';
           const reviewedHead = 'd7ff8e041c7ffecd52043e844eb2dac76210e779';
           const reviewedTree = 'e4b6ead713328fc8e67ca53e91cfb14af8008174';
@@ -284,25 +319,30 @@ jobs:
             const bootstrapFiles = [
               '.github/workflows/enforce-staging-to-main.yml',
               'tests/release/stagingReleaseAutomation.test.js',
-            ];
+            ].sort();
+            // The single synchronization merge must publish the reviewed proof
+            // while restoring both bootstrap files to their pre-bootstrap blobs.
+            const finalFiles = [...proofFiles, ...bootstrapFiles];
             if (pin == null || typeof pin !== 'object' || Array.isArray(pin) ||
+                pin.repository !== approvedRepository ||
+                pin.branch !== proofBranch || pin.base !== proofBase ||
                 !Number.isSafeInteger(pin.prNumber) || pin.prNumber < 1 ||
                 !isSha(pin.reviewedHead) || !isSha(pin.reviewedTree) ||
-                !Array.isArray(pin.files) || pin.files.length !== proofFiles.length) {
-              reject('Preflight proof admission is disabled until its exact reviewed identity is pinned.');
+                !Array.isArray(pin.files) || pin.files.length !== finalFiles.length) {
+              reject('Preflight proof admission lacks its exact reviewed and cleanup identities.');
             }
             const manifest = new Map();
             for (const file of pin.files) {
               const expectedStatus = file?.path === proofFiles[0] ? 'added' : 'modified';
-              if (!proofFiles.includes(file?.path) || manifest.has(file.path) ||
+              if (!finalFiles.includes(file?.path) || manifest.has(file.path) ||
                   file.status !== expectedStatus || !isSha(file.sha) ||
                   file.mode !== '100644' || file.type !== 'blob') {
-                reject('Preflight proof manifest is missing or invalid.');
+                reject('Preflight proof publication manifest is missing or invalid.');
               }
               manifest.set(file.path, file);
             }
-            if (manifest.size !== proofFiles.length) {
-              reject('Preflight proof manifest is incomplete.');
+            if (manifest.size !== finalFiles.length) {
+              reject('Preflight proof publication manifest is incomplete.');
             }
             if (repository !== approvedRepository ||
                 process.env.PR_NUMBER !== String(pin.prNumber) ||
@@ -323,7 +363,7 @@ jobs:
                   value?.head?.ref !== proofBranch || value?.head?.sha !== headSha ||
                   value?.base?.repo?.full_name !== repository ||
                   value?.base?.ref !== 'main' ||
-                  value?.changed_files !== proofFiles.length) {
+                  value?.changed_files !== finalFiles.length) {
                 reject('Live preflight proof pull request identity differs from its pin.');
               }
             }
@@ -344,6 +384,7 @@ jobs:
                 !Array.isArray(mainCommit.parents) ||
                 mainCommit.parents.length !== 2 ||
                 mainCommit.parents[0]?.sha !== proofBase ||
+                !isSha(mainCommit.parents[1]?.sha) ||
                 !Array.isArray(headCommit.parents) ||
                 headCommit.parents.length !== 2 ||
                 headCommit.parents[0]?.sha !== pin.reviewedHead ||
@@ -391,12 +432,16 @@ jobs:
               }
             }
             for (const path of bootstrapFiles) {
+              const cleanup = manifest.get(path);
               const before = baseEntries.get(path);
               const after = mainEntries.get(path);
-              if (!before || !after || before.type !== 'blob' ||
-                  after.type !== 'blob' || before.mode !== '100644' ||
-                  after.mode !== before.mode || sameEntry(before, after)) {
-                reject('Live main is not the exact two-file policy bootstrap over the approved base.');
+              const current = headEntries.get(path);
+              if (!before || before.sha !== cleanup.sha ||
+                  before.mode !== cleanup.mode || before.type !== cleanup.type ||
+                  !after || after.type !== 'blob' ||
+                  after.mode !== before.mode || sameEntry(before, after) ||
+                  !sameEntry(current, before)) {
+                reject('Preflight proof does not atomically restore the exact pre-bootstrap policy and test blobs.');
               }
             }
             assertOtherEntriesMatch(baseEntries, mainEntries, bootstrapFiles,
@@ -417,7 +462,7 @@ jobs:
             }
             assertOtherEntriesMatch(baseEntries, reviewedEntries, proofFiles,
               'Reviewed preflight proof changes an unapproved path.');
-            assertOtherEntriesMatch(mainEntries, headEntries, proofFiles,
+            assertOtherEntriesMatch(mainEntries, headEntries, finalFiles,
               'Synchronized preflight proof changes an unapproved path.');
 
             const files = [];
@@ -427,7 +472,7 @@ jobs:
                 reject('Preflight proof file pagination is invalid.');
               }
               files.push(...batch);
-              if (files.length > proofFiles.length) {
+              if (files.length > finalFiles.length) {
                 reject('Preflight proof includes an extra file.');
               }
               if (batch.length < 100) break;
@@ -442,9 +487,9 @@ jobs:
               }
               seen.add(file.filename);
             }
-            if (files.length !== proofFiles.length ||
+            if (files.length !== finalFiles.length ||
                 files.length !== pull.changed_files ||
-                seen.size !== proofFiles.length) {
+                seen.size !== finalFiles.length) {
               reject('Complete preflight proof PR file set differs from its pin.');
             }
             if (refSha('heads/main') !== mainSha ||
