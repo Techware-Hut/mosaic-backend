@@ -86,11 +86,65 @@ jobs:
             let payload;
             let validateTopology;
             try {
+              const { spawnSync } = require('node:child_process');
               const topology = require('./scripts/release/aws-release-topology');
               const { createAwsCliRunner } = require('./scripts/release/release-control-utils');
+              const approvedReads = Object.freeze({
+                'elasticbeanstalk:describe-environments': 'DescribeEnvironments',
+                'elasticbeanstalk:describe-configuration-settings': 'DescribeConfigurationSettings',
+                'elasticbeanstalk:describe-environment-resources': 'DescribeEnvironmentResources',
+                'elasticbeanstalk:describe-instances-health': 'DescribeInstancesHealth',
+                'autoscaling:describe-auto-scaling-groups': 'DescribeAutoScalingGroups',
+                'elbv2:describe-load-balancers': 'DescribeLoadBalancers',
+                'elbv2:describe-listeners': 'DescribeListeners',
+                'elbv2:describe-target-groups': 'DescribeTargetGroups',
+                'elbv2:describe-target-health': 'DescribeTargetHealth',
+                'elbv2:describe-load-balancer-attributes': 'DescribeLoadBalancerAttributes',
+              });
+              function classifyAwsError(stderr) {
+                const detail = String(stderr || '');
+                const code = /An error occurred \(([^)]+)\)/.exec(detail)?.[1] || '';
+                if (/^(?:AccessDenied(?:Exception)?|UnauthorizedOperation)$/.test(code) || /not authorized to perform/i.test(detail)) {
+                  return 'AccessDenied';
+                }
+                if (/^(?:ResourceNotFound(?:Exception)?|NoSuchEntity(?:Exception)?|EnvironmentNotFound(?:Exception)?|LoadBalancerNotFound(?:Exception)?|TargetGroupNotFound(?:Exception)?)$/.test(code)) {
+                  return 'ResourceNotFound';
+                }
+                if (/^(?:ValidationError|ValidationException|InvalidParameter(?:Value|Exception)?)$/.test(code)) {
+                  return 'ValidationError';
+                }
+                return 'OtherAwsError';
+              }
+              let failureClass = 'OtherAwsError';
+              const runner = createAwsCliRunner({
+                awsCli: 'aws',
+                spawn: (command, args, options) => {
+                  const result = spawnSync(command, args, options);
+                  if (result.error || result.status !== 0) {
+                    failureClass = classifyAwsError(result.stderr);
+                  }
+                  return result;
+                },
+              });
+              const diagnosticRunAws = (service, operation, args) => {
+                const label = approvedReads[`${service}:${operation}`];
+                if (!Object.hasOwn(approvedReads, `${service}:${operation}`)) {
+                  throw new Error('Unapproved AWS read operation');
+                }
+                failureClass = 'OtherAwsError';
+                try {
+                  const result = runner(service, operation, args);
+                  console.log(`PASS: ${label}`);
+                  return result;
+                } catch (_) {
+                  console.log(`FAIL: ${label}`);
+                  console.log(`FAIL CLASS: ${failureClass}`);
+                  throw new Error('Approved AWS read failed');
+                }
+              };
               validateTopology = topology.validateTopology;
               payload = topology.collectAwsTopology({
-                runAws: createAwsCliRunner(),
+                runAws: diagnosticRunAws,
                 region: process.env.AWS_REGION,
                 applicationName: process.env.EB_APPLICATION_NAME,
                 environmentName: process.env.EB_ENVIRONMENT_NAME,
