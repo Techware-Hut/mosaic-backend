@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 
 const topologyApi = require('../../scripts/release/aws-release-topology');
@@ -987,6 +988,83 @@ function preflightProofSource() {
   return fs.readFileSync(preflightProofWorkflowPath, 'utf8');
 }
 
+const approvedProofReads = [
+  ['elasticbeanstalk', 'describe-environments', 'DescribeEnvironments', 'environments'],
+  ['elasticbeanstalk', 'describe-configuration-settings', 'DescribeConfigurationSettings', 'configuration'],
+  ['elasticbeanstalk', 'describe-environment-resources', 'DescribeEnvironmentResources', 'resources'],
+  ['elasticbeanstalk', 'describe-instances-health', 'DescribeInstancesHealth', 'instanceHealth'],
+  ['autoscaling', 'describe-auto-scaling-groups', 'DescribeAutoScalingGroups', 'autoScaling'],
+  ['elbv2', 'describe-load-balancers', 'DescribeLoadBalancers', 'loadBalancers'],
+  ['elbv2', 'describe-listeners', 'DescribeListeners', 'listeners'],
+  ['elbv2', 'describe-target-groups', 'DescribeTargetGroups', 'targetGroups'],
+  ['elbv2', 'describe-target-health', 'DescribeTargetHealth', 'targetHealthByGroup'],
+  ['elbv2', 'describe-load-balancer-attributes', 'DescribeLoadBalancerAttributes', 'loadBalancerAttributes'],
+];
+
+function embeddedPreflightProofNode() {
+  const match = preflightProofSource().match(/^ {10}node 2>\/dev\/null <<'NODE'\r?\n([\s\S]*?)^ {10}NODE\s*$/m);
+  assert.ok(match, 'proof workflow must contain its isolated Node script');
+  return match[1].replace(/^ {10}/gm, '');
+}
+
+function runEmbeddedPreflightProof({ failOperation, awsError, unapprovedOperation = false } = {}) {
+  const fixture = topologyFixture();
+  const responses = Object.fromEntries(approvedProofReads.map(([service, operation, , fixtureKey]) => [
+    `${service}:${operation}`,
+    fixtureKey === 'targetHealthByGroup' ? fixture.targetHealthByGroup[TARGET_GROUP_ARN] : fixture[fixtureKey],
+  ]));
+  // The collector's --query projects ConfigurationSettings to a bare array.
+  responses['elasticbeanstalk:describe-configuration-settings'] = fixture.configuration.ConfigurationSettings;
+  const awsCalls = [];
+  const messages = [];
+  let validated = false;
+  const fakeSpawn = (binary, args) => {
+    assert.equal(binary, 'aws');
+    const operation = `${args[0]}:${args[1]}`;
+    awsCalls.push(operation);
+    assert.ok(Object.hasOwn(responses, operation), 'only approved read operations reach AWS CLI');
+    if (operation === 'elasticbeanstalk:describe-configuration-settings') {
+      assert.ok(args.includes('--query'), 'configuration response is filtered by the AWS CLI query');
+    }
+    if (operation === failOperation) {
+      return { status: 255, stderr: awsError, stdout: '' };
+    }
+    return { status: 0, stderr: '', stdout: JSON.stringify(responses[operation]) };
+  };
+  const localProcess = {
+    env: {
+      AWS_REGION: REGION,
+      EB_APPLICATION_NAME: APPLICATION,
+      EB_ENVIRONMENT_NAME: ENVIRONMENT,
+      GITHUB_SHA: SHA,
+    },
+  };
+  const localRequire = (specifier) => {
+    if (specifier === 'node:child_process') return { spawnSync: fakeSpawn };
+    if (specifier === './scripts/release/release-control-utils') {
+      return { createAwsCliRunner: require('../../scripts/release/release-control-utils').createAwsCliRunner };
+    }
+    if (specifier === './scripts/release/aws-release-topology') {
+      return {
+        collectAwsTopology: unapprovedOperation
+          ? ({ runAws }) => runAws('unapproved', 'read-operation', [])
+          : topologyApi.collectAwsTopology,
+        validateTopology: (payload, options) => {
+          validated = true;
+          return topologyApi.validateTopology(payload, options);
+        },
+      };
+    }
+    throw new Error('Unexpected module in isolated proof');
+  };
+  vm.runInNewContext(embeddedPreflightProofNode(), {
+    require: localRequire,
+    process: localProcess,
+    console: { log: (...values) => messages.push(values.join(' ')) },
+  }, { timeout: 1000 });
+  return { awsCalls, messages, validated, exitCode: localProcess.exitCode };
+}
+
 test('isolated production-preflight proof is manual, single-job, and read-only at GitHub', () => {
   const workflow = preflightProofSource();
   const triggerBlock = workflow.match(/^on:\s*\r?\n([\s\S]*?)(?=^[^\s#])/m);
@@ -1055,10 +1133,27 @@ test('isolated preflight topology proof is limited to approved reads and identif
     'elbv2:describe-target-groups',
     'elbv2:describe-target-health',
   ]);
+  const workflowLabels = [...workflow.matchAll(/^\s+'([^']+)': '(Describe[^']+)',?\s*$/gm)]
+    .map((match) => [match[1], match[2]]);
+  assert.deepEqual(workflowLabels, approvedProofReads.map(([service, operation, label]) => [
+    `${service}:${operation}`, label,
+  ]));
+  assert.match(workflow, /approvedReads = Object\.freeze\(/);
+  assert.match(workflow, /Object\.hasOwn\(approvedReads,/);
+  assert.match(workflow, /createAwsCliRunner\(\{\s*awsCli: 'aws',\s*spawn:/);
+  const classifier = workflow.slice(
+    workflow.indexOf('function classifyAwsError('),
+    workflow.indexOf('let failureClass =', workflow.indexOf('function classifyAwsError('))
+  );
+  assert.deepEqual([...classifier.matchAll(/return '([^']+)'/g)].map((match) => match[1]), [
+    'AccessDenied', 'ResourceNotFound', 'ValidationError', 'OtherAwsError',
+  ]);
   assert.doesNotMatch(workflow, /actions\/upload-artifact|\.github\/workflows\/deploy-eb-production|gh\s+workflow\s+run/i);
   assert.doesNotMatch(workflow, /\b(?:ssm|s3api|s3|elasticbeanstalk\s+(?:update|create|terminate)|elbv2\s+(?:modify|create|delete)|autoscaling\s+(?:update|create|delete))\b/i);
+  assert.doesNotMatch(workflow, /\baws\s+iam\b|put-role-policy|attach-role-policy|create-policy/i);
   assert.doesNotMatch(workflow, /\b(?:contents|pull-requests|deployments): write\b/);
   assert.doesNotMatch(workflow, /(?:printf|console\.log|console\.error|process\.stdout\.write)[^\n]*(?:\$\{?AWS_|\$\{?ROLE_|arn:aws|AccountId|LoadBalancerArn|InstanceId|TargetGroupArn|error\.message)/i);
+  assert.doesNotMatch(workflow, /console\.log\([^\n]*(?:stderr|detail|result\.stdout)/i);
   assert.doesNotMatch(workflow, /console\.error|process\.stderr\.write|\baws\s+sts\s+get-caller-identity\b/i);
   const messages = [...workflow.matchAll(/printf '%s\\n' '([^']+)'/g)].map((match) => match[1]);
   assert.deepEqual(messages, [
@@ -1111,4 +1206,65 @@ test('isolated preflight proof reports fixed stage results and validates collect
   assert.match(workflow, /\^\[0-9a-f\]\{40\}\$/);
   assert.match(workflow, /node 2>\/dev\/null <<'NODE'/);
   assert.match(workflow, /--output text 2>\/dev\/null/);
+});
+
+test('isolated proof labels every approved AWS read and stops at the failing operation', () => {
+  const expectedOperations = approvedProofReads.map(([service, operation]) => `${service}:${operation}`);
+  const expectedPasses = approvedProofReads.map(([, , label]) => `PASS: ${label}`);
+  const collected = runEmbeddedPreflightProof();
+  // The existing validator expects a ConfigurationSettings envelope, while the
+  // collector's AWS CLI query returns an array. Diagnostics leave that contract unchanged.
+  assert.deepEqual(collected.awsCalls, expectedOperations);
+  assert.deepEqual(collected.messages, [
+    ...expectedPasses,
+    'PASS: read-only AWS topology collection',
+    'FAIL: topology validation',
+  ]);
+  assert.equal(collected.validated, true);
+  assert.equal(collected.exitCode, 1);
+
+  for (let index = 0; index < approvedProofReads.length; index += 1) {
+    const [, , label] = approvedProofReads[index];
+    const failure = runEmbeddedPreflightProof({
+      failOperation: expectedOperations[index],
+      awsError: `An error occurred (AccessDeniedException) for ${LOAD_BALANCER_ARN} ${INSTANCE_ID}`,
+    });
+    assert.deepEqual(failure.awsCalls, expectedOperations.slice(0, index + 1));
+    assert.deepEqual(failure.messages, [
+      ...expectedPasses.slice(0, index),
+      `FAIL: ${label}`,
+      'FAIL CLASS: AccessDenied',
+      'FAIL: read-only AWS topology collection',
+    ]);
+    assert.equal(failure.validated, false);
+    assert.equal(failure.exitCode, 1);
+    assert.doesNotMatch(failure.messages.join('\n'), /arn:aws|123456789012|i-000000001234abcd|AccessDeniedException/);
+  }
+});
+
+test('isolated proof emits only approved AWS error classes and rejects unapproved operations', () => {
+  const firstOperation = approvedProofReads[0].slice(0, 2).join(':');
+  for (const [awsCode, expectedClass] of [
+    ['AccessDeniedException', 'AccessDenied'],
+    ['ResourceNotFoundException', 'ResourceNotFound'],
+    ['ValidationError', 'ValidationError'],
+    ['ThrottlingException', 'OtherAwsError'],
+  ]) {
+    const failure = runEmbeddedPreflightProof({
+      failOperation: firstOperation,
+      awsError: `An error occurred (${awsCode}) for ${TARGET_GROUP_ARN}`,
+    });
+    assert.deepEqual(failure.messages, [
+      'FAIL: DescribeEnvironments',
+      `FAIL CLASS: ${expectedClass}`,
+      'FAIL: read-only AWS topology collection',
+    ]);
+    assert.equal(failure.validated, false);
+    assert.doesNotMatch(failure.messages.join('\n'), /arn:aws|123456789012|An error occurred/);
+  }
+  const unapproved = runEmbeddedPreflightProof({ unapprovedOperation: true });
+  assert.deepEqual(unapproved.awsCalls, []);
+  assert.deepEqual(unapproved.messages, ['FAIL: read-only AWS topology collection']);
+  assert.equal(unapproved.exitCode, 1);
+  assert.equal(unapproved.validated, false);
 });
