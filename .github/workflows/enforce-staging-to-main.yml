@@ -36,6 +36,11 @@ jobs:
           const repository = process.env.EXPECTED_REPOSITORY;
           const approvedRepository = 'Techware-Hut/mosaic-backend';
           const approvedBranch = 'codex/focused-release-wave1';
+          const proofBranch = 'codex/production-preflight-oidc-proof';
+          const proofBase = 'b0f7907fcfbce6c0fd8d6a9bd99d5f12a8f1bf7d';
+          // This tuple must be replaced with one reviewed PR number, head/tree,
+          // and exact file manifest before this path can admit anything.
+          const proofAdmission = null; // PROOF_ADMISSION_PIN
           const approvedBase = 'da890fbd6741ef2e4c618bed84ef0072ece7932d';
           const reviewedHead = 'd7ff8e041c7ffecd52043e844eb2dac76210e779';
           const reviewedTree = 'e4b6ead713328fc8e67ca53e91cfb14af8008174';
@@ -269,6 +274,187 @@ jobs:
             assertPullIdentity(api(pullPath), headSha);
             console.log('Reviewed Wave 1 payload is eligible on the exact live main tip.');
           }
+
+          function verifyPinnedPreflightProof() {
+            const pin = proofAdmission;
+            const proofFiles = [
+              '.github/workflows/prove-production-preflight-oidc.yml',
+              'tests/release/productionReleaseInfrastructure.test.js',
+            ].sort();
+            const bootstrapFiles = [
+              '.github/workflows/enforce-staging-to-main.yml',
+              'tests/release/stagingReleaseAutomation.test.js',
+            ];
+            if (pin == null || typeof pin !== 'object' || Array.isArray(pin) ||
+                !Number.isSafeInteger(pin.prNumber) || pin.prNumber < 1 ||
+                !isSha(pin.reviewedHead) || !isSha(pin.reviewedTree) ||
+                !Array.isArray(pin.files) || pin.files.length !== proofFiles.length) {
+              reject('Preflight proof admission is disabled until its exact reviewed identity is pinned.');
+            }
+            const manifest = new Map();
+            for (const file of pin.files) {
+              const expectedStatus = file?.path === proofFiles[0] ? 'added' : 'modified';
+              if (!proofFiles.includes(file?.path) || manifest.has(file.path) ||
+                  file.status !== expectedStatus || !isSha(file.sha) ||
+                  file.mode !== '100644' || file.type !== 'blob') {
+                reject('Preflight proof manifest is missing or invalid.');
+              }
+              manifest.set(file.path, file);
+            }
+            if (manifest.size !== proofFiles.length) {
+              reject('Preflight proof manifest is incomplete.');
+            }
+            if (repository !== approvedRepository ||
+                process.env.PR_NUMBER !== String(pin.prNumber) ||
+                process.env.BASE_REF !== 'main' ||
+                process.env.HEAD_REF !== proofBranch ||
+                !isSha(process.env.HEAD_SHA)) {
+              reject('Pull request does not match the pinned preflight proof admission tuple.');
+            }
+
+            const pullPath = 'repos/' + repository + '/pulls/' + pin.prNumber;
+            const branchRef = 'heads/' + proofBranch;
+            const mainSha = refSha('heads/main');
+            const pull = api(pullPath);
+            const headSha = pull?.head?.sha;
+            function assertPullIdentity(value) {
+              if (value?.number !== pin.prNumber || value?.state !== 'open' ||
+                  value?.head?.repo?.full_name !== repository ||
+                  value?.head?.ref !== proofBranch || value?.head?.sha !== headSha ||
+                  value?.base?.repo?.full_name !== repository ||
+                  value?.base?.ref !== 'main' ||
+                  value?.changed_files !== proofFiles.length) {
+                reject('Live preflight proof pull request identity differs from its pin.');
+              }
+            }
+            assertPullIdentity(pull);
+            if (!isSha(headSha) || process.env.HEAD_SHA !== headSha ||
+                refSha(branchRef) !== headSha) {
+              reject('Preflight proof event, pull request, and live branch heads differ.');
+            }
+
+            const baseCommit = commitAt(proofBase);
+            const reviewedCommit = commitAt(pin.reviewedHead);
+            const mainCommit = commitAt(mainSha);
+            const headCommit = commitAt(headSha);
+            if (reviewedCommit.tree.sha !== pin.reviewedTree ||
+                !Array.isArray(reviewedCommit.parents) ||
+                reviewedCommit.parents.length !== 1 ||
+                reviewedCommit.parents[0]?.sha !== proofBase ||
+                !Array.isArray(mainCommit.parents) ||
+                mainCommit.parents.length !== 2 ||
+                mainCommit.parents[0]?.sha !== proofBase ||
+                !Array.isArray(headCommit.parents) ||
+                headCommit.parents.length !== 2 ||
+                headCommit.parents[0]?.sha !== pin.reviewedHead ||
+                headCommit.parents[1]?.sha !== mainSha) {
+              reject('Preflight proof is not the pinned review and one ordered main synchronization.');
+            }
+            const comparison = api('repos/' + repository + '/compare/' +
+              mainSha + '...' + headSha);
+            if (comparison?.status !== 'ahead' || comparison?.behind_by !== 0 ||
+                comparison?.base_commit?.sha !== mainSha ||
+                comparison?.merge_base_commit?.sha !== mainSha ||
+                !Number.isInteger(comparison?.ahead_by) || comparison.ahead_by < 1) {
+              reject('Preflight proof is not descended from the exact live main tip.');
+            }
+
+            const baseEntries = treeAt(baseCommit.tree.sha);
+            const reviewedEntries = treeAt(pin.reviewedTree);
+            const mainEntries = treeAt(mainCommit.tree.sha);
+            const headEntries = treeAt(headCommit.tree.sha);
+            function ancestorsOf(paths) {
+              const ancestors = new Set();
+              for (const path of paths) {
+                const parts = path.split('/');
+                for (let index = 1; index < parts.length; index += 1) {
+                  ancestors.add(parts.slice(0, index).join('/'));
+                }
+              }
+              return ancestors;
+            }
+            function assertOtherEntriesMatch(left, right, changedPaths, message) {
+              const changed = new Set(changedPaths);
+              const ancestors = ancestorsOf(changedPaths);
+              for (const path of new Set([...left.keys(), ...right.keys()])) {
+                if (changed.has(path)) continue;
+                const before = left.get(path);
+                const after = right.get(path);
+                if (ancestors.has(path)) {
+                  if (!before || !after || before.type !== 'tree' ||
+                      after.type !== 'tree' || before.mode !== after.mode) {
+                    reject(message);
+                  }
+                } else if (!sameEntry(before, after)) {
+                  reject(message);
+                }
+              }
+            }
+            for (const path of bootstrapFiles) {
+              const before = baseEntries.get(path);
+              const after = mainEntries.get(path);
+              if (!before || !after || before.type !== 'blob' ||
+                  after.type !== 'blob' || before.mode !== '100644' ||
+                  after.mode !== before.mode || sameEntry(before, after)) {
+                reject('Live main is not the exact two-file policy bootstrap over the approved base.');
+              }
+            }
+            assertOtherEntriesMatch(baseEntries, mainEntries, bootstrapFiles,
+              'Live main changes content outside the two-file policy bootstrap.');
+            for (const path of proofFiles) {
+              const file = manifest.get(path);
+              const before = baseEntries.get(path);
+              const reviewed = reviewedEntries.get(path);
+              const main = mainEntries.get(path);
+              const current = headEntries.get(path);
+              if ((file.status === 'added' ? before != null : before == null) ||
+                  !sameEntry(main, before) || !reviewed ||
+                  reviewed.sha !== file.sha || reviewed.mode !== file.mode ||
+                  reviewed.type !== file.type || !sameEntry(current, reviewed) ||
+                  (file.status === 'modified' && sameEntry(reviewed, before))) {
+                reject('Preflight proof blob, mode, type, or live-main baseline differs from its pin.');
+              }
+            }
+            assertOtherEntriesMatch(baseEntries, reviewedEntries, proofFiles,
+              'Reviewed preflight proof changes an unapproved path.');
+            assertOtherEntriesMatch(mainEntries, headEntries, proofFiles,
+              'Synchronized preflight proof changes an unapproved path.');
+
+            const files = [];
+            for (let page = 1; ; page += 1) {
+              const batch = api(pullPath + '/files?per_page=100&page=' + page);
+              if (!Array.isArray(batch) || batch.length > 100) {
+                reject('Preflight proof file pagination is invalid.');
+              }
+              files.push(...batch);
+              if (files.length > proofFiles.length) {
+                reject('Preflight proof includes an extra file.');
+              }
+              if (batch.length < 100) break;
+            }
+            const seen = new Set();
+            for (const file of files) {
+              const expected = manifest.get(file?.filename);
+              if (!expected || seen.has(file.filename) ||
+                  file.status !== expected.status ||
+                  file.previous_filename != null || file.sha !== expected.sha) {
+                reject('Preflight proof PR files differ from its exact manifest.');
+              }
+              seen.add(file.filename);
+            }
+            if (files.length !== proofFiles.length ||
+                files.length !== pull.changed_files ||
+                seen.size !== proofFiles.length) {
+              reject('Complete preflight proof PR file set differs from its pin.');
+            }
+            if (refSha('heads/main') !== mainSha ||
+                refSha(branchRef) !== headSha) {
+              reject('Main or preflight proof branch moved during policy verification.');
+            }
+            assertPullIdentity(api(pullPath));
+            console.log('Pinned preflight proof payload is eligible on the exact live main tip.');
+          }
+
           try {
             if (process.env.HEAD_REPOSITORY !== repository) {
               reject('Pull requests to main must originate in the canonical repository.');
@@ -277,8 +463,10 @@ jobs:
               verifyCanonicalStaging();
             } else if (process.env.HEAD_REF === approvedBranch) {
               verifyPinnedWaveOne();
+            } else if (process.env.HEAD_REF === proofBranch) {
+              verifyPinnedPreflightProof();
             } else {
-              reject('Pull requests to main must originate from staging or the pinned Wave 1 source.');
+              reject('Pull requests to main must originate from staging or an exact pinned source.');
             }
           } catch (error) {
             console.error(`::error::${error.message}`);
