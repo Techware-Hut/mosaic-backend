@@ -9,6 +9,7 @@ const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 
 const topologyApi = require('../../scripts/release/aws-release-topology');
+const focusedPreflightApi = require('../../scripts/release/run-focused-baseline-preflight');
 const gateApi = require('../../scripts/release/manage-checkout-gate');
 const ssmApi = require('../../scripts/release/run-ssm-reservation-check');
 const reservationApi = require('../../scripts/release/query-active-reservations');
@@ -1069,6 +1070,201 @@ const approvedProofReads = [
   ['elbv2', 'describe-target-health', 'DescribeTargetHealth', 'targetHealthByGroup'],
   ['elbv2', 'describe-load-balancer-attributes', 'DescribeLoadBalancerAttributes', 'loadBalancerAttributes'],
 ];
+
+function runFocusedPreflightFixture({
+  failOperation,
+  awsError,
+  awsFailures = {},
+  awsResultOverrides = {},
+  mutateFixture = () => {},
+  mutateResponses = () => {},
+} = {}) {
+  const fixture = topologyFixture();
+  mutateFixture(fixture);
+  const responses = Object.fromEntries(approvedProofReads.map(([service, operation, , fixtureKey]) => [
+    `${service}:${operation}`,
+    fixtureKey === 'targetHealthByGroup' ? fixture.targetHealthByGroup[TARGET_GROUP_ARN] : fixture[fixtureKey],
+  ]));
+  responses['elasticbeanstalk:describe-configuration-settings'] =
+    fixture.configuration.ConfigurationSettings;
+  mutateResponses(responses);
+  const awsCalls = [];
+  const messages = [];
+  const writes = [];
+  const fakeSpawn = (binary, args) => {
+    assert.equal(binary, 'aws');
+    const operation = `${args[0]}:${args[1]}`;
+    awsCalls.push(operation);
+    assert.ok(Object.hasOwn(responses, operation), 'only approved read operations reach AWS CLI');
+    if (operation === 'elasticbeanstalk:describe-configuration-settings') {
+      assert.ok(args.includes('--query'), 'EB configuration must remain filtered');
+    }
+    if (Object.hasOwn(awsResultOverrides, operation)) return awsResultOverrides[operation];
+    if (operation === failOperation || Object.hasOwn(awsFailures, operation)) {
+      return { status: 255, stderr: awsFailures[operation] || awsError, stdout: '' };
+    }
+    return { status: 0, stderr: '', stdout: JSON.stringify(responses[operation]) };
+  };
+  let result;
+  let error;
+  try {
+    result = focusedPreflightApi.main([
+      '--mode', 'focused-baseline', '--release-sha', SHA, '--output', 'unused.json',
+    ], {
+      env: {
+        AWS_REGION: REGION,
+        EB_APPLICATION_NAME: APPLICATION,
+        EB_ENVIRONMENT_NAME: ENVIRONMENT,
+      },
+      spawn: fakeSpawn,
+      writeJson: (filePath, value) => writes.push({ filePath, value }),
+      log: (message) => messages.push(String(message)),
+      clock: () => new Date('2026-08-13T00:00:00.000Z'),
+    });
+  } catch (caught) {
+    error = caught;
+  }
+  return { awsCalls, messages, writes, result, error };
+}
+
+test('focused baseline adapter attempts health once, warns only on live AccessDenied, and validates every remaining read', () => {
+  const operations = approvedProofReads.map(([service, operation]) => `${service}:${operation}`);
+  const healthOperation = 'elasticbeanstalk:describe-instances-health';
+  const warning = runFocusedPreflightFixture({
+    failOperation: healthOperation,
+    awsError: `An error occurred (AccessDeniedException) for ${LOAD_BALANCER_ARN} ${INSTANCE_ID}`,
+  });
+  assert.equal(warning.error, undefined);
+  assert.deepEqual(warning.awsCalls, operations);
+  assert.equal(warning.awsCalls.filter((operation) => operation === healthOperation).length, 1);
+  assert.ok(warning.messages.includes('WARN: DescribeInstancesHealth'));
+  assert.ok(warning.messages.includes('WARN CLASS: AccessDenied'));
+  assert.equal(warning.writes.length, 1);
+  assert.equal(warning.writes[0].value.status, 'passed');
+  assert.equal(warning.writes[0].value.instanceHealthVerified, false);
+  assert.equal(warning.writes[0].value.instances, null);
+  assert.equal(warning.writes[0].value.loadBalancer.healthyTargetCount, 1);
+  assert.doesNotMatch(
+    JSON.stringify({ messages: warning.messages, evidence: warning.writes[0].value }),
+    /arn:aws|123456789012|i-000000001234abcd|AccessDeniedException|An error occurred/
+  );
+
+  const healthy = runFocusedPreflightFixture();
+  assert.equal(healthy.error, undefined);
+  assert.deepEqual(healthy.awsCalls, operations);
+  assert.equal(healthy.writes[0].value.status, 'passed');
+  assert.equal(Object.hasOwn(healthy.writes[0].value, 'instanceHealthVerified'), false);
+  assert.equal(healthy.writes[0].value.instances.length, 1);
+  assert.equal(healthy.messages.some((message) => message.startsWith('WARN:')), false);
+
+  const plainDenied = runFocusedPreflightFixture({
+    failOperation: healthOperation,
+    awsError: 'An error occurred (AccessDenied)',
+  });
+  assert.equal(plainDenied.error, undefined);
+  assert.ok(plainDenied.messages.includes('WARN CLASS: AccessDenied'));
+  assert.equal(plainDenied.writes[0].value.instanceHealthVerified, false);
+});
+
+test('focused baseline adapter keeps other health failures and all other AWS reads fatal', () => {
+  const operations = approvedProofReads.map(([service, operation]) => `${service}:${operation}`);
+  const healthIndex = operations.indexOf('elasticbeanstalk:describe-instances-health');
+  const healthFailures = [
+    { status: 255, stderr: 'An error occurred (ResourceNotFoundException)', stdout: '' },
+    { status: 255, stderr: 'An error occurred (ValidationError)', stdout: '' },
+    { status: 255, stderr: 'An error occurred (ValidationError) while not authorized', stdout: '' },
+    { status: 255, stderr: 'An error occurred (ThrottlingException)', stdout: '' },
+    { status: null, error: new Error('spawn failed'), stderr: 'An error occurred (AccessDeniedException)', stdout: '' },
+    { status: 0, stderr: 'An error occurred (AccessDeniedException)', stdout: '{malformed json' },
+  ];
+  for (const cliResult of healthFailures) {
+    const failure = runFocusedPreflightFixture({
+      awsResultOverrides: { 'elasticbeanstalk:describe-instances-health': cliResult },
+    });
+    assert.ok(failure.error);
+    assert.deepEqual(failure.awsCalls, operations.slice(0, healthIndex + 1));
+    assert.equal(failure.messages.includes('WARN: DescribeInstancesHealth'), false);
+    assert.equal(failure.writes.some(({ value }) => value.status === 'passed'), false);
+  }
+
+  for (let index = 0; index < operations.length; index += 1) {
+    if (index === healthIndex) continue;
+    const failure = runFocusedPreflightFixture({
+      failOperation: operations[index],
+      awsError: 'An error occurred (AccessDeniedException)',
+    });
+    assert.ok(failure.error, `${operations[index]} must remain fatal`);
+    assert.deepEqual(failure.awsCalls, operations.slice(0, index + 1));
+    assert.equal(failure.messages.includes('WARN: DescribeInstancesHealth'), false);
+    assert.equal(failure.writes.some(({ value }) => value.status === 'passed'), false);
+  }
+
+  const afterWarning = runFocusedPreflightFixture({
+    awsFailures: {
+      'elasticbeanstalk:describe-instances-health': 'An error occurred (AccessDeniedException)',
+      'elbv2:describe-target-health': 'An error occurred (ValidationError)',
+    },
+  });
+  assert.ok(afterWarning.error);
+  assert.ok(afterWarning.messages.includes('WARN: DescribeInstancesHealth'));
+  assert.deepEqual(afterWarning.awsCalls, operations.slice(0, operations.indexOf('elbv2:describe-target-health') + 1));
+  assert.equal(afterWarning.writes.some(({ value }) => value.status === 'passed'), false);
+});
+
+test('focused baseline adapter rejects non-focused mode before AWS access', () => {
+  for (const mode of ['release', 'rollback', '']) {
+    const calls = [];
+    assert.throws(() => focusedPreflightApi.main([
+      '--mode', mode, '--release-sha', SHA, '--output', 'unused.json',
+    ], {
+      env: { AWS_REGION: REGION, EB_APPLICATION_NAME: APPLICATION, EB_ENVIRONMENT_NAME: ENVIRONMENT },
+      spawn: (...args) => calls.push(args),
+      writeJson: () => {},
+      log: () => {},
+    }));
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('focused baseline adapter rejects malformed configuration and unsafe returned topology', () => {
+  const invalidCases = [
+    { mutateResponses: (responses) => { responses['elasticbeanstalk:describe-configuration-settings'] = []; } },
+    { mutateResponses: (responses) => { responses['elasticbeanstalk:describe-configuration-settings'] = {}; } },
+    { mutateFixture: (fixture) => { fixture.instanceHealth.InstanceHealthList[0].Color = 'Red'; } },
+    { mutateFixture: (fixture) => { fixture.autoScaling.AutoScalingGroups[0].Instances[0].HealthStatus = 'Unhealthy'; } },
+    { mutateFixture: (fixture) => { fixture.targetHealthByGroup[TARGET_GROUP_ARN].TargetHealthDescriptions[0].TargetHealth.State = 'unhealthy'; } },
+    { mutateFixture: (fixture) => { fixture.listeners.Listeners.pop(); } },
+  ];
+  for (const invalidCase of invalidCases) {
+    const failure = runFocusedPreflightFixture(invalidCase);
+    assert.ok(failure.error);
+    assert.equal(failure.writes.some(({ value }) => value.status === 'passed'), false);
+  }
+
+  const invalidAfterWarning = runFocusedPreflightFixture({
+    failOperation: 'elasticbeanstalk:describe-instances-health',
+    awsError: 'An error occurred (AccessDeniedException)',
+    mutateFixture: (fixture) => { fixture.autoScaling.AutoScalingGroups[0].Instances[0].HealthStatus = 'Unhealthy'; },
+  });
+  assert.ok(invalidAfterWarning.error);
+  assert.ok(invalidAfterWarning.messages.includes('WARN: DescribeInstancesHealth'));
+  assert.equal(invalidAfterWarning.writes.some(({ value }) => value.status === 'passed'), false);
+});
+
+test('production workflow limits the health adapter to focused AWS preflight and preserves production mutation block', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../.github/workflows/deploy-eb-production.yml'), 'utf8');
+  const preflight = source.slice(source.indexOf('  aws-preflight:'), source.indexOf('  release-readiness:'));
+  const release = source.slice(source.indexOf('  production-approval-and-release:'));
+  assert.ok(preflight.includes('run-focused-baseline-preflight.js'));
+  assert.ok(preflight.includes('aws-release-topology.js preflight'));
+  assert.match(preflight, /RELEASE_MODE:\s*\$\{\{\s*needs\.resolve-release\.outputs\.release_mode\s*\}\}/);
+  assert.match(preflight, /\$RELEASE_MODE[^\n]*focused-baseline|focused-baseline[^\n]*\$RELEASE_MODE/);
+  assert.match(release, /needs\.resolve-release\.outputs\.release_mode != 'focused-baseline'/);
+  assert.match(release, /aws-release-topology\.js preflight/);
+  assert.match(release, /aws-release-topology\.js verify/);
+  assert.doesNotMatch(release, /run-focused-baseline-preflight\.js/);
+  assert.doesNotMatch(preflight, /\b(?:put-role-policy|attach-role-policy|create-bucket|send-command|update-environment)\b/i);
+});
 
 function embeddedPreflightProofNode() {
   const match = preflightProofSource().match(/^ {10}node 2>\/dev\/null <<'NODE'\r?\n([\s\S]*?)^ {10}NODE\s*$/m);
