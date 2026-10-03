@@ -340,11 +340,19 @@ jobs:
       - name: Verify live topology without mutation
         env:
           RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          RELEASE_MODE: ${{ needs.resolve-release.outputs.release_mode }}
         run: |
-          node scripts/release/aws-release-topology.js preflight \
-            --release-sha "$RELEASE_SHA" \
-            --mixed-version-safe false \
-            --output release-evidence/aws-preflight.json
+          if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            node scripts/release/run-focused-baseline-preflight.js \
+              --mode "$RELEASE_MODE" \
+              --release-sha "$RELEASE_SHA" \
+              --output release-evidence/aws-preflight.json
+          else
+            node scripts/release/aws-release-topology.js preflight \
+              --release-sha "$RELEASE_SHA" \
+              --mixed-version-safe false \
+              --output release-evidence/aws-preflight.json
+          fi
 
       - name: Validate approved drain configuration
         env:
