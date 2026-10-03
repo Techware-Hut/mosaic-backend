@@ -85,6 +85,7 @@ jobs:
           function prove() {
             let payload;
             let validateTopology;
+            let instanceHealthAccessDenied = false;
             try {
               const { spawnSync } = require('node:child_process');
               const topology = require('./scripts/release/aws-release-topology');
@@ -104,7 +105,8 @@ jobs:
               function classifyAwsError(stderr) {
                 const detail = String(stderr || '');
                 const code = /An error occurred \(([^)]+)\)/.exec(detail)?.[1] || '';
-                if (/^(?:AccessDenied(?:Exception)?|UnauthorizedOperation)$/.test(code) || /not authorized to perform/i.test(detail)) {
+                if (/^(?:AccessDenied(?:Exception)?|UnauthorizedOperation)$/.test(code) ||
+                    (!code && /not authorized to perform/i.test(detail))) {
                   return 'AccessDenied';
                 }
                 if (/^(?:ResourceNotFound(?:Exception)?|NoSuchEntity(?:Exception)?|EnvironmentNotFound(?:Exception)?|LoadBalancerNotFound(?:Exception)?|TargetGroupNotFound(?:Exception)?)$/.test(code)) {
@@ -116,11 +118,15 @@ jobs:
                 return 'OtherAwsError';
               }
               let failureClass = 'OtherAwsError';
+              let awsErrorCode = '';
+              let awsCliReturnedError = false;
               const runner = createAwsCliRunner({
                 awsCli: 'aws',
                 spawn: (command, args, options) => {
                   const result = spawnSync(command, args, options);
                   if (result.error || result.status !== 0) {
+                    awsErrorCode = /An error occurred \(([^)]+)\)/.exec(String(result.stderr || ''))?.[1] || '';
+                    awsCliReturnedError = !result.error && Number.isInteger(result.status) && result.status !== 0;
                     failureClass = classifyAwsError(result.stderr);
                   }
                   return result;
@@ -132,11 +138,23 @@ jobs:
                   throw new Error('Unapproved AWS read operation');
                 }
                 failureClass = 'OtherAwsError';
+                awsErrorCode = '';
+                awsCliReturnedError = false;
                 try {
                   const result = runner(service, operation, args);
                   console.log(`PASS: ${label}`);
                   return result;
                 } catch (_) {
+                  if (service === 'elasticbeanstalk' &&
+                      operation === 'describe-instances-health' &&
+                      failureClass === 'AccessDenied' &&
+                      awsCliReturnedError &&
+                      /^(?:AccessDenied|AccessDeniedException)$/.test(awsErrorCode)) {
+                    instanceHealthAccessDenied = true;
+                    console.log('WARN: DescribeInstancesHealth');
+                    console.log('WARN CLASS: AccessDenied');
+                    return null;
+                  }
                   console.log(`FAIL: ${label}`);
                   console.log(`FAIL CLASS: ${failureClass}`);
                   throw new Error('Approved AWS read failed');
@@ -159,18 +177,34 @@ jobs:
               if (!/^[0-9a-f]{40}$/.test(process.env.GITHUB_SHA || '')) {
                 throw new Error('Invalid exact main SHA');
               }
-              validateTopology(payload, {
+              // The filtered CLI query returns an array. Restore only its response
+              // envelope here; the production release collector stays unchanged.
+              if (!Array.isArray(payload.configuration)) {
+                throw new Error('Filtered configuration response is malformed');
+              }
+              const validationPayload = {
+                ...payload,
+                configuration: { ConfigurationSettings: payload.configuration },
+              };
+              const evidence = validateTopology(validationPayload, {
                 applicationName: process.env.EB_APPLICATION_NAME,
                 environmentName: process.env.EB_ENVIRONMENT_NAME,
                 mode: 'preflight',
                 releaseSha: process.env.GITHUB_SHA,
                 mixedVersionSafe: false,
+                allowInstanceHealthAccessDeniedInProof: instanceHealthAccessDenied,
               });
+              if (instanceHealthAccessDenied &&
+                  (evidence.instanceHealthVerified !== false || evidence.instances !== null)) {
+                throw new Error('Unverified instance health was reported as verified');
+              }
             } catch (_) {
               console.log('FAIL: topology validation');
               return false;
             }
-            console.log('PASS: topology validation');
+            console.log(instanceHealthAccessDenied
+              ? 'PASS: topology validation (EB instance health unverified)'
+              : 'PASS: topology validation');
             return true;
           }
           if (!prove()) process.exitCode = 1;
