@@ -1251,6 +1251,119 @@ test('focused baseline adapter rejects malformed configuration and unsafe return
   assert.equal(invalidAfterWarning.writes.some(({ value }) => value.status === 'passed'), false);
 });
 
+test('focused baseline validator failures emit fixed predicate codes and remain fatal', () => {
+  const cases = [
+    {
+      code: 'ENVIRONMENT_HEALTH',
+      mutate: (fixture) => { fixture.environments.Environments[0].Health = 'Red'; },
+    },
+    {
+      code: 'ASG_INSTANCE_INVENTORY',
+      mutate: (fixture) => { fixture.autoScaling.AutoScalingGroups[0].Instances[0].InstanceId = 'i-foreign'; },
+    },
+    {
+      code: 'ASG_INSTANCE_HEALTH',
+      mutate: (fixture) => { fixture.autoScaling.AutoScalingGroups[0].Instances[0].HealthStatus = 'Unhealthy'; },
+    },
+    {
+      code: 'SAFE_CUTOVER_TOPOLOGY',
+      mutate: (fixture) => { fixture.autoScaling.AutoScalingGroups[0].MaxSize = 2; },
+    },
+    {
+      code: 'LISTENER_COUNT',
+      mutate: (fixture) => { fixture.listeners.Listeners.pop(); },
+    },
+    {
+      code: 'LISTENER_PROTOCOL',
+      mutate: (fixture) => { fixture.listeners.Listeners[0].Protocol = 'HTTPS'; },
+    },
+    {
+      code: 'TARGET_INVENTORY',
+      mutate: (fixture) => {
+        fixture.targetHealthByGroup[TARGET_GROUP_ARN].TargetHealthDescriptions[0].Target.Id = 'i-foreign';
+      },
+    },
+    {
+      code: 'TARGET_HEALTH',
+      mutate: (fixture) => {
+        fixture.targetHealthByGroup[TARGET_GROUP_ARN].TargetHealthDescriptions[0].TargetHealth.State = 'unhealthy';
+      },
+    },
+    {
+      code: 'LOAD_BALANCER_IDLE_TIMEOUT',
+      mutate: (fixture) => { fixture.loadBalancerAttributes.Attributes[0].Value = 'not-a-number'; },
+    },
+  ];
+
+  for (const { code, mutate } of cases) {
+    const failure = runFocusedPreflightFixture({ mutateFixture: mutate });
+    assert.ok(failure.error, `${code} must fail`);
+    assert.deepEqual(failure.messages.slice(-2), [
+      'FAIL: topology validation',
+      `VALIDATION PREDICATE: ${code}`,
+    ]);
+    assert.equal(failure.writes.length, 1);
+    assert.equal(failure.writes[0].value.status, 'failed');
+    assert.equal(failure.writes.some(({ value }) => value.status === 'passed'), false);
+  }
+});
+
+test('focused validator diagnostics never expose identifier-bearing or unknown errors', () => {
+  const instanceFailure = runFocusedPreflightFixture({
+    mutateFixture: (fixture) => { fixture.instanceHealth.InstanceHealthList[0].Color = 'Red'; },
+  });
+  assert.ok(instanceFailure.error);
+  assert.deepEqual(instanceFailure.messages.slice(-2), [
+    'FAIL: topology validation',
+    'VALIDATION PREDICATE: HEALTH_INSTANCE_HEALTH',
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify({ messages: instanceFailure.messages, writes: instanceFailure.writes, error: instanceFailure.error.message }),
+    /arn:aws|123456789012|i-000000001234abcd|1234abcd|not Green\/Ok/
+  );
+
+  const unknown = runFocusedPreflightFixture({
+    mutateFixture: (fixture) => { fixture.autoScaling.AutoScalingGroups[0].Instances = [null]; },
+  });
+  assert.ok(unknown.error);
+  assert.deepEqual(unknown.messages.slice(-2), [
+    'FAIL: topology validation',
+    'VALIDATION PREDICATE: UNKNOWN',
+  ]);
+  assert.equal(unknown.writes.length, 1);
+  assert.equal(unknown.writes[0].value.status, 'failed');
+  assert.doesNotMatch(
+    JSON.stringify({ messages: unknown.messages, writes: unknown.writes, error: unknown.error.message }),
+    /Cannot read properties|TypeError|arn:aws|123456789012|i-000000001234abcd/
+  );
+});
+
+test('successful focused validation emits no predicate and health AccessDenied warning remains bounded', () => {
+  const healthy = runFocusedPreflightFixture();
+  assert.equal(healthy.error, undefined);
+  assert.equal(healthy.messages.some((message) => message.startsWith('VALIDATION PREDICATE:')), false);
+
+  const warning = runFocusedPreflightFixture({
+    failOperation: 'elasticbeanstalk:describe-instances-health',
+    awsError: 'An error occurred (AccessDeniedException)',
+  });
+  assert.equal(warning.error, undefined);
+  assert.ok(warning.messages.includes('WARN: DescribeInstancesHealth'));
+  assert.ok(warning.messages.includes('WARN CLASS: AccessDenied'));
+  assert.equal(warning.messages.some((message) => message.startsWith('VALIDATION PREDICATE:')), false);
+  assert.equal(warning.writes[0].value.instanceHealthVerified, false);
+  assert.equal(warning.writes[0].value.instances, null);
+
+  const fatalHealth = runFocusedPreflightFixture({
+    failOperation: 'elasticbeanstalk:describe-instances-health',
+    awsError: 'An error occurred (ValidationError)',
+  });
+  assert.ok(fatalHealth.error);
+  assert.equal(fatalHealth.messages.includes('WARN: DescribeInstancesHealth'), false);
+  assert.equal(fatalHealth.messages.some((message) => message.startsWith('VALIDATION PREDICATE:')), false);
+  assert.equal(fatalHealth.writes.some(({ value }) => value.status === 'passed'), false);
+});
+
 test('production workflow limits the health adapter to focused AWS preflight and preserves production mutation block', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../.github/workflows/deploy-eb-production.yml'), 'utf8');
   const preflight = source.slice(source.indexOf('  aws-preflight:'), source.indexOf('  release-readiness:'));
