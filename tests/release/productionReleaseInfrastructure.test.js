@@ -367,6 +367,75 @@ test('topology fails closed on wrong version, unhealthy target, or unsafe rollin
   );
 });
 
+test('unavailable EB instance health requires an explicit proof-only preflight opt-in', () => {
+  const missingHealth = topologyFixture();
+  missingHealth.instanceHealth = null;
+  const proofOptions = topologyOptions('preflight', {
+    allowInstanceHealthAccessDeniedInProof: true,
+  });
+
+  assert.throws(() => topologyApi.validateTopology(missingHealth, topologyOptions('preflight')),
+    /Enhanced Health instance inventory/);
+  assert.throws(() => topologyApi.validateTopology(missingHealth, topologyOptions('verify')),
+    /Enhanced Health instance inventory/);
+  assert.throws(() => topologyApi.validateTopology(missingHealth, topologyOptions('verify', {
+    allowInstanceHealthAccessDeniedInProof: true,
+  })), /Proof-only instance health warning state is invalid/);
+
+  const result = topologyApi.validateTopology(missingHealth, proofOptions);
+  assert.equal(result.status, 'passed');
+  assert.equal(result.phase, 'preflight');
+  assert.equal(result.instanceHealthVerified, false);
+  assert.equal(result.instances, null);
+  assert.equal(result.enhancedHealth, true);
+  assert.equal(result.loadBalancer.healthyTargetCount, 1);
+  assert.doesNotMatch(JSON.stringify(result), /arn:aws|123456789012|i-000000001234abcd/);
+
+  const strictResult = topologyApi.validateTopology(topologyFixture(), topologyOptions('preflight'));
+  assert.equal(Object.hasOwn(strictResult, 'instanceHealthVerified'), false);
+  assert.equal(strictResult.instances.length, 1);
+
+  for (const malformedHealth of [undefined, {}, { InstanceHealthList: [] }]) {
+    const payload = topologyFixture();
+    payload.instanceHealth = malformedHealth;
+    assert.throws(() => topologyApi.validateTopology(payload, proofOptions),
+      /Proof-only instance health warning state is invalid/);
+  }
+  const unhealthyHealth = topologyFixture();
+  unhealthyHealth.instanceHealth.InstanceHealthList[0].Color = 'Red';
+  assert.throws(() => topologyApi.validateTopology(unhealthyHealth, proofOptions),
+    /Proof-only instance health warning state is invalid/);
+});
+
+test('production topology CLI preflight and verify remain strict on missing EB instance health', () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-topology-strict-'));
+  const fixturePath = path.join(temporary, 'topology.json');
+  const outputPath = path.join(temporary, 'evidence.json');
+  const payload = topologyFixture();
+  payload.instanceHealth = null;
+  fs.writeFileSync(fixturePath, JSON.stringify(payload));
+  try {
+    for (const mode of ['preflight', 'verify']) {
+      let evidence;
+      assert.throws(() => topologyApi.main([
+        mode, '--output', outputPath, '--release-sha', SHA, '--fixture', fixturePath,
+      ], {
+        env: {
+          AWS_REGION: REGION,
+          EB_APPLICATION_NAME: APPLICATION,
+          EB_ENVIRONMENT_NAME: ENVIRONMENT,
+        },
+        writeJson(_path, result) { evidence = result; },
+        clock: () => new Date('2026-08-13T00:00:00.000Z'),
+      }), /Enhanced Health instance inventory/);
+      assert.equal(evidence.status, 'failed');
+      assert.equal(evidence.phase, mode);
+    }
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
 test('AWS topology collection uses an ARN selector and projects EB configuration', () => {
   const fixture = topologyFixture();
   const responses = new Map([
@@ -1007,17 +1076,30 @@ function embeddedPreflightProofNode() {
   return match[1].replace(/^ {10}/gm, '');
 }
 
-function runEmbeddedPreflightProof({ failOperation, awsError, unapprovedOperation = false } = {}) {
+function runEmbeddedPreflightProof({
+  failOperation,
+  awsError,
+  awsFailures = {},
+  awsResultOverrides = {},
+  mutateFixture = () => {},
+  mutateResponses = () => {},
+  unapprovedOperation = false,
+} = {}) {
   const fixture = topologyFixture();
+  mutateFixture(fixture);
   const responses = Object.fromEntries(approvedProofReads.map(([service, operation, , fixtureKey]) => [
     `${service}:${operation}`,
     fixtureKey === 'targetHealthByGroup' ? fixture.targetHealthByGroup[TARGET_GROUP_ARN] : fixture[fixtureKey],
   ]));
   // The collector's --query projects ConfigurationSettings to a bare array.
   responses['elasticbeanstalk:describe-configuration-settings'] = fixture.configuration.ConfigurationSettings;
+  mutateResponses(responses);
   const awsCalls = [];
   const messages = [];
   let validated = false;
+  let validatedPayload;
+  let validatedOptions;
+  let validationResult;
   const fakeSpawn = (binary, args) => {
     assert.equal(binary, 'aws');
     const operation = `${args[0]}:${args[1]}`;
@@ -1026,8 +1108,9 @@ function runEmbeddedPreflightProof({ failOperation, awsError, unapprovedOperatio
     if (operation === 'elasticbeanstalk:describe-configuration-settings') {
       assert.ok(args.includes('--query'), 'configuration response is filtered by the AWS CLI query');
     }
-    if (operation === failOperation) {
-      return { status: 255, stderr: awsError, stdout: '' };
+    if (Object.hasOwn(awsResultOverrides, operation)) return awsResultOverrides[operation];
+    if (operation === failOperation || Object.hasOwn(awsFailures, operation)) {
+      return { status: 255, stderr: awsFailures[operation] || awsError, stdout: '' };
     }
     return { status: 0, stderr: '', stdout: JSON.stringify(responses[operation]) };
   };
@@ -1051,7 +1134,10 @@ function runEmbeddedPreflightProof({ failOperation, awsError, unapprovedOperatio
           : topologyApi.collectAwsTopology,
         validateTopology: (payload, options) => {
           validated = true;
-          return topologyApi.validateTopology(payload, options);
+          validatedPayload = payload;
+          validatedOptions = options;
+          validationResult = topologyApi.validateTopology(payload, options);
+          return validationResult;
         },
       };
     }
@@ -1062,7 +1148,15 @@ function runEmbeddedPreflightProof({ failOperation, awsError, unapprovedOperatio
     process: localProcess,
     console: { log: (...values) => messages.push(values.join(' ')) },
   }, { timeout: 1000 });
-  return { awsCalls, messages, validated, exitCode: localProcess.exitCode };
+  return {
+    awsCalls,
+    messages,
+    validated,
+    validatedPayload,
+    validatedOptions,
+    validationResult,
+    exitCode: localProcess.exitCode,
+  };
 }
 
 test('isolated production-preflight proof is manual, single-job, and read-only at GitHub', () => {
@@ -1179,11 +1273,14 @@ test('isolated preflight proof reports fixed stage results and validates collect
   ]);
   const nodeMarkers = [...workflow.matchAll(/console\.log\('([^']+)'\)/g)].map((match) => match[1]);
   assert.deepEqual(nodeMarkers, [
+    'WARN: DescribeInstancesHealth',
+    'WARN CLASS: AccessDenied',
     'FAIL: read-only AWS topology collection',
     'PASS: read-only AWS topology collection',
     'FAIL: topology validation',
-    'PASS: topology validation',
   ]);
+  assert.match(workflow, /\? 'PASS: topology validation \(EB instance health unverified\)'/);
+  assert.match(workflow, /: 'PASS: topology validation'/);
   assert.doesNotMatch(workflow, /FAIL: production-preflight OIDC\/topology proof/);
 
   const successMarkers = [
@@ -1198,8 +1295,10 @@ test('isolated preflight proof reports fixed stage results and validates collect
   assert.deepEqual(positions, [...positions].sort((left, right) => left - right));
 
   const collection = workflow.indexOf('payload = topology.collectAwsTopology(');
-  const validation = workflow.indexOf('validateTopology(payload, {');
+  const validation = workflow.indexOf('validateTopology(validationPayload, {');
   assert.ok(collection >= 0 && validation > collection, 'validation must follow collection');
+  assert.match(workflow, /configuration: \{ ConfigurationSettings: payload\.configuration \}/);
+  assert.match(workflow, /allowInstanceHealthAccessDeniedInProof: instanceHealthAccessDenied/);
   assert.match(workflow, /mode: 'preflight'/);
   assert.match(workflow, /releaseSha: process\.env\.GITHUB_SHA/);
   assert.match(workflow, /mixedVersionSafe: false/);
@@ -1208,22 +1307,83 @@ test('isolated preflight proof reports fixed stage results and validates collect
   assert.match(workflow, /--output text 2>\/dev\/null/);
 });
 
-test('isolated proof labels every approved AWS read and stops at the failing operation', () => {
+test('isolated proof validates the filtered configuration and labels every approved AWS read', () => {
   const expectedOperations = approvedProofReads.map(([service, operation]) => `${service}:${operation}`);
   const expectedPasses = approvedProofReads.map(([, , label]) => `PASS: ${label}`);
   const collected = runEmbeddedPreflightProof();
-  // The existing validator expects a ConfigurationSettings envelope, while the
-  // collector's AWS CLI query returns an array. Diagnostics leave that contract unchanged.
   assert.deepEqual(collected.awsCalls, expectedOperations);
   assert.deepEqual(collected.messages, [
     ...expectedPasses,
     'PASS: read-only AWS topology collection',
-    'FAIL: topology validation',
+    'PASS: topology validation',
   ]);
   assert.equal(collected.validated, true);
-  assert.equal(collected.exitCode, 1);
+  assert.equal(collected.exitCode, undefined);
+  assert.equal(collected.validatedPayload.configuration.ConfigurationSettings.length, 1);
+  assert.equal(collected.validatedOptions.mode, 'preflight');
+  assert.equal(collected.validationResult.status, 'passed');
+  assert.equal(Object.hasOwn(collected.validationResult, 'instanceHealthVerified'), false);
+  assert.doesNotMatch(collected.messages.join('\n'), /arn:aws|123456789012|i-000000001234abcd/);
+});
+
+test('isolated proof warns only for denied EB instance health and completes every later read', () => {
+  const expectedOperations = approvedProofReads.map(([service, operation]) => `${service}:${operation}`);
+  const expectedPasses = approvedProofReads.map(([, , label]) => `PASS: ${label}`);
+  const healthIndex = expectedOperations.indexOf('elasticbeanstalk:describe-instances-health');
+  const warning = runEmbeddedPreflightProof({
+    failOperation: expectedOperations[healthIndex],
+    awsError: `An error occurred (AccessDeniedException) for ${LOAD_BALANCER_ARN} ${INSTANCE_ID}`,
+  });
+  assert.deepEqual(warning.awsCalls, expectedOperations);
+  assert.equal(warning.awsCalls.filter((operation) => operation === expectedOperations[healthIndex]).length, 1);
+  assert.deepEqual(warning.messages, [
+    ...expectedPasses.slice(0, healthIndex),
+    'WARN: DescribeInstancesHealth',
+    'WARN CLASS: AccessDenied',
+    ...expectedPasses.slice(healthIndex + 1),
+    'PASS: read-only AWS topology collection',
+    'PASS: topology validation (EB instance health unverified)',
+  ]);
+  assert.equal(warning.validated, true);
+  assert.equal(warning.exitCode, undefined);
+  assert.equal(warning.validatedPayload.instanceHealth, null);
+  assert.equal(warning.validatedPayload.configuration.ConfigurationSettings.length, 1);
+  assert.equal(warning.validatedOptions.allowInstanceHealthAccessDeniedInProof, true);
+  assert.equal(warning.validationResult.instanceHealthVerified, false);
+  assert.equal(warning.validationResult.instances, null);
+  assert.equal(warning.validationResult.loadBalancer.healthyTargetCount, 1);
+  assert.doesNotMatch(warning.messages.join('\n'), /arn:aws|123456789012|i-000000001234abcd|AccessDeniedException|An error occurred/);
+  assert.doesNotMatch(JSON.stringify(warning.validationResult), /arn:aws|123456789012|i-000000001234abcd/);
+
+  const laterFailure = runEmbeddedPreflightProof({
+    awsFailures: {
+      'elasticbeanstalk:describe-instances-health': 'An error occurred (AccessDeniedException)',
+      'elbv2:describe-target-health': `An error occurred (ValidationError) for ${TARGET_GROUP_ARN}`,
+    },
+  });
+  const targetHealthIndex = expectedOperations.indexOf('elbv2:describe-target-health');
+  assert.deepEqual(laterFailure.awsCalls, expectedOperations.slice(0, targetHealthIndex + 1));
+  assert.deepEqual(laterFailure.messages, [
+    ...expectedPasses.slice(0, healthIndex),
+    'WARN: DescribeInstancesHealth',
+    'WARN CLASS: AccessDenied',
+    ...expectedPasses.slice(healthIndex + 1, targetHealthIndex),
+    'FAIL: DescribeTargetHealth',
+    'FAIL CLASS: ValidationError',
+    'FAIL: read-only AWS topology collection',
+  ]);
+  assert.equal(laterFailure.validated, false);
+  assert.equal(laterFailure.exitCode, 1);
+  assert.doesNotMatch(laterFailure.messages.join('\n'), /arn:aws|123456789012|i-000000001234abcd|An error occurred/);
+});
+
+test('isolated proof stops at any denied read other than EB instance health', () => {
+  const expectedOperations = approvedProofReads.map(([service, operation]) => `${service}:${operation}`);
+  const expectedPasses = approvedProofReads.map(([, , label]) => `PASS: ${label}`);
+  const healthIndex = expectedOperations.indexOf('elasticbeanstalk:describe-instances-health');
 
   for (let index = 0; index < approvedProofReads.length; index += 1) {
+    if (index === healthIndex) continue;
     const [, , label] = approvedProofReads[index];
     const failure = runEmbeddedPreflightProof({
       failOperation: expectedOperations[index],
@@ -1240,6 +1400,90 @@ test('isolated proof labels every approved AWS read and stops at the failing ope
     assert.equal(failure.exitCode, 1);
     assert.doesNotMatch(failure.messages.join('\n'), /arn:aws|123456789012|i-000000001234abcd|AccessDeniedException/);
   }
+});
+
+test('other EB instance-health errors and malformed or unhealthy returned topology remain fatal', () => {
+  const expectedOperations = approvedProofReads.map(([service, operation]) => `${service}:${operation}`);
+  const expectedPasses = approvedProofReads.map(([, , label]) => `PASS: ${label}`);
+  const healthIndex = expectedOperations.indexOf('elasticbeanstalk:describe-instances-health');
+  for (const [awsError, expectedClass] of [
+    [`An error occurred (ResourceNotFoundException) for ${INSTANCE_ID}`, 'ResourceNotFound'],
+    [`An error occurred (ValidationError) for ${INSTANCE_ID}`, 'ValidationError'],
+    [`An error occurred (ValidationError) while not authorized to perform on ${INSTANCE_ID}`, 'ValidationError'],
+    [`An error occurred (ThrottlingException) for ${INSTANCE_ID}`, 'OtherAwsError'],
+  ]) {
+    const failure = runEmbeddedPreflightProof({
+      failOperation: expectedOperations[healthIndex],
+      awsError,
+    });
+    assert.deepEqual(failure.awsCalls, expectedOperations.slice(0, healthIndex + 1));
+    assert.deepEqual(failure.messages, [
+      ...expectedPasses.slice(0, healthIndex),
+      'FAIL: DescribeInstancesHealth',
+      `FAIL CLASS: ${expectedClass}`,
+      'FAIL: read-only AWS topology collection',
+    ]);
+    assert.equal(failure.validated, false);
+    assert.equal(failure.exitCode, 1);
+    assert.doesNotMatch(failure.messages.join('\n'), /arn:aws|123456789012|i-000000001234abcd|An error occurred/);
+  }
+
+  for (const [cliResult, expectedClass] of [
+    [{ status: null, error: new Error('spawn failed'), stderr: 'An error occurred (AccessDeniedException)', stdout: '' }, 'AccessDenied'],
+    [{ status: 0, stderr: '', stdout: '{malformed json' }, 'OtherAwsError'],
+  ]) {
+    const failure = runEmbeddedPreflightProof({
+      awsResultOverrides: { [expectedOperations[healthIndex]]: cliResult },
+    });
+    assert.deepEqual(failure.awsCalls, expectedOperations.slice(0, healthIndex + 1));
+    assert.deepEqual(failure.messages, [
+      ...expectedPasses.slice(0, healthIndex),
+      'FAIL: DescribeInstancesHealth',
+      `FAIL CLASS: ${expectedClass}`,
+      'FAIL: read-only AWS topology collection',
+    ]);
+    assert.equal(failure.validated, false);
+    assert.equal(failure.exitCode, 1);
+    assert.doesNotMatch(failure.messages.join('\n'), /arn:aws|123456789012|i-000000001234abcd|An error occurred/);
+  }
+
+  const invalidCases = [
+    { mutateResponses: (responses) => { responses['elasticbeanstalk:describe-configuration-settings'] = []; } },
+    { mutateFixture: (fixture) => { fixture.instanceHealth.InstanceHealthList[0].Color = 'Red'; } },
+    { mutateFixture: (fixture) => { fixture.autoScaling.AutoScalingGroups[0].Instances[0].HealthStatus = 'Unhealthy'; } },
+    { mutateFixture: (fixture) => { fixture.autoScaling.AutoScalingGroups[0].MaxSize = 2; } },
+    { mutateFixture: (fixture) => { fixture.targetHealthByGroup[TARGET_GROUP_ARN].TargetHealthDescriptions[0].TargetHealth.State = 'unhealthy'; } },
+    { mutateFixture: (fixture) => { fixture.listeners.Listeners.pop(); } },
+  ];
+  for (const invalidCase of invalidCases) {
+    const failure = runEmbeddedPreflightProof(invalidCase);
+    assert.deepEqual(failure.awsCalls, expectedOperations);
+    assert.deepEqual(failure.messages, [
+      ...expectedPasses,
+      'PASS: read-only AWS topology collection',
+      'FAIL: topology validation',
+    ]);
+    assert.equal(failure.validated, true);
+    assert.equal(failure.exitCode, 1);
+    assert.doesNotMatch(failure.messages.join('\n'), /arn:aws|123456789012|i-000000001234abcd/);
+  }
+
+  const invalidAfterWarning = runEmbeddedPreflightProof({
+    failOperation: expectedOperations[healthIndex],
+    awsError: 'An error occurred (AccessDeniedException)',
+    mutateFixture: (fixture) => { fixture.autoScaling.AutoScalingGroups[0].Instances[0].HealthStatus = 'Unhealthy'; },
+  });
+  assert.deepEqual(invalidAfterWarning.awsCalls, expectedOperations);
+  assert.deepEqual(invalidAfterWarning.messages, [
+    ...expectedPasses.slice(0, healthIndex),
+    'WARN: DescribeInstancesHealth',
+    'WARN CLASS: AccessDenied',
+    ...expectedPasses.slice(healthIndex + 1),
+    'PASS: read-only AWS topology collection',
+    'FAIL: topology validation',
+  ]);
+  assert.equal(invalidAfterWarning.validated, true);
+  assert.equal(invalidAfterWarning.exitCode, 1);
 });
 
 test('isolated proof emits only approved AWS error classes and rejects unapproved operations', () => {
