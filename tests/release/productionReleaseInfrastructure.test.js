@@ -1058,6 +1058,15 @@ function preflightProofSource() {
   return fs.readFileSync(preflightProofWorkflowPath, 'utf8');
 }
 
+const releaseControlProofWorkflowPath = path.join(
+  __dirname,
+  '../../.github/workflows/prove-production-release-control-oidc.yml'
+);
+
+function releaseControlProofSource() {
+  return fs.readFileSync(releaseControlProofWorkflowPath, 'utf8');
+}
+
 const approvedProofReads = [
   ['elasticbeanstalk', 'describe-environments', 'DescribeEnvironments', 'environments'],
   ['elasticbeanstalk', 'describe-configuration-settings', 'DescribeConfigurationSettings', 'configuration'],
@@ -1467,6 +1476,56 @@ function runEmbeddedPreflightProof({
     exitCode: localProcess.exitCode,
   };
 }
+
+test('isolated release-control OIDC proof is manual, main-only, and bound to its Environment', () => {
+  const workflow = releaseControlProofSource();
+  assert.match(workflow, /^name: Prove production-release-control OIDC$/m);
+  const triggerBlock = workflow.match(/^on:\s*\r?\n([\s\S]*?)(?=^[^\s#])/m);
+  assert.ok(triggerBlock, 'workflow must declare its own event block');
+  assert.deepEqual(
+    [...triggerBlock[1].matchAll(/^  ([a-z_]+):/gm)].map((match) => match[1]),
+    ['workflow_dispatch']
+  );
+  assert.match(workflow, /^permissions:\s*\r?\n  contents: read\s*\r?\n  id-token: write\s*$/m);
+  assert.doesNotMatch(workflow, /^\s+(?:contents|pull-requests|deployments|actions|workflows): write\s*$/m);
+  assert.deepEqual(
+    [...workflow.matchAll(/^  ([a-z][a-z0-9_-]*):\s*$/gm)]
+      .filter((match) => match.index > workflow.indexOf('\njobs:'))
+      .map((match) => match[1]),
+    ['prove-production-release-control-oidc']
+  );
+  assert.match(workflow, /^    timeout-minutes: 10\s*$/m);
+  assert.match(workflow, /^    environment: production-release-control\s*$/m);
+  const mainGuard = workflow.indexOf('- name: Require main ref');
+  const proofStep = workflow.indexOf('- name: Prove release-control OIDC assumption');
+  assert.ok(mainGuard >= 0 && proofStep > mainGuard, 'main guard must precede OIDC proof');
+  assert.match(workflow.slice(mainGuard, proofStep), /\$\{GITHUB_REF:-\}[^\n]*refs\/heads\/main[\s\S]*?exit 1/);
+  assert.match(workflow, /ROLE_TO_ASSUME: \$\{\{ vars\.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME \}\}/);
+  assert.doesNotMatch(workflow, /secrets\.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME|actions\/checkout@|actions\/upload-artifact@/);
+});
+
+test('isolated release-control proof exercises only STS and emits identifier-free evidence', () => {
+  const workflow = releaseControlProofSource();
+  const awsCalls = [...workflow.matchAll(/\baws\s+([a-z0-9-]+)\s+([a-z0-9-]+)/g)]
+    .map((match) => `${match[1]}:${match[2]}`);
+  assert.deepEqual(awsCalls, [
+    'sts:assume-role-with-web-identity',
+    'sts:get-caller-identity',
+  ]);
+  assert.match(workflow, /--data-urlencode 'audience=sts\.amazonaws\.com'/);
+  assert.match(workflow, /--role-session-name "\$session_name"/);
+  assert.match(workflow, /--duration-seconds 900/);
+  assert.match(workflow, /caller_arn="\$\(aws sts get-caller-identity --query Arn --output text 2>\/dev\/null\)"/);
+  assert.match(workflow, /assumed-role\/mosaic-production-release-control\/\$\{session_name\}/);
+  assert.match(workflow, /set \+x/);
+  assert.match(workflow, /PRODUCTION RELEASE-CONTROL OIDC VERIFIED/);
+  assert.match(workflow, /AWS application permissions: NOT TESTED/);
+  assert.match(workflow, /AWS mutation: NO/);
+  assert.doesNotMatch(workflow, /(?:printf|echo|cat|tee)[^\n]*(?:\$\{?(?:ROLE_TO_ASSUME|oidc_token|credentials|caller_arn|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN)\b|AccountId|AccessKeyId|SecretAccessKey)/);
+  assert.doesNotMatch(workflow, /(?:printf|echo)[^\n]*(?:arn:aws|\$\{?expected_account\b)/);
+  assert.doesNotMatch(workflow, /\b(?:gh\s+workflow\s+run|aws\s+(?:elbv2|elasticbeanstalk|s3|s3api|ssm|iam))\b/i);
+  assert.doesNotMatch(workflow, /\.github\/workflows\/deploy-eb-production|workflow_run:|push:|pull_request:/);
+});
 
 test('isolated production-preflight proof is manual, single-job, and read-only at GitHub', () => {
   const workflow = preflightProofSource();

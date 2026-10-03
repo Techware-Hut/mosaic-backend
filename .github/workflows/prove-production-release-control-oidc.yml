@@ -1,0 +1,86 @@
+name: Prove production-release-control OIDC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  prove-production-release-control-oidc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-release-control
+    steps:
+      - name: Require main ref
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_REF:-}" != 'refs/heads/main' ]]; then
+            printf '%s\n' 'FAIL: main ref required'
+            exit 1
+          fi
+          printf '%s\n' 'PASS: main ref'
+
+      - name: Prove release-control OIDC assumption
+        shell: bash
+        env:
+          ROLE_TO_ASSUME: ${{ vars.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME }}
+          AWS_REGION: us-east-1
+        run: |
+          set -Eeuo pipefail
+          set +x
+          fail() {
+            printf 'FAIL: %s\n' "$1"
+            exit 1
+          }
+
+          [[ -n "${ROLE_TO_ASSUME:-}" ]] || fail 'release-control role binding'
+          [[ "$ROLE_TO_ASSUME" =~ ^arn:aws:iam::([0-9]{12}):role/mosaic-production-release-control$ ]] || fail 'release-control role binding'
+          expected_account="${BASH_REMATCH[1]}"
+          printf '%s\n' 'PASS: release-control role binding present'
+
+          [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" && -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]] || fail 'GitHub OIDC token'
+          oidc_token="$(curl --fail --silent --show-error \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            --get --data-urlencode 'audience=sts.amazonaws.com' \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL" 2>/dev/null | jq -er '.value | select(type == "string" and length > 0)' 2>/dev/null)" || fail 'GitHub OIDC token'
+          printf '%s\n' 'PASS: GitHub OIDC token issued'
+
+          export AWS_SHARED_CREDENTIALS_FILE=/dev/null
+          export AWS_CONFIG_FILE=/dev/null
+          export AWS_EC2_METADATA_DISABLED=true
+          unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_DEFAULT_PROFILE AWS_WEB_IDENTITY_TOKEN_FILE AWS_ROLE_ARN
+
+          session_name="release-control-proof-${GITHUB_RUN_ID}"
+          credentials="$(aws sts assume-role-with-web-identity \
+            --role-arn "$ROLE_TO_ASSUME" \
+            --role-session-name "$session_name" \
+            --web-identity-token "$oidc_token" \
+            --duration-seconds 900 \
+            --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+            --output text 2>/dev/null)" || fail 'AWS role assumption'
+          unset oidc_token
+          read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN <<< "$credentials"
+          unset credentials
+          [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" && -n "${AWS_SESSION_TOKEN:-}" ]] || fail 'AWS role assumption'
+          export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          printf '%s\n' 'PASS: AWS role assumption'
+
+          caller_arn="$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)" || fail 'release-control caller identity'
+          [[ "$caller_arn" == "arn:aws:sts::${expected_account}:assumed-role/mosaic-production-release-control/${session_name}" ]] || fail 'release-control caller identity'
+          unset caller_arn AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          printf '%s\n' 'PASS: release-control caller identity'
+
+          {
+            printf '%s\n' 'PRODUCTION RELEASE-CONTROL OIDC VERIFIED'
+            printf '%s\n' '- main ref: pass'
+            printf '%s\n' '- Environment: production-release-control'
+            printf '%s\n' '- role binding: present'
+            printf '%s\n' '- OIDC token: issued'
+            printf '%s\n' '- role assumption: pass'
+            printf '%s\n' '- caller identity: pass'
+            printf '%s\n' '- AWS application permissions: NOT TESTED'
+            printf '%s\n' '- AWS mutation: NO'
+          } >> "$GITHUB_STEP_SUMMARY"
