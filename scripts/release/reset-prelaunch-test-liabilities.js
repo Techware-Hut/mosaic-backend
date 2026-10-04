@@ -153,15 +153,18 @@ async function stripeClassify(order, stripe) {
     };
   }
 
-  if (order.paymentStatus === 'failed' && order.status === 'cancelled'
-      && !hasActiveReservation(order)) {
-    if (intent.status !== 'canceled') blocked('STRIPE_STATE_CHANGED');
-    return { classification: 'B', stripeSummary: summary };
-  }
-
   if (order.paymentStatus !== 'paid') {
-    if (intent.status !== 'requires_payment_method') blocked('STRIPE_STATE_CHANGED');
-    return { classification: 'D', stripeSummary: summary };
+    if (intent.status === 'canceled') {
+      if (order.paymentStatus !== 'failed' || order.status !== 'cancelled'
+          || hasActiveReservation(order)) {
+        blocked('STRIPE_STATE_CHANGED');
+      }
+      return { classification: 'B', stripeSummary: summary };
+    }
+    if (intent.status === 'requires_payment_method') {
+      return { classification: 'D', stripeSummary: summary };
+    }
+    blocked('STRIPE_STATE_CHANGED');
   }
 
   if (matchesG(order)) return { classification: 'G', stripeSummary: summary };
