@@ -41,6 +41,11 @@ function order(classification, n, overrides = {}) {
     inventoryAdjustments: [],
     inventoryAdjustmentVersion: null,
     items: [{ variantId: oid('pv', n), size: 'M', quantity: 1, price: 10, color: 'black' }],
+    shipping: { method: 'ground', amount: 123 },
+    shippingAddress: { city: 'Testville', line1: '123 Test St', postalCode: '12345' },
+    statusHistory: [{ status: 'created', at: new Date('2026-01-01T00:00:00Z'), by: 'fixture' }],
+    trackingNumber: `TRACK-${classification}-${n}`,
+    miscellaneousPersistedField: { nested: { value: `extra-${classification}-${n}` } },
     ...overrides,
   };
 }
@@ -77,11 +82,24 @@ function matches(record, filter) {
   });
 }
 
+function projectRecord(record, fields) {
+  if (!record || !fields) return record;
+  const projected = {};
+  for (const field of fields.split(/\s+/).filter(Boolean)) {
+    if (Object.prototype.hasOwnProperty.call(record, field)) projected[field] = record[field];
+  }
+  return projected;
+}
+
 function queryResult(rows, onSession = () => {}) {
+  let selected = null;
   return {
-    select() { return this; },
+    select(fields) { selected = fields; return this; },
     session(session) { onSession(session); return this; },
-    async lean() { return structuredClone(rows); },
+    async lean() {
+      if (Array.isArray(rows)) return structuredClone(rows.map((record) => projectRecord(record, selected)));
+      return structuredClone(projectRecord(rows, selected));
+    },
   };
 }
 
@@ -429,6 +447,44 @@ test('apply cancels only D intents, restores H once, archives, audits, then dele
   assert.equal(fixture.actions.filter((action) => action.type === 'order-delete').length, 63);
 });
 
+
+test('checkpoint archives preserve the complete original order document beyond classification projection', async () => {
+  const fixture = harness();
+  await fixture.run(APPLY, applyEnv());
+  const archive = fixture.archives.find((entry) => entry.classification === 'A1');
+  assert.ok(archive);
+  assert.match(archive.sourceOrder.groupOrderId, /^TEST-A1-/);
+  assert.equal(String(archive.sourceOrder.userId), oid('u', 1));
+  assert.equal(String(archive.sourceOrder.vendorId), oid('v', 1));
+  assert.equal(String(archive.sourceOrder.businessId), oid('b', 1));
+  assert.deepEqual(archive.sourceOrder.shipping, { method: 'ground', amount: 123 });
+  assert.deepEqual(archive.sourceOrder.shippingAddress, {
+    city: 'Testville', line1: '123 Test St', postalCode: '12345',
+  });
+  assert.deepEqual(archive.sourceOrder.statusHistory, [
+    { status: 'created', at: new Date('2026-01-01T00:00:00Z'), by: 'fixture' },
+  ]);
+  assert.equal(archive.sourceOrder.trackingNumber.startsWith('TRACK-A1-'), true);
+  assert.deepEqual(archive.sourceOrder.miscellaneousPersistedField.nested,
+    { value: 'extra-A1-1' });
+});
+
+test('critical-state drift during full checkpoint reread blocks before Stripe cancellation', async () => {
+  let drifted = false;
+  const fixture = harness({
+    onTransactionStart(orders) {
+      if (!drifted) {
+        const first = orders.get(oid('d', 1));
+        first.paymentStatus = 'paid';
+        drifted = true;
+      }
+    },
+  });
+  await assert.rejects(fixture.run(APPLY, applyEnv()), /ORDER_STATE_CHANGED/);
+  assert.equal(fixture.archives.length, 0);
+  assert.equal(fixture.audits.length, 0);
+  assert.equal(fixture.stripe.calls.some(([name]) => name === 'paymentIntents.cancel'), false);
+});
 test('G is truthful archive-only and never fabricates email evidence', async () => {
   const fixture = harness();
   await fixture.run(APPLY, applyEnv());

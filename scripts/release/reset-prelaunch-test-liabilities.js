@@ -291,14 +291,24 @@ function buildAudit(archive, actionCode) {
 }
 
 function expectedOriginalRereadFilter(item) {
-  return {
-    _id: item.order._id,
-    paymentStatus: item.order.paymentStatus,
-    status: item.order.status,
-    inventoryReservedAt: item.order.inventoryReservedAt ?? null,
-    inventoryDecrementedAt: item.order.inventoryDecrementedAt ?? null,
-    inventoryRestoredAt: item.order.inventoryRestoredAt ?? null,
-  };
+  return { _id: item.order._id };
+}
+
+function sameNullableValue(left, right) {
+  if (left == null && right == null) return true;
+  return String(left) === String(right);
+}
+
+function assertCriticalStateMatches(current, original) {
+  if (!current || String(current._id) !== String(original._id)
+      || current.paymentId !== original.paymentId
+      || current.paymentStatus !== original.paymentStatus
+      || current.status !== original.status
+      || !sameNullableValue(current.inventoryReservedAt, original.inventoryReservedAt)
+      || !sameNullableValue(current.inventoryDecrementedAt, original.inventoryDecrementedAt)
+      || !sameNullableValue(current.inventoryRestoredAt, original.inventoryRestoredAt)) {
+    blocked('ORDER_STATE_CHANGED');
+  }
 }
 
 function activeOrderByArchiveFilter(archive) {
@@ -312,9 +322,9 @@ async function createCheckpoint({ classified, actorUserId, sourceBackendSha, Ord
   try {
     await session.withTransaction(async () => {
       for (const item of classified) {
-        const current = await Order.findOne(expectedOriginalRereadFilter(item)).select(ORDER_FIELDS)
+        const current = await Order.findOne(expectedOriginalRereadFilter(item))
           .session(session).lean();
-        if (!current || String(current._id) !== String(item.order._id)) blocked('ORDER_STATE_CHANGED');
+        assertCriticalStateMatches(current, item.order);
         const archive = buildCheckpointArchive({ ...item, order: current }, { actorUserId, sourceBackendSha, now });
         const insertedArchive = await PrelaunchTestOrderArchive.create([archive], { session });
         if (!Array.isArray(insertedArchive) || insertedArchive.length !== 1) blocked('ARCHIVE_INSERT_FAILED');
@@ -588,6 +598,8 @@ module.exports = {
   archiveCollectionName,
   archiveCollectionExists,
   verifyArchiveStoragePrepared,
+  sameNullableValue,
+  assertCriticalStateMatches,
   createCheckpoint,
   loadCheckpointArchives,
   assertValidCheckpointArchives,
