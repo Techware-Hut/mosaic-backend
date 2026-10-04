@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-const CONFIRMATION = 'PREPARE_RECONCILIATION_LEDGER';
+const CONFIRMATION = 'PREPARE_PRELAUNCH_TEST_ARCHIVE';
 
 function blocked(code) {
   const error = new Error(code);
@@ -17,55 +17,54 @@ function parseArgs(argv) {
   blocked('PREPARE_CONFIRMATION_REQUIRED');
 }
 
-async function inspectStorage({ mongoose, ReleaseReconciliationLedger, reconciliation }) {
-  const exists = await reconciliation.ledgerCollectionExists({ mongoose, ReleaseReconciliationLedger });
+async function inspectStorage({ mongoose, PrelaunchTestOrderArchive, reset }) {
+  const exists = await reset.archiveCollectionExists({ mongoose, PrelaunchTestOrderArchive });
   if (!exists) return { exists: false, ready: false };
   try {
-    const indexes = await ReleaseReconciliationLedger.collection.indexes();
-    reconciliation.assertLedgerIndexes(indexes);
+    reset.assertArchiveIndexes(await PrelaunchTestOrderArchive.collection.indexes());
     return { exists: true, ready: true };
   } catch (error) {
-    if (error?.safeCode === 'LEDGER_STORAGE_NOT_PREPARED') {
+    if (error?.safeCode === 'ARCHIVE_STORAGE_NOT_PREPARED') {
       return { exists: true, ready: false };
     }
     throw error;
   }
 }
 
-async function prepareStorage({ mongoose, ReleaseReconciliationLedger, reconciliation, confirmed }) {
-  const collectionName = reconciliation.ledgerCollectionName(ReleaseReconciliationLedger);
-  const before = await inspectStorage({ mongoose, ReleaseReconciliationLedger, reconciliation });
-  if (!confirmed) return { mode: 'dry-run', collection: collectionName, ...before };
-  if (!before.exists) await mongoose.connection.db.createCollection(collectionName);
-  const existing = await ReleaseReconciliationLedger.collection.indexes();
+async function prepareStorage({ mongoose, PrelaunchTestOrderArchive, reset, confirmed }) {
+  const collection = reset.archiveCollectionName(PrelaunchTestOrderArchive);
+  const before = await inspectStorage({ mongoose, PrelaunchTestOrderArchive, reset });
+  if (!confirmed) return { mode: 'dry-run', collection, ...before };
+  if (!before.exists) await mongoose.connection.db.createCollection(collection);
+  const existing = await PrelaunchTestOrderArchive.collection.indexes();
   for (const index of existing) {
     if (index.name === '_id_') continue;
-    const allowed = reconciliation.REQUIRED_LEDGER_INDEXES.some((required) =>
+    const allowed = reset.REQUIRED_ARCHIVE_INDEXES.some((required) =>
       index.name === required.name && index.key && index.key[required.field] === 1
         && Object.keys(index.key).length === 1 && index.unique === true);
-    if (!allowed) blocked('LEDGER_STORAGE_NOT_PREPARED');
+    if (!allowed) blocked('ARCHIVE_STORAGE_NOT_PREPARED');
   }
-  for (const required of reconciliation.REQUIRED_LEDGER_INDEXES) {
+  for (const required of reset.REQUIRED_ARCHIVE_INDEXES) {
     const exists = existing.some((index) => index.name === required.name
       && index.key && index.key[required.field] === 1
       && Object.keys(index.key).length === 1 && index.unique === true);
     if (!exists) {
-      await ReleaseReconciliationLedger.collection.createIndex(
+      await PrelaunchTestOrderArchive.collection.createIndex(
         { [required.field]: 1 },
         { unique: true, name: required.name }
       );
     }
   }
-  await reconciliation.verifyLedgerStoragePrepared({ mongoose, ReleaseReconciliationLedger });
-  return { mode: 'apply', collection: collectionName, exists: true, ready: true };
+  await reset.verifyArchiveStoragePrepared({ mongoose, PrelaunchTestOrderArchive });
+  return { mode: 'apply', collection, exists: true, ready: true };
 }
 
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   if (!process.env.MONGODB_URI) blocked('CONNECTION_CONFIG_REQUIRED');
   const mongoose = require('mongoose');
-  const reconciliation = require('./reconcile-terminal-payment-liabilities');
-  const ReleaseReconciliationLedger = require('../../models/ReleaseReconciliationLedger');
+  const reset = require('./reset-prelaunch-test-liabilities');
+  const PrelaunchTestOrderArchive = require('../../models/PrelaunchTestOrderArchive');
   try {
     await mongoose.connect(process.env.MONGODB_URI, {
       serverSelectionTimeoutMS: 10000,
@@ -73,7 +72,7 @@ async function main() {
       autoIndex: false,
     });
     const result = await prepareStorage({
-      mongoose, ReleaseReconciliationLedger, reconciliation, confirmed: parsed.confirmed,
+      mongoose, PrelaunchTestOrderArchive, reset, confirmed: parsed.confirmed,
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } finally {
