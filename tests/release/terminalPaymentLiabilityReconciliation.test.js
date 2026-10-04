@@ -54,11 +54,14 @@ function fixtureOrders() {
   return [
     ...Array.from({ length: 5 }, (_, i) => order('A1', i + 1)),
     ...Array.from({ length: 3 }, (_, i) => order('B', i + 1)),
-    ...Array.from({ length: 21 }, (_, i) => order('D', i + 1, i === 0 ? {
-      inventoryReservedAt: new Date('2026-10-01T00:00:00Z'),
-      inventoryAdjustments: [{ variantId: oid('pv', 1), size: 'M', quantity: 1 }],
-      inventoryAdjustmentVersion: 1,
-    } : {})),
+    ...Array.from({ length: 21 }, (_, i) => order('D', i + 1, {
+      ...(i < 3 ? { status: 'cancelled' } : {}),
+      ...(i === 0 ? {
+        inventoryReservedAt: new Date('2026-10-01T00:00:00Z'),
+        inventoryAdjustments: [{ variantId: oid('pv', 1), size: 'M', quantity: 1 }],
+        inventoryAdjustmentVersion: 1,
+      } : {}),
+    })),
     ...Array.from({ length: 34 }, (_, i) => order('G', i + 1)),
     order('X', 1, { paymentStatus: 'paid', paidConfirmationEmailSentAt: new Date('2026-01-02T00:00:00Z') }),
   ];
@@ -445,6 +448,41 @@ test('A1 refund linkage and terminal refund state are strict', async () => {
     id: 're_second', status: 'succeeded', amount: 0, charge: 'ch_pi_A1_1',
   });
   await assert.rejects(multipleRefunds.run(), /STRIPE_STATE_CHANGED/);
+});
+
+test('B and D classification follows authoritative Stripe terminal state', async () => {
+  const fixture = harness();
+  assert.equal(fixture.orders.get(oid('d', 1)).status, 'cancelled');
+  assert.equal(fixture.stripe.intents.get('pi_D_1').status, 'requires_payment_method');
+  assert.equal(fixture.stripe.intents.get('pi_B_1').status, 'canceled');
+  assert.deepEqual(await fixture.run(), {
+    mode: 'dry-run', A1: 5, B: 3, D: 21, G: 34, H: 1, total: 63, applied: 0,
+  });
+});
+
+test('non-paid requires_payment_method remains D for failed/cancelled and pending Mongo states', async () => {
+  const failedCancelled = harness();
+  assert.equal(failedCancelled.orders.get(oid('d', 2)).status, 'cancelled');
+  await failedCancelled.run();
+
+  const pending = harness();
+  pending.orders.get(oid('d', 4)).paymentStatus = 'pending';
+  pending.stripe.intents.get('pi_D_4').status = 'requires_payment_method';
+  await pending.run();
+});
+
+test('unexpected B/D Stripe states fail closed', async () => {
+  const failedCancelledSucceeded = harness();
+  failedCancelledSucceeded.stripe.intents.get('pi_D_2').status = 'succeeded';
+  await assert.rejects(failedCancelledSucceeded.run(), /STRIPE_STATE_CHANGED/);
+
+  const failedCancelledProcessing = harness();
+  failedCancelledProcessing.stripe.intents.get('pi_D_3').status = 'processing';
+  await assert.rejects(failedCancelledProcessing.run(), /STRIPE_STATE_CHANGED/);
+
+  const canceledNonB = harness();
+  canceledNonB.stripe.intents.get('pi_D_4').status = 'canceled';
+  await assert.rejects(canceledNonB.run(), /STRIPE_STATE_CHANGED/);
 });
 
 test('livemode true and changed Stripe state block the reset before writes', async () => {
