@@ -143,7 +143,7 @@ function stripeFor(orders) {
       amount_refunded: 1000,
     });
     refunds.set(chargeId, {
-      data: [{ id: `re_${record.paymentId}`, livemode: false, status: 'succeeded', amount: 1000, charge: chargeId }],
+      data: [{ id: `re_${record.paymentId}`, status: 'succeeded', amount: 1000, charge: chargeId }],
       has_more: false,
     });
     disputes.set(chargeId, { data: [], has_more: false });
@@ -151,6 +151,9 @@ function stripeFor(orders) {
   return {
     calls,
     intents,
+    charges,
+    refunds,
+    disputes,
     client: {
       paymentIntents: {
         retrieve: async (id) => {
@@ -399,6 +402,49 @@ test('incompatible archive indexes block preparation and apply', async () => {
   await assert.rejects(fixture.prepare(true), /ARCHIVE_STORAGE_NOT_PREPARED/);
   await assert.rejects(fixture.run(APPLY, applyEnv()), /ARCHIVE_STORAGE_NOT_PREPARED/);
   assert.equal(fixture.sessionStarted, 0);
+});
+
+test('A1 refund evidence is anchored to test-mode PaymentIntent and Charge', async () => {
+  const accepted = harness();
+  assert.equal(Object.prototype.hasOwnProperty.call(
+    accepted.stripe.refunds.get('ch_pi_A1_1').data[0], 'livemode'), false);
+  assert.deepEqual(await accepted.run(), {
+    mode: 'dry-run', A1: 5, B: 3, D: 21, G: 34, H: 1, total: 63, applied: 0,
+  });
+
+  const liveIntent = harness();
+  liveIntent.stripe.intents.get('pi_A1_1').livemode = true;
+  await assert.rejects(liveIntent.run(), /LIVE_STRIPE_OBJECT/);
+  assert.equal(liveIntent.actions.some((action) => action.type === 'order-delete'), false);
+
+  const liveCharge = harness();
+  liveCharge.stripe.charges.get('ch_pi_A1_1').livemode = true;
+  await assert.rejects(liveCharge.run(), /LIVE_STRIPE_OBJECT/);
+  assert.equal(liveCharge.actions.some((action) => action.type === 'order-delete'), false);
+});
+
+test('A1 refund linkage and terminal refund state are strict', async () => {
+  const mismatchedCharge = harness();
+  mismatchedCharge.stripe.refunds.get('ch_pi_A1_1').data[0].charge = 'ch_other';
+  await assert.rejects(mismatchedCharge.run(), /STRIPE_STATE_CHANGED/);
+
+  const mismatchedIntent = harness();
+  mismatchedIntent.stripe.refunds.get('ch_pi_A1_1').data[0].payment_intent = 'pi_other';
+  await assert.rejects(mismatchedIntent.run(), /STRIPE_STATE_CHANGED/);
+
+  const pendingRefund = harness();
+  pendingRefund.stripe.refunds.get('ch_pi_A1_1').data[0].status = 'pending';
+  await assert.rejects(pendingRefund.run(), /STRIPE_STATE_CHANGED/);
+
+  const partialRefund = harness();
+  partialRefund.stripe.refunds.get('ch_pi_A1_1').data[0].amount = 999;
+  await assert.rejects(partialRefund.run(), /STRIPE_STATE_CHANGED/);
+
+  const multipleRefunds = harness();
+  multipleRefunds.stripe.refunds.get('ch_pi_A1_1').data.push({
+    id: 're_second', status: 'succeeded', amount: 0, charge: 'ch_pi_A1_1',
+  });
+  await assert.rejects(multipleRefunds.run(), /STRIPE_STATE_CHANGED/);
 });
 
 test('livemode true and changed Stripe state block the reset before writes', async () => {

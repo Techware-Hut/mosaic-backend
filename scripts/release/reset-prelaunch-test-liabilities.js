@@ -140,9 +140,11 @@ async function stripeClassify(order, stripe) {
     if (!refunds || !Array.isArray(refunds.data) || refunds.has_more !== false
         || refunds.data.length !== 1) blocked('STRIPE_STATE_CHANGED');
     const refund = refunds.data[0];
-    assertTestMode(refund);
     if (!refund || refund.status !== 'succeeded' || refund.amount !== charge.amount
-        || refund.charge !== charge.id) blocked('STRIPE_STATE_CHANGED');
+        || refund.charge !== charge.id
+        || (refund.payment_intent != null && refund.payment_intent !== intent.id)) {
+      blocked('STRIPE_STATE_CHANGED');
+    }
     if (!disputes || !Array.isArray(disputes.data) || disputes.has_more !== false
         || disputes.data.length !== 0) blocked('STRIPE_STATE_CHANGED');
     return {
