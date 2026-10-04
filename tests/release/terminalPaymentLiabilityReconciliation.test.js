@@ -216,7 +216,7 @@ function harness(options = {}) {
     async deleteOne(filter, settings) {
       actions.push({ type: 'order-delete', filter, settings });
       assert.equal(settings.session, session);
-      if (options.failDelete) throw new Error('sensitive delete error');
+      if (typeof options.failDelete === 'function' ? options.failDelete() : options.failDelete) throw new Error('sensitive delete error');
       const found = [...orders.values()].find((record) => matches(record, filter));
       if (!found) return { deletedCount: 0 };
       orders.delete(String(found._id));
@@ -224,6 +224,10 @@ function harness(options = {}) {
     },
   };
   const PrelaunchTestOrderArchive = {
+    find(filter) {
+      actions.push({ type: 'archive-find', filter });
+      return { async lean() { return structuredClone(archives); } };
+    },
     collection: {
       name: ARCHIVE_COLLECTION,
       async indexes() {
@@ -410,20 +414,19 @@ test('apply cancels only D intents, restores H once, archives, audits, then dele
   assert.deepEqual(result, {
     mode: 'apply', A1: 5, B: 3, D: 21, G: 34, H: 1, total: 63, applied: 63,
   });
-  assert.equal(fixture.sessionStarted, 1);
-  assert.equal(fixture.sessionEnded, 1);
+  assert.equal(fixture.sessionStarted, 2);
+  assert.equal(fixture.sessionEnded, 2);
   assert.equal(fixture.stripe.calls.filter(([name]) => name === 'paymentIntents.cancel').length, 21);
   assert.equal(fixture.stripe.calls.some(([name, id]) => name === 'paymentIntents.cancel' && !id.startsWith('pi_D_')), false);
   assert.equal(fixture.actions.filter((action) => action.type === 'release-inventory').length, 1);
   assert.equal(fixture.archives.length, 63);
-  assert.equal(fixture.audits.length, 63);
+  assert.equal(fixture.audits.length, 126);
   assert.equal(fixture.orders.size, 1);
-  const transactionWrites = fixture.actions.filter((action) =>
-    ['archive-create', 'audit-create', 'order-delete'].includes(action.type));
-  for (let i = 0; i < transactionWrites.length; i += 3) {
-    assert.deepEqual(transactionWrites.slice(i, i + 3).map((action) => action.type),
-      ['archive-create', 'audit-create', 'order-delete']);
-  }
+  const firstCancel = fixture.actions.findIndex((action) => action.type === 'release-inventory');
+  const firstCheckpoint = fixture.actions.findIndex((action) => action.type === 'archive-create');
+  assert.equal(firstCheckpoint >= 0 && firstCheckpoint < firstCancel, true);
+  assert.equal(fixture.actions.filter((action) => action.type === 'archive-create').length, 63);
+  assert.equal(fixture.actions.filter((action) => action.type === 'order-delete').length, 63);
 });
 
 test('G is truthful archive-only and never fabricates email evidence', async () => {
@@ -438,22 +441,134 @@ test('G is truthful archive-only and never fabricates email evidence', async () 
   assert.equal(JSON.stringify(fixture.actions).includes('sendMail'), false);
 });
 
-test('transaction rollback removes archive/audit and preserves active orders', async () => {
+test('final transaction rollback preserves checkpoint archives and active orders', async () => {
   const fixture = harness({ failDelete: true });
   await assert.rejects(fixture.run(APPLY, applyEnv()), /TRANSACTION_FAILED/);
-  assert.equal(fixture.archives.length, 0);
-  assert.equal(fixture.audits.length, 0);
+  assert.equal(fixture.archives.length, 63);
+  assert.equal(fixture.audits.length, 63);
   assert.equal(fixture.orders.size, 64);
   assert.equal(fixture.actions.some((action) => action.type === 'rollback'), true);
 });
 
-test('inventory failure blocks active deletion', async () => {
+test('inventory failure blocks active deletion after durable checkpoint', async () => {
   const fixture = harness({ failInventoryRelease: true });
   await assert.rejects(fixture.run(APPLY, applyEnv()), /INVENTORY_RESTORE_FAILED/);
-  assert.equal(fixture.sessionStarted, 0);
+  assert.equal(fixture.sessionStarted, 1);
+  assert.equal(fixture.archives.length, 63);
   assert.equal(fixture.actions.some((action) => action.type === 'order-delete'), false);
 });
 
+
+
+test('checkpoint transaction failure prevents any Stripe cancellation', async () => {
+  const fixture = harness({ failArchive: true });
+  await assert.rejects(fixture.run(APPLY, applyEnv()), /CHECKPOINT_TRANSACTION_FAILED/);
+  assert.equal(fixture.archives.length, 0);
+  assert.equal(fixture.audits.length, 0);
+  assert.equal(fixture.orders.size, 64);
+  assert.equal(fixture.stripe.calls.some(([name]) => name === 'paymentIntents.cancel'), false);
+});
+
+test('interrupted run after one D cancellation resumes from checkpoint', async () => {
+  const fixture = harness();
+  const originalCancel = fixture.deps.stripe.paymentIntents.cancel;
+  let cancelCount = 0;
+  fixture.deps.stripe.paymentIntents.cancel = async (id) => {
+    cancelCount += 1;
+    const result = await originalCancel(id);
+    if (cancelCount === 1) throw new Error('interrupted after first cancel');
+    return result;
+  };
+  await assert.rejects(fixture.run(APPLY, applyEnv()), /STRIPE_READ_FAILED/);
+  assert.equal(fixture.archives.length, 63);
+  assert.equal(fixture.stripe.calls.filter(([name]) => name === 'paymentIntents.cancel').length, 1);
+  fixture.deps.stripe.paymentIntents.cancel = originalCancel;
+  assert.equal((await fixture.run(APPLY, applyEnv())).applied, 63);
+  assert.equal(fixture.archives.length, 63);
+  assert.equal(fixture.orders.size, 1);
+});
+test('interrupted run after D cancellations resumes from checkpoint without duplicate archives', async () => {
+  const fixture = harness();
+  const originalCancel = fixture.deps.stripe.paymentIntents.cancel;
+  let cancelCount = 0;
+  fixture.deps.stripe.paymentIntents.cancel = async (id) => {
+    cancelCount += 1;
+    const result = await originalCancel(id);
+    if (cancelCount === 10) throw new Error('interrupted after cancel');
+    return result;
+  };
+  await assert.rejects(fixture.run(APPLY, applyEnv()), /STRIPE_READ_FAILED/);
+  assert.equal(fixture.archives.length, 63);
+  assert.equal(fixture.stripe.calls.filter(([name]) => name === 'paymentIntents.cancel').length, 10);
+  fixture.deps.stripe.paymentIntents.cancel = originalCancel;
+
+  const result = await fixture.run(APPLY, applyEnv());
+  assert.equal(result.applied, 63);
+  assert.equal(fixture.archives.length, 63);
+  assert.equal(fixture.audits.filter((event) => event.actionCode === reset.CHECKPOINT_ACTION_CODE).length, 63);
+  assert.equal(fixture.audits.filter((event) => event.actionCode === reset.FINAL_ACTION_CODE).length, 63);
+  assert.equal(fixture.orders.size, 1);
+});
+
+test('checkpoint-backed canceled D intents are accepted but canceled D without checkpoint blocks', async () => {
+  const checkpointed = harness();
+  let failDelete = true;
+  checkpointed.actions.push({ type: 'note', case: 'force final failure' });
+  checkpointed.deps.Order.deleteOne = async (filter, settings) => {
+    checkpointed.actions.push({ type: 'order-delete', filter, settings });
+    assert.ok(settings.session);
+    if (failDelete) throw new Error('final failed');
+    const found = [...checkpointed.orders.values()].find((record) => matches(record, filter));
+    if (!found) return { deletedCount: 0 };
+    checkpointed.orders.delete(String(found._id));
+    return { deletedCount: 1 };
+  };
+  await assert.rejects(checkpointed.run(APPLY, applyEnv()), /FINAL_TRANSACTION_FAILED/);
+  assert.equal(checkpointed.archives.length, 63);
+  assert.equal(checkpointed.stripe.intents.get('pi_D_1').status, 'canceled');
+  failDelete = false;
+  assert.equal((await checkpointed.run(APPLY, applyEnv())).applied, 63);
+
+  const uncheckpointed = harness();
+  uncheckpointed.stripe.intents.get('pi_D_1').status = 'canceled';
+  await assert.rejects(uncheckpointed.run(APPLY, applyEnv()), /STRIPE_STATE_CHANGED/);
+  assert.equal(uncheckpointed.archives.length, 0);
+});
+
+test('H restoration interruption resumes without restoring twice and rejects restored H without checkpoint', async () => {
+  let failDelete = true;
+  const fixture = harness({ failDelete: () => failDelete });
+  await assert.rejects(fixture.run(APPLY, applyEnv()), /FINAL_TRANSACTION_FAILED/);
+  assert.equal(fixture.actions.filter((action) => action.type === 'release-inventory').length, 1);
+  failDelete = false;
+  assert.equal((await fixture.run(APPLY, applyEnv())).applied, 63);
+  assert.equal(fixture.actions.filter((action) => action.type === 'release-inventory').length, 1);
+
+  const restoredOrders = fixtureOrders();
+  const h = restoredOrders.find((record) => record.paymentId === 'pi_D_1');
+  h.inventoryReservedAt = null;
+  h.inventoryRestoredAt = new Date('2026-10-04T00:00:00Z');
+  h.inventoryDecrementedAt = null;
+  const noCheckpoint = harness({ orders: restoredOrders });
+  await assert.rejects(noCheckpoint.run(APPLY, applyEnv()), /H_OVERLAY_MISMATCH|EXPECTED_COUNT_DRIFT/);
+  assert.equal(noCheckpoint.archives.length, 0);
+});
+
+test('completed rerun reports already complete without Stripe, inventory, archive, or audit writes', async () => {
+  const fixture = harness();
+  await fixture.run(APPLY, applyEnv());
+  const actionCount = fixture.actions.length;
+  const stripeCallCount = fixture.stripe.calls.length;
+  const auditCount = fixture.audits.length;
+  const result = await fixture.run(APPLY, applyEnv());
+  assert.equal(result.status, 'ALREADY_COMPLETE');
+  assert.equal(result.applied, 0);
+  assert.equal(fixture.archives.length, 63);
+  assert.equal(fixture.audits.length, auditCount);
+  assert.equal(fixture.stripe.calls.length, stripeCallCount);
+  assert.equal(fixture.actions.slice(actionCount).some((action) =>
+    ['release-inventory', 'archive-create', 'audit-create', 'order-delete'].includes(action.type)), false);
+});
 test('verification mode returns only release blocker counts', async () => {
   const fixture = harness({ blockerCounts: {
     activeReservationCount: 0,
