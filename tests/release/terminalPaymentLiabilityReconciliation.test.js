@@ -2,12 +2,25 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const Module = require('node:module');
 
 const reconciliation = require('../../scripts/release/reconcile-terminal-payment-liabilities');
 
 const ACTOR_ID = '507f1f77bcf86cd799439011';
 const APPLY = ['--apply', '--confirm', reconciliation.CONFIRMATION];
 const FIXED_NOW = new Date('2026-10-04T12:00:00.000Z');
+const controllerPath = path.resolve(__dirname, '../../controllers/admin/adminAudit.controller.js');
+
+function mockResponse() {
+  return {
+    statusCode: null,
+    body: null,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; },
+  };
+}
 
 function order(classification, number, overrides = {}) {
   const isRefund = classification === 'A1';
@@ -155,6 +168,7 @@ function queryResult(rows, onSession = () => {}) {
 
 function harness(inputOrders = eightOrders(), options = {}) {
   const orders = new Map(inputOrders.map((record) => [String(record._id), structuredClone(record)]));
+  const ledger = [];
   const events = [];
   const actions = [];
   const stripe = stripeFor(inputOrders);
@@ -164,13 +178,16 @@ function harness(inputOrders = eightOrders(), options = {}) {
     async withTransaction(work, settings) {
       actions.push({ type: 'transaction', settings });
       const orderSnapshot = structuredClone([...orders.entries()]);
+      const ledgerSnapshot = structuredClone(ledger);
       const eventSnapshot = structuredClone(events);
       try {
-        if (options.onTransactionStart) options.onTransactionStart(orders);
+        if (options.onTransactionStart) options.onTransactionStart(orders, ledger);
         return await work();
       } catch (error) {
         orders.clear();
         for (const [id, record] of orderSnapshot) orders.set(id, record);
+        ledger.length = 0;
+        ledger.push(...ledgerSnapshot);
         events.length = 0;
         events.push(...eventSnapshot);
         actions.push({ type: 'rollback' });
@@ -206,6 +223,24 @@ function harness(inputOrders = eightOrders(), options = {}) {
       return { matchedCount: 1, modifiedCount: 1 };
     },
   };
+  const ReleaseReconciliationLedger = {
+    find(filter) {
+      actions.push({ type: 'ledger-find', filter });
+      return queryResult(ledger.filter((entry) => matches(entry, filter)));
+    },
+    findOne(filter) {
+      actions.push({ type: 'ledger-reread', filter });
+      return queryResult(ledger.find((entry) => matches(entry, filter)) || null,
+        (used) => assert.equal(used, session));
+    },
+    async create(docs, settings) {
+      actions.push({ type: 'ledger-create', docs, settings });
+      assert.equal(settings.session, session);
+      if (options.failLedger) throw new Error('sensitive ledger error');
+      ledger.push(...structuredClone(docs));
+      return docs;
+    },
+  };
   const AdminAuditEvent = {
     find(filter) {
       actions.push({ type: 'audit-find', filter });
@@ -226,6 +261,7 @@ function harness(inputOrders = eightOrders(), options = {}) {
   };
   const deps = {
     Order,
+    ReleaseReconciliationLedger,
     AdminAuditEvent,
     User: { exists: async () => true },
     mongoose: {
@@ -240,6 +276,7 @@ function harness(inputOrders = eightOrders(), options = {}) {
     deps,
     stripe,
     actions,
+    ledger,
     events,
     orders,
     get sessionStarted() { return sessionStarted; },
@@ -260,8 +297,10 @@ test('default and explicit dry-run discover exact 5 A1 / 3 B without writes', as
     });
   }
   assert.equal(fixture.sessionStarted, 0);
+  assert.equal(fixture.ledger.length, 0);
   assert.equal(fixture.events.length, 0);
-  assert.equal(fixture.actions.some((action) => action.type === 'update'), false);
+  assert.equal(fixture.actions.some((action) =>
+    ['ledger-create', 'audit-create', 'update'].includes(action.type)), false);
   assert.equal(fixture.orders.get(eightOrders()[0]._id).paymentId, eightOrders()[0].paymentId);
 });
 
@@ -275,6 +314,7 @@ test('apply requires exact token and actor before any discovery or write', async
   await assert.rejects(fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: 'not-an-id' }),
     /VALID_ACTOR_USER_ID_REQUIRED/);
   assert.deepEqual(fixture.actions, []);
+  assert.equal(fixture.ledger.length, 0);
   assert.equal(fixture.events.length, 0);
   assert.equal(fixture.stripe.calls.length, 0);
 });
@@ -372,11 +412,12 @@ test('count drift blocks every write and does not start a transaction', async ()
   await assert.rejects(fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID }),
     /EXPECTED_COUNT_DRIFT/);
   assert.equal(fixture.sessionStarted, 0);
+  assert.equal(fixture.ledger.length, 0);
   assert.equal(fixture.events.length, 0);
   assert.equal(fixture.actions.some((action) => action.type === 'update'), false);
 });
 
-test('changed Mongo state at transaction reread blocks audit and order mutation', async () => {
+test('changed Mongo state at transaction reread blocks ledger, audit and order mutation', async () => {
   const fixture = harness(eightOrders(), {
     onTransactionStart(orders) {
       orders.get(eightOrders()[0]._id).status = 'ordered';
@@ -384,77 +425,150 @@ test('changed Mongo state at transaction reread blocks audit and order mutation'
   });
   await assert.rejects(fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID }),
     /ORDER_STATE_CHANGED/);
+  assert.equal(fixture.ledger.length, 0);
   assert.equal(fixture.events.length, 0);
+  assert.equal(fixture.actions.some((action) =>
+    ['ledger-create', 'audit-create', 'update'].includes(action.type)), false);
+});
+
+test('prior duplicate ledger mapping fails closed before Stripe or any write', async () => {
+  for (const duplicateField of ['orderId', 'priorPaymentId']) {
+    const fixture = harness();
+    const first = {
+      ledgerEntryId: 'ledger-one',
+      orderId: 'historical-order-one',
+      priorPaymentId: 'pi_historical_one',
+      classification: 'B',
+      reason: 'release_cutover_terminal_reference_retirement',
+      outcome: 'success',
+    };
+    const second = { ...first, ledgerEntryId: 'ledger-two',
+      orderId: 'historical-order-two', priorPaymentId: 'pi_historical_two' };
+    second[duplicateField] = first[duplicateField];
+    fixture.ledger.push(first, second);
+    await assert.rejects(fixture.run(), /DUPLICATE_PRIOR_LEDGER/);
+    assert.equal(fixture.stripe.calls.length, 0);
+    assert.equal(fixture.sessionStarted, 0);
+    assert.equal(fixture.events.length, 0);
+    assert.equal(fixture.actions.some((action) => action.type === 'update'), false);
+  }
+});
+
+test('ledger mapping appearing during transaction blocks audit and payment clear', async () => {
+  const fixture = harness(eightOrders(), {
+    onTransactionStart(_orders, ledger) {
+      ledger.push({ orderId: eightOrders()[0]._id, ledgerEntryId: 'concurrent-opaque-ledger' });
+    },
+  });
+  await assert.rejects(fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID }),
+    /ALREADY_RECONCILED/);
+  assert.equal(fixture.ledger.length, 0);
+  assert.equal(fixture.events.length, 0);
+  assert.equal(fixture.actions.some((action) => action.type === 'audit-create'), false);
   assert.equal(fixture.actions.some((action) => action.type === 'update'), false);
 });
 
-test('apply inserts each immutable audit event before clearing only paymentId', async () => {
+test('apply inserts exact ledger mapping, then safe audit event, then clears only paymentId', async () => {
   const fixture = harness();
   const before = structuredClone([...fixture.orders.entries()]);
   const result = await fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID });
   assert.equal(result.applied, 8);
   assert.equal(fixture.sessionStarted, 1);
   assert.equal(fixture.sessionEnded, 1);
+  assert.equal(fixture.ledger.length, 8);
   assert.equal(fixture.events.length, 8);
-  const writes = fixture.actions.filter((action) => ['audit-create', 'update'].includes(action.type));
-  assert.equal(writes.length, 16);
-  for (let i = 0; i < writes.length; i += 2) {
-    assert.equal(writes[i].type, 'audit-create');
-    assert.equal(writes[i + 1].type, 'update');
-    assert.deepEqual(writes[i + 1].update, { $unset: { paymentId: '' } });
-    assert.equal(writes[i + 1].settings.timestamps, false);
+  const writes = fixture.actions.filter((action) =>
+    ['ledger-create', 'audit-create', 'update'].includes(action.type));
+  assert.equal(writes.length, 24);
+  for (let i = 0; i < writes.length; i += 3) {
+    assert.deepEqual(writes.slice(i, i + 3).map((action) => action.type),
+      ['ledger-create', 'audit-create', 'update']);
+    assert.deepEqual(writes[i + 2].update, { $unset: { paymentId: '' } });
+    assert.equal(writes[i + 2].settings.timestamps, false);
   }
   for (const [id, original] of before) {
     const current = fixture.orders.get(id);
     const { paymentId: _beforePaymentId, ...expected } = original;
     assert.deepEqual(current, expected);
   }
+  const ledgerIds = new Set();
+  for (const entry of fixture.ledger) {
+    const original = before.find(([id]) => id === String(entry.orderId))[1];
+    assert.match(entry.ledgerEntryId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    assert.equal(ledgerIds.has(entry.ledgerEntryId), false);
+    ledgerIds.add(entry.ledgerEntryId);
+    assert.equal(entry.priorPaymentId, original.paymentId);
+    assert.equal(entry.classification, original.paymentStatus === 'refunded' ? 'A1' : 'B');
+    assert.equal(entry.priorPaymentStatus, original.paymentStatus);
+    assert.equal(entry.priorOrderStatus, original.status);
+    assert.equal(entry.stripeTerminalStatus,
+      original.paymentStatus === 'refunded' ? 'succeeded' : 'canceled');
+    assert.equal(entry.reason, 'release_cutover_terminal_reference_retirement');
+    assert.equal(entry.actorUserId, ACTOR_ID);
+    assert.equal(entry.outcome, 'success');
+  }
   for (const event of fixture.events) {
-    const original = before.find(([id]) => id === event.targetId)[1];
+    const entry = fixture.ledger.find((item) => item.ledgerEntryId === event.targetId);
+    assert.ok(entry);
     assert.equal(event.actionCode, reconciliation.ACTION_CODE);
     assert.equal(event.actorUserId, ACTOR_ID);
     assert.equal(event.actorRole, 'release_operator');
-    assert.equal(event.targetType, 'Order');
+    assert.equal(event.targetType, 'ReleaseReconciliationLedger');
     assert.equal(event.outcome, 'success');
     assert.deepEqual(event.changeSummary, {
-      priorPaymentId: original.paymentId,
-      classification: original.paymentStatus === 'refunded' ? 'A1' : 'B',
-      priorPaymentStatus: original.paymentStatus,
-      priorOrderStatus: original.status,
-      stripeTerminalStatus: original.paymentStatus === 'refunded' ? 'succeeded' : 'canceled',
+      classification: entry.classification,
+      priorPaymentStatus: entry.priorPaymentStatus,
+      priorOrderStatus: entry.priorOrderStatus,
+      stripeTerminalStatus: entry.stripeTerminalStatus,
       reason: 'release_cutover_terminal_reference_retirement',
-      reconciledAt: FIXED_NOW.toISOString(),
     });
+    assert.doesNotMatch(JSON.stringify(event), /order-sensitive|pi_sensitive|ch_pi_sensitive|private-item/);
   }
   assert.equal(fixture.stripe.calls.every((call) =>
     ['paymentIntents.retrieve', 'charges.retrieve', 'refunds.list', 'disputes.list'].includes(call)), true);
 });
 
-test('audit insertion failure prevents order mutation', async () => {
+test('ledger insertion failure prevents audit and order mutation', async () => {
+  const fixture = harness(eightOrders(), { failLedger: true });
+  await assert.rejects(fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID }),
+    /TRANSACTION_FAILED/);
+  assert.equal(fixture.ledger.length, 0);
+  assert.equal(fixture.events.length, 0);
+  assert.equal(fixture.actions.some((action) =>
+    ['audit-create', 'update'].includes(action.type)), false);
+  assert.equal(fixture.orders.get(eightOrders()[0]._id).paymentId, eightOrders()[0].paymentId);
+  assert.equal(fixture.actions.some((action) => action.type === 'rollback'), true);
+});
+
+test('audit insertion failure rolls back ledger and prevents order mutation', async () => {
   const fixture = harness(eightOrders(), { failAudit: true });
   await assert.rejects(fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID }),
     /TRANSACTION_FAILED/);
   assert.equal(fixture.actions.some((action) => action.type === 'update'), false);
+  assert.equal(fixture.actions.some((action) => action.type === 'ledger-create'), true);
+  assert.equal(fixture.ledger.length, 0);
   assert.equal(fixture.events.length, 0);
   assert.equal(fixture.orders.get(eightOrders()[0]._id).paymentId, eightOrders()[0].paymentId);
   assert.equal(fixture.actions.some((action) => action.type === 'rollback'), true);
 });
 
-test('order mutation failure rolls back audit and the payment reference', async () => {
+test('order mutation failure rolls back ledger, audit and the payment reference', async () => {
   for (const failUpdate of ['throw', 'after-mutation', 'unmodified']) {
     const fixture = harness(eightOrders(), { failUpdate });
     await assert.rejects(fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID }),
       failUpdate === 'unmodified' ? /PAYMENT_REFERENCE_CLEAR_FAILED/ : /TRANSACTION_FAILED/);
+    assert.equal(fixture.ledger.length, 0);
     assert.equal(fixture.events.length, 0);
     assert.equal(fixture.orders.get(eightOrders()[0]._id).paymentId, eightOrders()[0].paymentId);
     assert.equal(fixture.actions.some((action) => action.type === 'rollback'), true);
   }
 });
 
-test('rerun classifies completed events as already reconciled and never repeats writes', async () => {
+test('rerun classifies completed ledger entries as already reconciled and never repeats writes', async () => {
   const fixture = harness();
   await fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID });
   const priorActions = fixture.actions.length;
+  const priorLedger = fixture.ledger.length;
   const priorEvents = fixture.events.length;
   const result = await fixture.run();
   assert.deepEqual(result, {
@@ -463,9 +577,10 @@ test('rerun classifies completed events as already reconciled and never repeats 
   });
   await assert.rejects(fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID }),
     /EXPECTED_COUNT_DRIFT/);
+  assert.equal(fixture.ledger.length, priorLedger);
   assert.equal(fixture.events.length, priorEvents);
   assert.equal(fixture.actions.slice(priorActions).some((action) =>
-    ['transaction', 'audit-create', 'update'].includes(action.type)), false);
+    ['transaction', 'ledger-create', 'audit-create', 'update'].includes(action.type)), false);
 });
 
 test('returned dry-run and apply summaries and blocked errors never leak IDs or Stripe data', async () => {
@@ -479,4 +594,82 @@ test('returned dry-run and apply summaries and blocked errors never leak IDs or 
   await assert.rejects(drift.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID }),
     (error) => error.safeCode === 'EXPECTED_COUNT_DRIFT'
       && !/order-sensitive|pi_sensitive|ch_pi_sensitive/.test(error.message));
+});
+
+test('normal admin audit list and detail return only safe ledger event metadata', async () => {
+  const fixture = harness();
+  await fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID });
+  const event = { ...fixture.events[0], eventId: 'opaque-event-id' };
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request.endsWith('models/AdminAuditEvent')) {
+      return {
+        find: () => ({
+          sort: () => ({
+            skip: () => ({
+              limit: () => ({
+                select: () => ({ lean: async () => [event] }),
+              }),
+            }),
+          }),
+        }),
+        countDocuments: async () => 1,
+        findOne: () => ({ select: () => ({ lean: async () => event }) }),
+      };
+    }
+    return originalLoad(request, parent, isMain);
+  };
+  let controller;
+  try {
+    delete require.cache[controllerPath];
+    controller = require(controllerPath);
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[controllerPath];
+  }
+  const listResponse = mockResponse();
+  await controller.listAdminAuditEvents({ query: {} }, listResponse);
+  const detailResponse = mockResponse();
+  await controller.getAdminAuditEventByEventId({ params: { eventId: event.eventId } }, detailResponse);
+  assert.equal(listResponse.statusCode, 200);
+  assert.equal(detailResponse.statusCode, 200);
+  assert.equal(listResponse.body.data[0].targetId, event.targetId);
+  assert.equal(detailResponse.body.data.targetId, event.targetId);
+  for (const response of [listResponse, detailResponse]) {
+    const serialized = JSON.stringify(response.body);
+    assert.doesNotMatch(serialized, /order-sensitive|pi_sensitive|ch_pi_sensitive|private-item/);
+    assert.equal(serialized.includes(event.targetId), true);
+  }
+});
+
+test('restricted ledger has unique mapping indexes, rejects mutation, and has no HTTP route or controller', async () => {
+  const Ledger = require('../../models/ReleaseReconciliationLedger');
+  const uniqueIndexFields = new Set(Ledger.schema.indexes()
+    .filter(([, options]) => options.unique === true)
+    .flatMap(([fields]) => Object.keys(fields)));
+  for (const field of ['ledgerEntryId', 'orderId', 'priorPaymentId']) {
+    assert.equal(uniqueIndexFields.has(field), true, `${field} must be unique`);
+  }
+  assert.equal(Ledger.schema.options.timestamps.createdAt, true);
+  assert.equal(Ledger.schema.options.timestamps.updatedAt, false);
+  for (const query of [
+    Ledger.updateOne({}, { $set: { classification: 'B' } }),
+    Ledger.updateMany({}, { $set: { classification: 'B' } }),
+    Ledger.deleteOne({}),
+    Ledger.deleteMany({}),
+  ]) {
+    await assert.rejects(query, /ReleaseReconciliationLedger records are immutable/);
+  }
+  const scan = (directory) => fs.readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) return scan(full);
+      return entry.isFile() && entry.name.endsWith('.js') ? [full] : [];
+    });
+  for (const directory of ['routes', 'controllers']) {
+    for (const file of scan(path.resolve(__dirname, '../..', directory))) {
+      assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /ReleaseReconciliationLedger/,
+        `${directory} must not expose the restricted ledger`);
+    }
+  }
 });

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 'use strict';
 
+const crypto = require('crypto');
+
 // Release-only reconciliation. This module is inert unless invoked as a CLI.
-// Do not use the best-effort admin audit service here: the audit and order
-// mutation must commit or roll back in the same MongoDB transaction.
+// The restricted mapping belongs only in the internal ledger. The normal
+// admin audit API returns its events verbatim on the deployed baseline.
 const ACTION_CODE = 'release_terminal_payment_reference_retirement';
 const CONFIRMATION = 'RETIRE_TERMINAL_PAYMENT_REFERENCES';
 const REASON = 'release_cutover_terminal_reference_retirement';
@@ -127,25 +129,27 @@ async function stripeEligibility(order, classification, stripe) {
     && disputes.has_more === false && disputes.data.length === 0;
 }
 
-function isPriorSuccess(event) {
-  return !!event && event.actionCode === ACTION_CODE && event.outcome === 'success'
-    && event.targetType === 'Order' && typeof event.targetId === 'string'
-    && typeof event.changeSummary?.priorPaymentId === 'string'
-    && ['A1', 'B'].includes(event.changeSummary?.classification)
-    && event.changeSummary?.reason === REASON;
+function isPriorLedger(entry) {
+  return !!entry && entry.outcome === 'success' && entry.reason === REASON
+    && typeof entry.ledgerEntryId === 'string' && entry.ledgerEntryId.length > 0
+    && entry.orderId != null && typeof entry.priorPaymentId === 'string'
+    && entry.priorPaymentId.length > 0 && ['A1', 'B'].includes(entry.classification);
 }
 
-async function discover({ Order, AdminAuditEvent, stripe }) {
+async function discover({ Order, ReleaseReconciliationLedger, stripe }) {
   const orders = await Order.find(discoveryQuery()).select(ORDER_FIELDS).lean();
   if (!Array.isArray(orders) || orders.length > 1000) blocked('INVALID_DISCOVERY_RESULT');
-  const priorEvents = await AdminAuditEvent.find({
-    actionCode: ACTION_CODE, outcome: 'success', targetType: 'Order',
-  }).select('actionCode outcome targetType targetId changeSummary').lean();
-  if (!Array.isArray(priorEvents) || priorEvents.some((event) => !isPriorSuccess(event))) {
-    blocked('INVALID_PRIOR_AUDIT');
+  const priorLedger = await ReleaseReconciliationLedger.find({
+    reason: REASON, outcome: 'success',
+  }).select('ledgerEntryId orderId priorPaymentId classification reason outcome').lean();
+  if (!Array.isArray(priorLedger) || priorLedger.some((entry) => !isPriorLedger(entry))) {
+    blocked('INVALID_PRIOR_LEDGER');
   }
-  const priorTargets = new Set(priorEvents.map((event) => event.targetId));
-  if (priorTargets.size !== priorEvents.length) blocked('DUPLICATE_PRIOR_AUDIT');
+  const priorTargets = new Set(priorLedger.map((entry) => String(entry.orderId)));
+  const priorPaymentIds = new Set(priorLedger.map((entry) => entry.priorPaymentId));
+  if (priorTargets.size !== priorLedger.length || priorPaymentIds.size !== priorLedger.length) {
+    blocked('DUPLICATE_PRIOR_LEDGER');
+  }
   const seenPaymentIds = new Set();
   const eligible = [];
   let ineligible = 0;
@@ -155,7 +159,8 @@ async function discover({ Order, AdminAuditEvent, stripe }) {
     }
     seenPaymentIds.add(order.paymentId);
     const classification = mongoClass(order);
-    if (!classification || priorTargets.has(String(order._id))) {
+    if (!classification || priorTargets.has(String(order._id))
+        || priorPaymentIds.has(order.paymentId)) {
       ineligible += 1;
       continue;
     }
@@ -170,7 +175,7 @@ async function discover({ Order, AdminAuditEvent, stripe }) {
     summary: {
       A1Eligible: A1,
       BEligible: B,
-      alreadyReconciled: priorEvents.length,
+      alreadyReconciled: priorLedger.length,
       driftedIneligible: ineligible,
       totalEligible: eligible.length,
     },
@@ -191,7 +196,8 @@ function conditionalFilter(order) {
   };
 }
 
-async function applyAll({ eligible, actorUserId, Order, AdminAuditEvent, User, mongoose, stripe, now }) {
+async function applyAll({ eligible, actorUserId, Order, ReleaseReconciliationLedger,
+  AdminAuditEvent, User, mongoose, stripe }) {
   validateActor(actorUserId);
   if (!await User.exists({ _id: actorUserId, role: 'admin' })) blocked('ACTOR_NOT_ADMIN');
   // A terminal Stripe state is checked again immediately before the Mongo transaction.
@@ -207,26 +213,37 @@ async function applyAll({ eligible, actorUserId, Order, AdminAuditEvent, User, m
       for (const { order, classification } of eligible) {
         const current = await Order.findOne({ _id: order._id }).select(ORDER_FIELDS).session(session).lean();
         if (!mongoStateUnchanged(order, current)) blocked('ORDER_STATE_CHANGED');
-        const prior = await AdminAuditEvent.findOne({
-          actionCode: ACTION_CODE, targetType: 'Order', targetId: String(order._id), outcome: 'success',
-        }).session(session).lean();
+        const prior = await ReleaseReconciliationLedger.findOne({ orderId: order._id })
+          .session(session).lean();
         if (prior) blocked('ALREADY_RECONCILED');
+        const ledgerEntryId = crypto.randomUUID();
+        const safeSummary = {
+          classification,
+          priorPaymentStatus: order.paymentStatus,
+          priorOrderStatus: order.status,
+          stripeTerminalStatus: classification === 'A1' ? 'succeeded' : 'canceled',
+          reason: REASON,
+        };
+        const ledgerEntry = {
+          ledgerEntryId,
+          orderId: order._id,
+          priorPaymentId: order.paymentId,
+          ...safeSummary,
+          actorUserId,
+          outcome: 'success',
+        };
+        const insertedLedger = await ReleaseReconciliationLedger.create([ledgerEntry], { session });
+        if (!Array.isArray(insertedLedger) || insertedLedger.length !== 1) {
+          blocked('LEDGER_INSERT_FAILED');
+        }
         const event = {
           actorUserId,
           actorRole: 'release_operator',
           actionCode: ACTION_CODE,
-          targetType: 'Order',
-          targetId: String(order._id),
+          targetType: 'ReleaseReconciliationLedger',
+          targetId: ledgerEntryId,
           outcome: 'success',
-          changeSummary: {
-            priorPaymentId: order.paymentId,
-            classification,
-            priorPaymentStatus: order.paymentStatus,
-            priorOrderStatus: order.status,
-            stripeTerminalStatus: classification === 'A1' ? 'succeeded' : 'canceled',
-            reason: REASON,
-            reconciledAt: now().toISOString(),
-          },
+          changeSummary: safeSummary,
         };
         const inserted = await AdminAuditEvent.create([event], { session });
         if (!Array.isArray(inserted) || inserted.length !== 1) blocked('AUDIT_INSERT_FAILED');
@@ -251,14 +268,14 @@ async function applyAll({ eligible, actorUserId, Order, AdminAuditEvent, User, m
   }
 }
 
-async function run({ argv, env, deps, now = () => new Date() }) {
+async function run({ argv, env, deps }) {
   const { mode } = parseArgs(argv);
   const actorUserId = mode === 'apply' ? validateActor(env.RECONCILIATION_ACTOR_USER_ID) : null;
   const { eligible, summary } = await discover(deps);
   if (mode === 'dry-run') return { mode, ...summary, applied: 0 };
   if (summary.A1Eligible !== EXPECTED.A1 || summary.BEligible !== EXPECTED.B
       || summary.totalEligible !== EXPECTED.total) blocked('EXPECTED_COUNT_DRIFT');
-  await applyAll({ eligible, actorUserId, ...deps, now });
+  await applyAll({ eligible, actorUserId, ...deps });
   return { mode, ...summary, applied: EXPECTED.total };
 }
 
@@ -273,6 +290,7 @@ async function main() {
     mongoose,
     Order: require('../../models/Order'),
     AdminAuditEvent: require('../../models/AdminAuditEvent'),
+    ReleaseReconciliationLedger: require('../../models/ReleaseReconciliationLedger'),
     User: require('../../models/User'),
     stripe: new Stripe(process.env.STRIPE_SECRET_KEY, { maxNetworkRetries: 0, timeout: 10000 }),
   };
