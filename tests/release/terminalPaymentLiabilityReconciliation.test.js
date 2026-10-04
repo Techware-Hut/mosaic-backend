@@ -7,11 +7,13 @@ const path = require('node:path');
 const Module = require('node:module');
 
 const reconciliation = require('../../scripts/release/reconcile-terminal-payment-liabilities');
+const prepareLedger = require('../../scripts/release/prepare-reconciliation-ledger');
 
 const ACTOR_ID = '507f1f77bcf86cd799439011';
 const APPLY = ['--apply', '--confirm', reconciliation.CONFIRMATION];
 const FIXED_NOW = new Date('2026-10-04T12:00:00.000Z');
 const controllerPath = path.resolve(__dirname, '../../controllers/admin/adminAudit.controller.js');
+const LEDGER_COLLECTION = 'releasereconciliationledgers';
 
 function mockResponse() {
   return {
@@ -166,12 +168,25 @@ function queryResult(rows, onSession = () => {}) {
   };
 }
 
+function requiredIndexDocs() {
+  return [
+    { name: '_id_', key: { _id: 1 }, unique: true },
+    ...reconciliation.REQUIRED_LEDGER_INDEXES.map((index) => ({
+      name: index.name,
+      key: { [index.field]: 1 },
+      unique: true,
+    })),
+  ];
+}
+
 function harness(inputOrders = eightOrders(), options = {}) {
   const orders = new Map(inputOrders.map((record) => [String(record._id), structuredClone(record)]));
   const ledger = [];
   const events = [];
   const actions = [];
   const stripe = stripeFor(inputOrders);
+  let ledgerCollectionExists = options.ledgerCollectionExists !== false;
+  let ledgerIndexes = structuredClone(options.ledgerIndexes || requiredIndexDocs());
   let sessionStarted = 0;
   let sessionEnded = 0;
   const session = {
@@ -224,6 +239,18 @@ function harness(inputOrders = eightOrders(), options = {}) {
     },
   };
   const ReleaseReconciliationLedger = {
+    collection: {
+      name: LEDGER_COLLECTION,
+      async indexes() {
+        actions.push({ type: 'ledger-indexes' });
+        return structuredClone(ledgerIndexes);
+      },
+      async createIndex(key, settings) {
+        actions.push({ type: 'ledger-create-index', key, settings });
+        ledgerIndexes.push({ name: settings.name, key, unique: settings.unique });
+        return settings.name;
+      },
+    },
     find(filter) {
       actions.push({ type: 'ledger-find', filter });
       return queryResult(ledger.filter((entry) => matches(entry, filter)));
@@ -265,6 +292,26 @@ function harness(inputOrders = eightOrders(), options = {}) {
     AdminAuditEvent,
     User: { exists: async () => true },
     mongoose: {
+      connection: {
+        db: {
+          listCollections(filter) {
+            actions.push({ type: 'list-collections', filter });
+            return {
+              async toArray() {
+                return ledgerCollectionExists && filter.name === LEDGER_COLLECTION
+                  ? [{ name: LEDGER_COLLECTION }]
+                  : [];
+              },
+            };
+          },
+          async createCollection(name) {
+            actions.push({ type: 'create-collection', name });
+            ledgerCollectionExists = true;
+            ledgerIndexes = [{ name: '_id_', key: { _id: 1 }, unique: true }];
+            return {};
+          },
+        },
+      },
       async startSession() {
         sessionStarted += 1;
         return session;
@@ -279,6 +326,8 @@ function harness(inputOrders = eightOrders(), options = {}) {
     ledger,
     events,
     orders,
+    get ledgerIndexes() { return ledgerIndexes; },
+    get ledgerCollectionExists() { return ledgerCollectionExists; },
     get sessionStarted() { return sessionStarted; },
     get sessionEnded() { return sessionEnded; },
     run: (argv = ['--dry-run'], env = {}) => reconciliation.run({
@@ -300,8 +349,23 @@ test('default and explicit dry-run discover exact 5 A1 / 3 B without writes', as
   assert.equal(fixture.ledger.length, 0);
   assert.equal(fixture.events.length, 0);
   assert.equal(fixture.actions.some((action) =>
-    ['ledger-create', 'audit-create', 'update'].includes(action.type)), false);
+    ['create-collection', 'ledger-create-index', 'ledger-create', 'audit-create', 'update']
+      .includes(action.type)), false);
   assert.equal(fixture.orders.get(eightOrders()[0]._id).paymentId, eightOrders()[0].paymentId);
+});
+
+test('dry-run treats an absent ledger collection as empty and creates nothing', async () => {
+  const fixture = harness(eightOrders(), { ledgerCollectionExists: false });
+  const result = await fixture.run(['--dry-run']);
+  assert.deepEqual(result, {
+    mode: 'dry-run', A1Eligible: 5, BEligible: 3,
+    alreadyReconciled: 0, driftedIneligible: 0, totalEligible: 8, applied: 0,
+  });
+  assert.equal(fixture.ledgerCollectionExists, false);
+  assert.equal(fixture.actions.some((action) => action.type === 'ledger-find'), false);
+  assert.equal(fixture.actions.some((action) =>
+    ['create-collection', 'ledger-create-index', 'ledger-create', 'audit-create', 'update']
+      .includes(action.type)), false);
 });
 
 test('apply requires exact token and actor before any discovery or write', async () => {
@@ -417,6 +481,28 @@ test('count drift blocks every write and does not start a transaction', async ()
   assert.equal(fixture.actions.some((action) => action.type === 'update'), false);
 });
 
+test('apply blocks before Stripe or transaction when ledger storage is absent or unprepared', async () => {
+  for (const options of [
+    { ledgerCollectionExists: false },
+    { ledgerIndexes: [{ name: '_id_', key: { _id: 1 }, unique: true }] },
+    { ledgerIndexes: [
+      { name: '_id_', key: { _id: 1 }, unique: true },
+      { name: 'orderId_1', key: { orderId: 1 }, unique: false },
+    ] },
+  ]) {
+    const fixture = harness(eightOrders(), options);
+    await assert.rejects(fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID }),
+      /LEDGER_STORAGE_NOT_PREPARED/);
+    assert.equal(fixture.sessionStarted, 0);
+    assert.equal(fixture.stripe.calls.length, 0);
+    assert.equal(fixture.ledger.length, 0);
+    assert.equal(fixture.events.length, 0);
+    assert.equal(fixture.actions.some((action) =>
+      ['create-collection', 'ledger-create-index', 'ledger-create', 'audit-create', 'update']
+        .includes(action.type)), false);
+  }
+});
+
 test('changed Mongo state at transaction reread blocks ledger, audit and order mutation', async () => {
   const fixture = harness(eightOrders(), {
     onTransactionStart(orders) {
@@ -526,6 +612,19 @@ test('apply inserts exact ledger mapping, then safe audit event, then clears onl
   }
   assert.equal(fixture.stripe.calls.every((call) =>
     ['paymentIntents.retrieve', 'charges.retrieve', 'refunds.list', 'disputes.list'].includes(call)), true);
+});
+
+test('apply verifies prepared ledger storage before discovery and transaction writes', async () => {
+  const fixture = harness();
+  await fixture.run(APPLY, { RECONCILIATION_ACTOR_USER_ID: ACTOR_ID });
+  const firstWrite = fixture.actions.findIndex((action) =>
+    ['ledger-create', 'audit-create', 'update'].includes(action.type));
+  assert.ok(firstWrite > 0);
+  assert.deepEqual(fixture.actions.slice(0, 2).map((action) => action.type),
+    ['list-collections', 'ledger-indexes']);
+  assert.ok(fixture.actions.findIndex((action) => action.type === 'ledger-indexes')
+    < fixture.actions.findIndex((action) => action.type === 'transaction'));
+  assert.ok(fixture.actions.findIndex((action) => action.type === 'transaction') < firstWrite);
 });
 
 test('ledger insertion failure prevents audit and order mutation', async () => {
@@ -652,6 +751,8 @@ test('restricted ledger has unique mapping indexes, rejects mutation, and has no
   }
   assert.equal(Ledger.schema.options.timestamps.createdAt, true);
   assert.equal(Ledger.schema.options.timestamps.updatedAt, false);
+  assert.equal(Ledger.schema.options.autoCreate, false);
+  assert.equal(Ledger.schema.options.autoIndex, false);
   for (const query of [
     Ledger.updateOne({}, { $set: { classification: 'B' } }),
     Ledger.updateMany({}, { $set: { classification: 'B' } }),
@@ -672,4 +773,79 @@ test('restricted ledger has unique mapping indexes, rejects mutation, and has no
         `${directory} must not expose the restricted ledger`);
     }
   }
+});
+
+test('preparation utility requires exact confirmation and creates only ledger storage', async () => {
+  assert.deepEqual(prepareLedger.parseArgs([]), { confirmed: false });
+  assert.deepEqual(prepareLedger.parseArgs(['--confirm', prepareLedger.CONFIRMATION]),
+    { confirmed: true });
+  assert.throws(() => prepareLedger.parseArgs(['--confirm', 'wrong']),
+    /PREPARE_CONFIRMATION_REQUIRED/);
+
+  const dryRun = harness(eightOrders(), { ledgerCollectionExists: false });
+  assert.deepEqual(await prepareLedger.prepareStorage({
+    mongoose: dryRun.deps.mongoose,
+    ReleaseReconciliationLedger: dryRun.deps.ReleaseReconciliationLedger,
+    reconciliation,
+    confirmed: false,
+  }), {
+    mode: 'dry-run',
+    collection: LEDGER_COLLECTION,
+    exists: false,
+    ready: false,
+  });
+  assert.equal(dryRun.ledgerCollectionExists, false);
+  assert.equal(dryRun.actions.some((action) =>
+    ['create-collection', 'ledger-create-index', 'discover', 'ledger-find',
+      'ledger-create', 'audit-create', 'update'].includes(action.type)), false);
+
+  const fixture = harness(eightOrders(), { ledgerCollectionExists: false });
+  assert.deepEqual(await prepareLedger.prepareStorage({
+    mongoose: fixture.deps.mongoose,
+    ReleaseReconciliationLedger: fixture.deps.ReleaseReconciliationLedger,
+    reconciliation,
+    confirmed: true,
+  }), {
+    mode: 'apply',
+    collection: LEDGER_COLLECTION,
+    exists: true,
+    ready: true,
+  });
+  assert.deepEqual(fixture.actions.filter((action) => action.type === 'create-collection')
+    .map((action) => action.name), [LEDGER_COLLECTION]);
+  assert.deepEqual(fixture.actions.filter((action) => action.type === 'ledger-create-index')
+    .map((action) => action.settings.name), ['ledgerEntryId_1', 'orderId_1', 'priorPaymentId_1']);
+  assert.equal(fixture.actions.some((action) =>
+    ['discover', 'ledger-find', 'ledger-create', 'audit-create', 'update'].includes(action.type)), false);
+});
+
+test('preparation is idempotent and blocks incompatible ledger indexes', async () => {
+  const ready = harness();
+  assert.deepEqual(await prepareLedger.prepareStorage({
+    mongoose: ready.deps.mongoose,
+    ReleaseReconciliationLedger: ready.deps.ReleaseReconciliationLedger,
+    reconciliation,
+    confirmed: true,
+  }), {
+    mode: 'apply',
+    collection: LEDGER_COLLECTION,
+    exists: true,
+    ready: true,
+  });
+  assert.equal(ready.actions.some((action) =>
+    ['create-collection', 'ledger-create-index'].includes(action.type)), false);
+
+  const incompatible = harness(eightOrders(), { ledgerIndexes: [
+    { name: '_id_', key: { _id: 1 }, unique: true },
+    { name: 'unsafe_extra_1', key: { unsafe_extra: 1 }, unique: false },
+  ] });
+  await assert.rejects(prepareLedger.prepareStorage({
+    mongoose: incompatible.deps.mongoose,
+    ReleaseReconciliationLedger: incompatible.deps.ReleaseReconciliationLedger,
+    reconciliation,
+    confirmed: true,
+  }), /LEDGER_STORAGE_NOT_PREPARED/);
+  assert.equal(incompatible.actions.some((action) =>
+    ['create-collection', 'ledger-create-index', 'ledger-create', 'audit-create', 'update']
+      .includes(action.type)), false);
 });

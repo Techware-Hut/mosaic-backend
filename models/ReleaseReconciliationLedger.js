@@ -64,6 +64,8 @@ const releaseReconciliationLedgerSchema = new mongoose.Schema(
   {
     timestamps: { createdAt: true, updatedAt: false },
     versionKey: false,
+    autoCreate: false,
+    autoIndex: false,
   }
 );
 

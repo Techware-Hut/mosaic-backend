@@ -10,6 +10,11 @@ const ACTION_CODE = 'release_terminal_payment_reference_retirement';
 const CONFIRMATION = 'RETIRE_TERMINAL_PAYMENT_REFERENCES';
 const REASON = 'release_cutover_terminal_reference_retirement';
 const EXPECTED = Object.freeze({ A1: 5, B: 3, total: 8 });
+const REQUIRED_LEDGER_INDEXES = Object.freeze([
+  Object.freeze({ field: 'ledgerEntryId', name: 'ledgerEntryId_1' }),
+  Object.freeze({ field: 'orderId', name: 'orderId_1' }),
+  Object.freeze({ field: 'priorPaymentId', name: 'priorPaymentId_1' }),
+]);
 const A1_STATUSES = new Set(['refunded', 'rejected', 'cancelled']);
 const PAYMENT_REFERENCE = { $exists: true, $type: 'string', $ne: '' };
 const ORDER_FIELDS = '_id paymentId paymentStatus status totalAmount currency inventoryReservedAt inventoryDecrementedAt inventoryRestoredAt';
@@ -136,12 +141,68 @@ function isPriorLedger(entry) {
     && entry.priorPaymentId.length > 0 && ['A1', 'B'].includes(entry.classification);
 }
 
-async function discover({ Order, ReleaseReconciliationLedger, stripe }) {
+function ledgerCollectionName(ReleaseReconciliationLedger) {
+  const name = ReleaseReconciliationLedger?.collection?.name
+    || ReleaseReconciliationLedger?.collection?.collectionName;
+  if (typeof name !== 'string' || !name) blocked('LEDGER_STORAGE_NOT_PREPARED');
+  return name;
+}
+
+async function ledgerCollectionExists({ mongoose, ReleaseReconciliationLedger }) {
+  const db = mongoose?.connection?.db || ReleaseReconciliationLedger?.db?.db;
+  if (!db || typeof db.listCollections !== 'function') blocked('LEDGER_STORAGE_NOT_PREPARED');
+  const name = ledgerCollectionName(ReleaseReconciliationLedger);
+  const matches = await db.listCollections({ name }, { nameOnly: true }).toArray();
+  return Array.isArray(matches) && matches.some((collection) => collection.name === name);
+}
+
+function indexMatches(index, required) {
+  return !!index && index.name === required.name && index.unique === true
+    && index.key && Object.keys(index.key).length === 1 && index.key[required.field] === 1;
+}
+
+function assertLedgerIndexes(indexes) {
+  if (!Array.isArray(indexes)) blocked('LEDGER_STORAGE_NOT_PREPARED');
+  for (const index of indexes) {
+    if (index.name === '_id_') continue;
+    const required = REQUIRED_LEDGER_INDEXES.find((candidate) =>
+      Object.prototype.hasOwnProperty.call(index.key || {}, candidate.field));
+    if (!required || !indexMatches(index, required)) blocked('LEDGER_STORAGE_NOT_PREPARED');
+  }
+  for (const required of REQUIRED_LEDGER_INDEXES) {
+    if (!indexes.some((index) => indexMatches(index, required))) {
+      blocked('LEDGER_STORAGE_NOT_PREPARED');
+    }
+  }
+  return true;
+}
+
+async function verifyLedgerStoragePrepared({ mongoose, ReleaseReconciliationLedger }) {
+  if (!await ledgerCollectionExists({ mongoose, ReleaseReconciliationLedger })) {
+    blocked('LEDGER_STORAGE_NOT_PREPARED');
+  }
+  const indexes = await ReleaseReconciliationLedger.collection.indexes();
+  return assertLedgerIndexes(indexes);
+}
+
+async function readPriorLedger({ mongoose, ReleaseReconciliationLedger, requirePrepared = false }) {
+  const exists = await ledgerCollectionExists({ mongoose, ReleaseReconciliationLedger });
+  if (!exists) {
+    if (requirePrepared) blocked('LEDGER_STORAGE_NOT_PREPARED');
+    return [];
+  }
+  if (requirePrepared) await verifyLedgerStoragePrepared({ mongoose, ReleaseReconciliationLedger });
+  return ReleaseReconciliationLedger.find({ reason: REASON, outcome: 'success' })
+    .select('ledgerEntryId orderId priorPaymentId classification reason outcome').lean();
+}
+
+async function discover({ Order, ReleaseReconciliationLedger, mongoose, stripe,
+  requireLedgerStorage = false }) {
   const orders = await Order.find(discoveryQuery()).select(ORDER_FIELDS).lean();
   if (!Array.isArray(orders) || orders.length > 1000) blocked('INVALID_DISCOVERY_RESULT');
-  const priorLedger = await ReleaseReconciliationLedger.find({
-    reason: REASON, outcome: 'success',
-  }).select('ledgerEntryId orderId priorPaymentId classification reason outcome').lean();
+  const priorLedger = await readPriorLedger({
+    mongoose, ReleaseReconciliationLedger, requirePrepared: requireLedgerStorage,
+  });
   if (!Array.isArray(priorLedger) || priorLedger.some((entry) => !isPriorLedger(entry))) {
     blocked('INVALID_PRIOR_LEDGER');
   }
@@ -271,7 +332,10 @@ async function applyAll({ eligible, actorUserId, Order, ReleaseReconciliationLed
 async function run({ argv, env, deps }) {
   const { mode } = parseArgs(argv);
   const actorUserId = mode === 'apply' ? validateActor(env.RECONCILIATION_ACTOR_USER_ID) : null;
-  const { eligible, summary } = await discover(deps);
+  if (mode === 'apply') await verifyLedgerStoragePrepared(deps);
+  const { eligible, summary } = await discover({
+    ...deps, requireLedgerStorage: mode === 'apply',
+  });
   if (mode === 'dry-run') return { mode, ...summary, applied: 0 };
   if (summary.A1Eligible !== EXPECTED.A1 || summary.BEligible !== EXPECTED.B
       || summary.totalEligible !== EXPECTED.total) blocked('EXPECTED_COUNT_DRIFT');
@@ -313,5 +377,8 @@ if (require.main === module) {
 module.exports = {
   ACTION_CODE, CONFIRMATION, EXPECTED, parseArgs, validateActor,
   discoveryQuery, mongoClass, mongoStateUnchanged, stripeEligibility,
+  ledgerCollectionName, ledgerCollectionExists, assertLedgerIndexes,
+  verifyLedgerStoragePrepared, readPriorLedger,
   discover, conditionalFilter, applyAll, run,
+  REQUIRED_LEDGER_INDEXES,
 };
