@@ -1007,22 +1007,20 @@ test('focused workflow requires exact target CI and source proof but never enter
   assert.match(workflow, /Reassert safe gate after any post-enable failure/);
 });
 
-test('checkout-gate CLI inherits focused mode and rejects live mutation without a flag', () => {
+test('checkout-gate CLI inherits focused mode and still requires explicit live-mutation confirmation', () => {
   assert.equal(gateCli(gateVerifyArgs, { RELEASE_MODE: 'focused-baseline' }).releaseMode, 'focused-baseline');
   assert.throws(
-    () => gateCli(gateEnableArgs, { RELEASE_MODE: 'focused-baseline' }),
-    /Focused live ALB mutation is disabled/
+    () => gateCli(['enable', '--output', 'gate-evidence.json'], { RELEASE_MODE: 'focused-baseline' }),
+    /enable requires --confirm ENABLE_CHECKOUT_GATE/
   );
+  assert.equal(gateCli(gateEnableArgs, { RELEASE_MODE: 'focused-baseline' }).releaseMode, 'focused-baseline');
 });
 
-test('checkout-gate CLI accepts matching focused flag and environment for verification only', () => {
+test('checkout-gate CLI accepts matching focused flag and environment for confirmed mutation', () => {
   const focusedVerifyArgs = [...gateVerifyArgs, '--release-mode', 'focused-baseline'];
   const focusedEnableArgs = [...gateEnableArgs, '--release-mode', 'focused-baseline'];
   assert.equal(gateCli(focusedVerifyArgs, { RELEASE_MODE: 'focused-baseline' }).releaseMode, 'focused-baseline');
-  assert.throws(
-    () => gateCli(focusedEnableArgs, { RELEASE_MODE: 'focused-baseline' }),
-    /Focused live ALB mutation is disabled/
-  );
+  assert.equal(gateCli(focusedEnableArgs, { RELEASE_MODE: 'focused-baseline' }).releaseMode, 'focused-baseline');
 });
 
 test('checkout-gate CLI rejects explicit release against inherited focused mode', () => {

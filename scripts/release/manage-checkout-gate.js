@@ -523,9 +523,6 @@ function cliConfiguration(argv, env = process.env, fixtureConfiguration = {}) {
   }
   activePathRegexValues(config.releaseMode);
   validatePinnedArnSet(config);
-  if (config.releaseMode === 'focused-baseline' && !config.fixture && action !== 'verify') {
-    throw new Error('Focused live ALB mutation is disabled until external release gates are approved');
-  }
   if (!config.fixture && action !== 'verify') {
     const expectedConfirmation = action === 'enable' ? 'ENABLE_CHECKOUT_GATE' : 'DISABLE_CHECKOUT_GATE';
     if (config.confirmation !== expectedConfirmation) {

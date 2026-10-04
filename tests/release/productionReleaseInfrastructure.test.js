@@ -614,16 +614,36 @@ test('focused-baseline partial transition failure regates both listeners', () =>
   assert.deepEqual(observed.records.map((record) => record.state), ['active', 'active']);
 });
 
-test('focused-baseline gate CLI mode is explicit and invalid mode fails before AWS access', () => {
-  const args = ['verify', '--release-mode', 'focused-baseline', '--output', 'unused.json'];
-  assert.equal(gateApi.cliConfiguration(args, {}, gateConfig()).releaseMode, 'focused-baseline');
+test('focused-baseline gate CLI allows explicit confirmed live transitions', () => {
+  const verifyArgs = ['verify', '--release-mode', 'focused-baseline', '--output', 'unused.json'];
+  assert.equal(gateApi.cliConfiguration(verifyArgs, {}, gateConfig()).releaseMode, 'focused-baseline');
+
   assert.throws(
     () => gateApi.cliConfiguration([
-      'enable', '--release-mode', 'focused-baseline', '--confirm', 'ENABLE_CHECKOUT_GATE',
-      '--output', 'unused.json',
+      'enable', '--release-mode', 'focused-baseline', '--output', 'unused.json',
     ], {}, gateConfig()),
-    /Focused live ALB mutation is disabled/,
+    /enable requires --confirm ENABLE_CHECKOUT_GATE/,
   );
+  const enable = gateApi.cliConfiguration([
+    'enable', '--release-mode', 'focused-baseline', '--confirm', 'ENABLE_CHECKOUT_GATE',
+    '--output', 'unused.json',
+  ], {}, gateConfig());
+  assert.equal(enable.action, 'enable');
+  assert.equal(enable.releaseMode, 'focused-baseline');
+
+  assert.throws(
+    () => gateApi.cliConfiguration([
+      'disable', '--release-mode', 'focused-baseline', '--output', 'unused.json',
+    ], {}, gateConfig()),
+    /disable requires --confirm DISABLE_CHECKOUT_GATE/,
+  );
+  const disable = gateApi.cliConfiguration([
+    'disable', '--release-mode', 'focused-baseline', '--confirm', 'DISABLE_CHECKOUT_GATE',
+    '--output', 'unused.json',
+  ], {}, gateConfig());
+  assert.equal(disable.action, 'disable');
+  assert.equal(disable.releaseMode, 'focused-baseline');
+
   assert.equal(gateApi.cliConfiguration(
     ['verify', '--output', 'unused.json'], {}, gateConfig()
   ).releaseMode, 'release');
