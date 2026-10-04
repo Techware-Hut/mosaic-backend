@@ -1,5 +1,28 @@
 const AdminAuditEvent = require('../../models/AdminAuditEvent');
 
+const RETIREMENT_ACTION = 'release_terminal_payment_reference_retirement';
+const REDACTED = '[REDACTED]';
+
+function redactRetirementEvent(event) {
+  if (event.actionCode !== RETIREMENT_ACTION) return event;
+
+  // An allowlist keeps future audit fields from accidentally exposing the
+  // restricted order-to-payment mapping through this normal admin API.
+  const source = event.changeSummary;
+  const changeSummary = { priorPaymentId: REDACTED };
+  for (const field of [
+    'classification', 'priorPaymentStatus', 'priorOrderStatus',
+    'stripeTerminalStatus', 'reason', 'reconciledAt',
+  ]) {
+    if (source && typeof source[field] === 'string') changeSummary[field] = source[field];
+  }
+  return {
+    ...event,
+    targetId: REDACTED,
+    changeSummary,
+  };
+}
+
 exports.listAdminAuditEvents = async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -29,7 +52,7 @@ exports.listAdminAuditEvents = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: events,
+      data: events.map(redactRetirementEvent),
       pagination: {
         page,
         limit,
@@ -63,7 +86,7 @@ exports.getAdminAuditEventByEventId = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: event,
+      data: redactRetirementEvent(event),
     });
   } catch (error) {
     console.error('getAdminAuditEventByEventId error:', error.message);
