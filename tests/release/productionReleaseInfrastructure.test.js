@@ -1087,6 +1087,15 @@ function releaseControlProofSource() {
   return fs.readFileSync(releaseControlProofWorkflowPath, 'utf8');
 }
 
+const focusedCheckoutGateWorkflowPath = path.join(
+  __dirname,
+  '../../.github/workflows/focused-checkout-gate.yml'
+);
+
+function focusedCheckoutGateWorkflowSource() {
+  return fs.readFileSync(focusedCheckoutGateWorkflowPath, 'utf8');
+}
+
 const approvedProofReads = [
   ['elasticbeanstalk', 'describe-environments', 'DescribeEnvironments', 'environments'],
   ['elasticbeanstalk', 'describe-configuration-settings', 'DescribeConfigurationSettings', 'configuration'],
@@ -1545,6 +1554,67 @@ test('isolated release-control proof exercises only STS and emits identifier-fre
   assert.doesNotMatch(workflow, /(?:printf|echo)[^\n]*(?:arn:aws|\$\{?expected_account\b)/);
   assert.doesNotMatch(workflow, /\b(?:gh\s+workflow\s+run|aws\s+(?:elbv2|elasticbeanstalk|s3|s3api|ssm|iam))\b/i);
   assert.doesNotMatch(workflow, /\.github\/workflows\/deploy-eb-production|workflow_run:|push:|pull_request:/);
+});
+
+test('focused checkout gate workflow is manual, main-only, and release-control scoped', () => {
+  const workflow = focusedCheckoutGateWorkflowSource();
+  assert.match(workflow, /^name: Focused checkout gate$/m);
+  const triggerBlock = workflow.match(/^on:\s*\r?\n([\s\S]*?)(?=^[^\s#])/m);
+  assert.ok(triggerBlock, 'workflow must declare its own event block');
+  assert.deepEqual(
+    [...triggerBlock[1].matchAll(/^  ([a-z_]+):/gm)].map((match) => match[1]),
+    ['workflow_dispatch']
+  );
+  assert.doesNotMatch(workflow, /\b(?:push|pull_request|pull_request_target|workflow_run|repository_dispatch):/);
+  assert.match(workflow, /^permissions:\s*\r?\n  contents: read\s*\r?\n  id-token: write\s*$/m);
+  assert.doesNotMatch(workflow, /^\s+(?:contents|pull-requests|deployments|actions|workflows): write\s*$/m);
+  assert.match(workflow, /^    environment: production-release-control\s*$/m);
+  assert.match(workflow, /^  RELEASE_MODE: focused-baseline\s*$/m);
+  assert.doesNotMatch(workflow, /inputs:\s*[\s\S]*release[-_ ]mode|github\.event\.inputs|inputs\.release_mode/);
+
+  const mainGuard = workflow.indexOf('- name: Require main ref');
+  const checkout = workflow.indexOf('- name: Checkout current main');
+  const controllerGuard = workflow.indexOf('- name: Reconfirm current main controller');
+  const awsCredentials = workflow.indexOf('- name: Configure release-control AWS credentials');
+  assert.ok(mainGuard >= 0 && checkout > mainGuard && controllerGuard > checkout && awsCredentials > controllerGuard);
+  assert.match(workflow.slice(mainGuard, checkout), /\$\{GITHUB_REF:-\}[^\n]*refs\/heads\/main[\s\S]*?exit 1/);
+  assert.match(workflow.slice(controllerGuard, awsCredentials), /git fetch --no-tags origin main/);
+  assert.match(workflow.slice(controllerGuard, awsCredentials), /git rev-parse origin\/main/);
+  assert.match(workflow.slice(controllerGuard, awsCredentials), /git rev-parse HEAD/);
+  assert.match(workflow.slice(controllerGuard, awsCredentials), /WORKFLOW_SHA[^\n]*current_main|current_main[^\n]*WORKFLOW_SHA/);
+});
+
+test('focused checkout gate workflow uses only release-control OIDC and focused gate commands', () => {
+  const workflow = focusedCheckoutGateWorkflowSource();
+  assert.match(workflow, /uses: actions\/checkout@[0-9a-f]{40}/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /uses: aws-actions\/configure-aws-credentials@[0-9a-f]{40}/);
+  assert.match(workflow, /role-to-assume: \$\{\{ vars\.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME \}\}/);
+  assert.doesNotMatch(workflow, /secrets\.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|mosaic-admin/);
+
+  assert.match(workflow, /manage-checkout-gate\.js enable\s*\\\s*\r?\n\s*--release-mode focused-baseline\s*\\\s*\r?\n\s*--confirm ENABLE_CHECKOUT_GATE/);
+  assert.match(workflow, /manage-checkout-gate\.js verify\s*\\\s*\r?\n\s*--release-mode focused-baseline\s*\\\s*\r?\n\s*--expected-state active/);
+  assert.match(workflow, /RELEASE_MODE=focused-baseline bash scripts\/release\/verify-checkout-gate\.sh\s*\\\s*\r?\n\s*--release-mode focused-baseline/);
+  assert.match(workflow, /https?:\/\/api\.mosaicbizhub\.com/);
+  assert.match(workflow, /\/api\/orders\/initiate/);
+  assert.match(workflow, /\/api\/payments\/create-payment-intent/);
+  assert.match(workflow, /expectedStatus": 503/);
+});
+
+test('focused checkout gate workflow leaves gate active, uploads evidence, and excludes reset or deploy', () => {
+  const workflow = focusedCheckoutGateWorkflowSource();
+  assert.match(workflow, /Reassert active checkout gate after verification failure/);
+  assert.match(workflow, /steps\.enable\.outputs\.attempted == 'true'/);
+  assert.match(workflow, /gate-failure-safe-active\.json/);
+  assert.match(workflow, /checkoutGateFinalState: 'active'/);
+  assert.match(workflow, /uses: actions\/upload-artifact@[0-9a-f]{40}/);
+  assert.match(workflow, /focused-checkout-gate-summary\.json/);
+  assert.match(workflow, /retention-days: 14/);
+
+  assert.doesNotMatch(workflow, /DISABLE_CHECKOUT_GATE|manage-checkout-gate\.js disable|--expected-state inactive|ungate/i);
+  assert.doesNotMatch(workflow, /reset-prelaunch-test-liabilities|RESET_PRELAUNCH_TEST_LIABILITIES|--apply|CHECKOUT_INITIATION_GATED/);
+  assert.doesNotMatch(workflow, /deploy-eb-exact-sha|UpdateEnvironment|create-application-version|elasticbeanstalk.*update|aws ssm send-command|AWS-RunShellScript/i);
+  assert.doesNotMatch(workflow, /\b(?:mongo|mongosh|stripe|paymentIntents\.cancel|releaseInventoryReservation|sendEmail)\b/i);
 });
 
 test('isolated production-preflight proof is manual, single-job, and read-only at GitHub', () => {
