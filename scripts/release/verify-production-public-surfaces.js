@@ -169,10 +169,12 @@ async function verifyProductionPublicSurfaces({
     });
     checkoutStatus = checkoutResponse.status;
     const expectedCheckoutStatuses = releaseMode === 'focused-baseline'
-      ? (mode === 'deployed' ? [503] : [401])
+      ? (mode === 'ungated' ? [401] : [503])
       : (mode === 'preflight' ? [400, 401, 403, 422, 503] : [400, 401, 403, 422]);
     if (!expectedCheckoutStatuses.includes(checkoutStatus)) {
-      throw new Error(`Checkout is not in normal application state (HTTP ${checkoutStatus})`);
+      throw new Error(releaseMode === 'focused-baseline'
+        ? `Focused checkout gate is not in expected ${mode} state (HTTP ${checkoutStatus})`
+        : `Checkout is not in normal application state (HTTP ${checkoutStatus})`);
     }
   }
 
@@ -184,11 +186,11 @@ async function verifyProductionPublicSurfaces({
   });
   legacyPaymentStatus = legacyResponse.status;
   const expectedLegacyStatuses = releaseMode === 'focused-baseline'
-    ? (mode === 'deployed' ? [503] : [401])
+    ? (mode === 'ungated' ? [401] : [503])
     : [404, 405];
   if (!expectedLegacyStatuses.includes(legacyPaymentStatus)) {
     throw new Error(releaseMode === 'focused-baseline'
-      ? `Approved baseline legacy payment route is not in its expected ${mode} state (HTTP ${legacyPaymentStatus})`
+      ? `Focused legacy payment checkout gate is not in expected ${mode} state (HTTP ${legacyPaymentStatus})`
       : `Legacy payment-intent route is still reachable (HTTP ${legacyPaymentStatus})`);
   }
   if (mode === 'preflight' && releaseMode !== 'focused-baseline') {

@@ -502,7 +502,7 @@ function focusedPublicFetch(observedSha, canonicalStatus, legacyStatus) {
 test('focused-baseline public proof distinguishes preflight, gated deployment, and ungated routes', async () => {
   const releaseSha = 'a'.repeat(40);
   const cases = [
-    ['preflight', APPROVED_BASELINE_SHA, 401, 401],
+    ['preflight', APPROVED_BASELINE_SHA, 503, 503],
     ['deployed', releaseSha, 503, 503],
     ['ungated', releaseSha, 401, 401],
   ];
@@ -514,6 +514,9 @@ test('focused-baseline public proof distinguishes preflight, gated deployment, a
       expectedSha: releaseSha,
       fetchImpl: focusedPublicFetch(observedSha, canonicalStatus, legacyStatus),
     });
+    assert.equal(result.observedSha, observedSha);
+    assert.equal(result.checkoutStatus, canonicalStatus);
+    assert.equal(result.checkoutGateObserved, mode !== 'ungated');
     assert.equal(result.legacyPaymentStatus, legacyStatus);
     assert.equal(result.legacyPaymentSurface, 'active-authenticated-baseline');
     assert.equal(result.legacyPaymentCutover, null);
@@ -534,10 +537,77 @@ test('focused-baseline public proof distinguishes preflight, gated deployment, a
       releaseMode: 'focused-baseline',
       baseUrl: 'https://api.example.test',
       expectedSha: releaseSha,
-      fetchImpl: focusedPublicFetch(APPROVED_BASELINE_SHA, 401, 404),
+      fetchImpl: focusedPublicFetch(APPROVED_BASELINE_SHA, 503, 404),
     }),
     /expected preflight state/
   );
+  for (const mode of ['preflight', 'deployed']) {
+    const observedSha = mode === 'preflight' ? APPROVED_BASELINE_SHA : releaseSha;
+    for (const [canonicalStatus, legacyStatus] of [[401, 503], [503, 401]]) {
+      await assert.rejects(
+        verifyProductionPublicSurfaces({
+          mode,
+          releaseMode: 'focused-baseline',
+          baseUrl: 'https://api.example.test',
+          expectedSha: releaseSha,
+          fetchImpl: focusedPublicFetch(observedSha, canonicalStatus, legacyStatus),
+        }),
+        new RegExp(`Focused .*checkout gate is not in expected ${mode} state \\(HTTP 401\\)`)
+      );
+    }
+  }
+  for (const [canonicalStatus, legacyStatus] of [[503, 401], [401, 503]]) {
+    await assert.rejects(
+      verifyProductionPublicSurfaces({
+        mode: 'ungated',
+        releaseMode: 'focused-baseline',
+        baseUrl: 'https://api.example.test',
+        expectedSha: releaseSha,
+        fetchImpl: focusedPublicFetch(releaseSha, canonicalStatus, legacyStatus),
+      }),
+      /expected ungated state/
+    );
+  }
+});
+
+test('normal release and rollback public checkout expectations remain unchanged', async () => {
+  const releaseSha = 'a'.repeat(40);
+  for (const releaseMode of ['release', 'rollback']) {
+    for (const [mode, observedSha, canonicalStatus] of [
+      ['preflight', APPROVED_BASELINE_SHA, 401],
+      ['preflight', APPROVED_BASELINE_SHA, 503],
+      ['deployed', releaseSha, 503],
+      ['ungated', releaseSha, 401],
+    ]) {
+      const result = await verifyProductionPublicSurfaces({
+        mode,
+        releaseMode,
+        baseUrl: 'https://api.example.test',
+        expectedSha: releaseSha,
+        legacyRetirementSha: 'b'.repeat(40),
+        legacyReconciliationSha256: 'c'.repeat(64),
+        fetchImpl: focusedPublicFetch(observedSha, canonicalStatus, 404),
+      });
+      assert.equal(result.checkoutStatus, mode === 'deployed' ? null : canonicalStatus);
+      assert.equal(result.legacyPaymentStatus, 404);
+    }
+    await assert.rejects(
+      verifyProductionPublicSurfaces({
+        mode: 'ungated', releaseMode,
+        baseUrl: 'https://api.example.test', expectedSha: releaseSha,
+        fetchImpl: focusedPublicFetch(releaseSha, 503, 404),
+      }),
+      /Checkout is not in normal application state/
+    );
+    await assert.rejects(
+      verifyProductionPublicSurfaces({
+        mode: 'deployed', releaseMode,
+        baseUrl: 'https://api.example.test', expectedSha: releaseSha,
+        fetchImpl: focusedPublicFetch(releaseSha, 503, 503),
+      }),
+      /Legacy payment-intent route is still reachable/
+    );
+  }
 });
 
 test('focused-baseline CLI does not require retirement attestation; normal preflight still does', () => {
