@@ -863,7 +863,43 @@ test('focused evidence keeps certification separate from deployment and rejects 
   assert.equal(evidence.preApproval.productionApprovalEntered, false);
   assert.equal(evidence.deployment.attempted, false);
   assert.equal(evidence.focusedBaseline.externalGates.paymentLiability, 'not-proven');
-  assert.equal(evidence.focusedBaseline.externalGates.protectedRefNoBypass, 'not-proven');
+  assert.equal(evidence.focusedBaseline.externalGates.protectedRefNoBypass, 'proven');
+
+  writeEvidenceFile(directory, 'aws-approved-preflight.json', { status: 'passed', releaseSha: shaA });
+  writeEvidenceFile(directory, 'gate-enabled.json', { status: 'passed', gateState: 'active' });
+  writeEvidenceFile(directory, 'drain-approved.json', { approved: true, drainSeconds: 331 });
+  for (const name of ['reservations-before.json', 'reservations-after.json']) {
+    writeEvidenceFile(directory, name, {
+      status: 'passed', mode: 'require-zero', readOnly: true,
+      activeReservationCount: 0, incompletePaidOrderCount: 0, unresolvedPaymentIntentCount: 0,
+    });
+  }
+  writeEvidenceFile(directory, 'eb-deployment.json', {
+    status: 'passed', releaseSha: shaA, versionLabel: `mosaic-${shaA}`,
+    packageSha256: '4'.repeat(64), deploymentAttempted: true, deploymentVerified: true,
+    sourceTree: '5'.repeat(40), packageSource: 'exact-git-tree', applicationVersion: 'created',
+  });
+  writeEvidenceFile(directory, 'aws-deployed.json', {
+    status: 'passed', releaseSha: shaA, expectedVersion: `mosaic-${shaA}`,
+    currentVersion: `mosaic-${shaA}`,
+  });
+  writeEvidenceFile(directory, 'public-deployed.json', {
+    status: 'passed', expectedSha: shaA, observedSha: shaA,
+  });
+  writeEvidenceFile(directory, 'gate-final.json', { status: 'passed', gateState: 'active' });
+  evidence = buildProductionEvidence({
+    directory, releaseSha: shaA, releaseMode: 'focused-baseline', jobStatus: 'success',
+  });
+  assert.equal(evidence.status, 'success');
+  assert.equal(evidence.failingPhase, null);
+  assert.equal(evidence.focusedBaseline.productionApproval, 'entered');
+  assert.equal(evidence.focusedBaseline.deployment, 'verified');
+  assert.equal(evidence.focusedBaseline.externalGates.liveDualRouteGate, 'proven');
+  assert.equal(evidence.focusedBaseline.externalGates.paymentLiability, 'proven');
+  assert.equal(evidence.gate.finalState, 'active');
+  assert.equal(evidence.gate.removal, 'focused-gate-remained-active');
+  assert.equal(evidence.gate.normalCheckoutRestored, false);
+
   writeEvidenceFile(directory, 'workflow-results.json', {
     schemaVersion: 1, releaseMode: 'focused-baseline',
     jobs: {
@@ -880,14 +916,14 @@ test('focused evidence keeps certification separate from deployment and rejects 
   assert.equal(evidence.tests.unit, 'failure');
 });
 
-test('focused deploy exits before any AWS or packaging operation', () => {
-  const script = `RELEASE_MODE=focused-baseline FOCUSED_BASELINE_SHA=${FOCUSED_BASELINE_SHA} FOCUSED_RELEASE_REF=refs/heads/release/focused/booking-filter AWS_CLI=this-command-must-never-be-called bash scripts/release/deploy-eb-exact-sha.sh ${shaA}`;
+test('focused deploy validates approved baseline and protected ref before AWS access', () => {
+  const script = `RELEASE_MODE=focused-baseline FOCUSED_BASELINE_SHA=${shaB} FOCUSED_RELEASE_REF=refs/heads/release/focused/booking-filter AWS_CLI=this-command-must-never-be-called bash scripts/release/deploy-eb-exact-sha.sh ${shaA}`;
   const result = spawnSync('bash', ['-c', script], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /Focused production mutation is disabled/);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Focused target is not bound to the approved production baseline and protected ref/);
   assert.doesNotMatch(result.stderr, /this-command-must-never-be-called/);
 });
 
@@ -998,7 +1034,7 @@ test('production workflow is automatic-preflight then one approved serialized re
   assert.doesNotMatch(workflow, /gh pr merge|enable-auto-merge|pull_request_target/);
 });
 
-test('focused workflow requires exact target CI and source proof but never enters production mutation', () => {
+test('focused workflow requires exact target CI and source proof before protected production release', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   assert.match(workflow, /focused-baseline[\s\S]*baseline_sha:[\s\S]*release_ref:[\s\S]*source_pr:/);
   assert.match(workflow, /exact-ci:[\s\S]*ref: \$\{\{ needs\.resolve-release\.outputs\.release_sha \}\}[\s\S]*run: npm ci[\s\S]*run: npm test[\s\S]*run: npm run test:contract[\s\S]*run: npm run test:integration/);

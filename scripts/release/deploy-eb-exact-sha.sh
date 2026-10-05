@@ -15,17 +15,12 @@ if [[ ! "$RELEASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
   exit 2
 fi
 if [ "$RELEASE_MODE_VALUE" = "focused-baseline" ]; then
-  # Declare the exact target contract now, but never package or mutate AWS in
-  # Wave 1. Later work must add protected-branch, OIDC, live dual-route gate,
-  # and payment-liability proofs before this fail-closed stop can be removed.
   if [ "${FOCUSED_BASELINE_SHA:-}" != "$APPROVED_FOCUSED_BASELINE_SHA" ] \
     || [[ ! "${FOCUSED_RELEASE_REF:-}" =~ ^refs/heads/release/focused/[a-z0-9]+(-[a-z0-9]+)*$ ]] \
     || [ "$RELEASE_SHA" = "$APPROVED_FOCUSED_BASELINE_SHA" ]; then
     echo "Focused target is not bound to the approved production baseline and protected ref" >&2
     exit 2
   fi
-  echo "Focused production mutation is disabled until external release gates are complete" >&2
-  exit 1
 fi
 if [ "$RELEASE_MODE_VALUE" = "focused-rollback" ]; then
   if [ "$RELEASE_SHA" != "$APPROVED_FOCUSED_BASELINE_SHA" ] \
@@ -36,8 +31,8 @@ if [ "$RELEASE_MODE_VALUE" = "focused-rollback" ]; then
   echo "Focused rollback mutation is disabled until external release gates are complete" >&2
   exit 1
 fi
-if [ "$RELEASE_MODE_VALUE" != "release" ] && [ "$RELEASE_MODE_VALUE" != "rollback" ]; then
-  echo "RELEASE_MODE must be release or rollback" >&2
+if [ "$RELEASE_MODE_VALUE" != "release" ] && [ "$RELEASE_MODE_VALUE" != "rollback" ] && [ "$RELEASE_MODE_VALUE" != "focused-baseline" ]; then
+  echo "RELEASE_MODE must be release, rollback, or focused-baseline" >&2
   exit 2
 fi
 for name in AWS_REGION_VALUE EB_APPLICATION_VALUE EB_ENVIRONMENT_VALUE; do
@@ -166,7 +161,7 @@ object_key=""
 package_sha=""
 package_checksum_b64=""
 
-if [ "$existing_version" = "0" ] || [ "$RELEASE_MODE_VALUE" = "release" ]; then
+if [ "$existing_version" = "0" ] || [ "$RELEASE_MODE_VALUE" = "release" ] || [ "$RELEASE_MODE_VALUE" = "focused-baseline" ]; then
   build_exact_tree_package
   validate_embedded_manifest "$package_path"
   package_sha=$(sha256_file "$package_path")
@@ -207,7 +202,7 @@ else
     echo "Existing application version source bundle is unavailable or outside the controlled bucket" >&2
     exit 1
   fi
-  if [ "$RELEASE_MODE_VALUE" = "release" ]; then
+  if [ "$RELEASE_MODE_VALUE" = "release" ] || [ "$RELEASE_MODE_VALUE" = "focused-baseline" ]; then
     expected_key="mosaic-releases/$RELEASE_SHA/$package_sha.zip"
     if [ "$object_key" != "$expected_key" ]; then
       echo "Existing application version does not reference this exact deterministic package" >&2

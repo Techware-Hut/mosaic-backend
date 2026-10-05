@@ -389,7 +389,7 @@ jobs:
         run: |
           {
             if [ "${{ needs.resolve-release.outputs.release_mode }}" = "focused-baseline" ]; then
-              echo "## FOCUSED PREFLIGHT VERIFIED — PRODUCTION MUTATION BLOCKED"
+              echo "## FOCUSED PREFLIGHT VERIFIED - READY FOR PROTECTED PRODUCTION APPROVAL"
             else
               echo "## READY FOR PRODUCTION APPROVAL"
             fi
@@ -399,9 +399,9 @@ jobs:
             echo "- Fresh exact-target checkout route proof: success"
             echo "- Required exact source certificate: verified (release/focused); rollback alone may skip"
             echo "- Public probes and read-only AWS topology: success"
-            echo "- Production mutation: NO"
+            echo "- Production mutation: requires protected production-release-control approval"
             if [ "${{ needs.resolve-release.outputs.release_mode }}" = "focused-baseline" ]; then
-              echo "- Focused deploy remains disabled pending GitHub Environment, AWS OIDC, live dual-route gate, and payment-liability proof"
+              echo "- Focused deployment path requires the checkout gate to remain active and release blockers to stay zero"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -410,8 +410,7 @@ jobs:
     needs:
       - resolve-release
       - release-readiness
-    # Wave 1 explicitly keeps focused production approval and all AWS mutation unreachable.
-    if: ${{ !cancelled() && needs.resolve-release.result == 'success' && needs.release-readiness.result == 'success' && needs.resolve-release.outputs.release_mode != 'focused-baseline' }}
+    if: ${{ !cancelled() && needs.resolve-release.result == 'success' && needs.release-readiness.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     environment:
@@ -425,6 +424,9 @@ jobs:
     env:
       RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
       RELEASE_MODE: ${{ needs.resolve-release.outputs.release_mode }}
+      FOCUSED_BASELINE_SHA: ${{ needs.resolve-release.outputs.baseline_sha }}
+      FOCUSED_RELEASE_REF: ${{ needs.resolve-release.outputs.release_ref }}
+      FOCUSED_SOURCE_PR: ${{ needs.resolve-release.outputs.source_pr }}
       CHECKOUT_GATE_LOAD_BALANCER_ARN: ${{ vars.CHECKOUT_GATE_LOAD_BALANCER_ARN }}
       CHECKOUT_GATE_HTTP_RULE_ARN: ${{ vars.CHECKOUT_GATE_HTTP_RULE_ARN }}
       CHECKOUT_GATE_HTTPS_RULE_ARN: ${{ vars.CHECKOUT_GATE_HTTPS_RULE_ARN }}
@@ -469,6 +471,26 @@ jobs:
             echo "::error::Break-glass rollback target is not reachable from current main."
             exit 1
           fi
+          if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            if [ "$FOCUSED_BASELINE_SHA" != "9bc75c257a9f483a287f122dbd38514b7a4b55d4" ]; then
+              echo "::error::Focused baseline is not the approved deployed production baseline."
+              exit 1
+            fi
+            if [[ ! "$FOCUSED_RELEASE_REF" =~ ^refs/heads/release/focused/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              echo "::error::Focused release ref is not a protected focused release branch."
+              exit 1
+            fi
+            git fetch --no-tags origin "+$FOCUSED_RELEASE_REF:$FOCUSED_RELEASE_REF"
+            focused_tip=$(git rev-parse "$FOCUSED_RELEASE_REF")
+            if [ "$focused_tip" != "$RELEASE_SHA" ]; then
+              echo "::error::Focused release ref no longer points to the approved release SHA."
+              exit 1
+            fi
+            if [ "$RELEASE_SHA" = "$FOCUSED_BASELINE_SHA" ] || [ "$RELEASE_SHA" = "$current_main" ]; then
+              echo "::error::Focused release target must be distinct from the baseline and controller main."
+              exit 1
+            fi
+          fi
 
       - name: Configure production AWS credentials
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
@@ -479,10 +501,17 @@ jobs:
 
       - name: Revalidate topology before mutation
         run: |
-          node scripts/release/aws-release-topology.js preflight \
-            --release-sha "$RELEASE_SHA" \
-            --mixed-version-safe false \
-            --output release-evidence/aws-approved-preflight.json
+          if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            node scripts/release/run-focused-baseline-preflight.js \
+              --mode focused-baseline \
+              --release-sha "$RELEASE_SHA" \
+              --output release-evidence/aws-approved-preflight.json
+          else
+            node scripts/release/aws-release-topology.js preflight \
+              --release-sha "$RELEASE_SHA" \
+              --mixed-version-safe false \
+              --output release-evidence/aws-approved-preflight.json
+          fi
 
       - name: Enable exact checkout gate
         id: gate
@@ -494,12 +523,22 @@ jobs:
           test "$(git rev-parse HEAD)" = "$current_main"
           if [ "$RELEASE_MODE" = "release" ]; then
             test "$current_main" = "$RELEASE_SHA"
+          elif [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            test "$FOCUSED_BASELINE_SHA" = "9bc75c257a9f483a287f122dbd38514b7a4b55d4"
+            test "$RELEASE_SHA" != "$current_main"
           else
             git merge-base --is-ancestor "$RELEASE_SHA" "$current_main"
           fi
-          echo "attempted=true" >> "$GITHUB_OUTPUT"
           mkdir -p release-evidence
-          node - <<'NODE'
+          if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            echo "attempted=false" >> "$GITHUB_OUTPUT"
+            node scripts/release/manage-checkout-gate.js verify \
+              --release-mode focused-baseline \
+              --expected-state active \
+              --output release-evidence/gate-enabled.json
+          else
+            echo "attempted=true" >> "$GITHUB_OUTPUT"
+            node - <<'NODE'
           const fs = require('node:fs');
           fs.writeFileSync('release-evidence/gate-attempt.json', `${JSON.stringify({
             schemaVersion: 1,
@@ -509,14 +548,16 @@ jobs:
             attemptedAt: new Date().toISOString(),
           }, null, 2)}\n`, { mode: 0o600 });
           NODE
-          node scripts/release/manage-checkout-gate.js enable \
-            --confirm ENABLE_CHECKOUT_GATE \
-            --output release-evidence/gate-enabled.json
+            node scripts/release/manage-checkout-gate.js enable \
+              --confirm ENABLE_CHECKOUT_GATE \
+              --output release-evidence/gate-enabled.json
+          fi
           echo "active=true" >> "$GITHUB_OUTPUT"
 
       - name: Verify checkout gate on HTTPS and HTTP
         run: |
           bash scripts/release/verify-checkout-gate.sh \
+            --release-mode "$RELEASE_MODE" \
             "$PRODUCTION_API_URL" \
             "http://api.mosaicbizhub.com"
 
@@ -527,10 +568,11 @@ jobs:
             --output release-evidence/drain-approved.json
           sleep "$CHECKOUT_DRAIN_SECONDS"
           bash scripts/release/verify-checkout-gate.sh \
+            --release-mode "$RELEASE_MODE" \
             "$PRODUCTION_API_URL" \
             "http://api.mosaicbizhub.com"
 
-      - name: Require zero active reservations before deploy
+      - name: Require zero release blockers before deploy
         run: |
           node scripts/release/run-ssm-reservation-check.js --require-zero \
             --output release-evidence/reservations-before.json
@@ -545,18 +587,22 @@ jobs:
       - name: Re-prove gate immediately before EB mutation
         run: |
           node scripts/release/manage-checkout-gate.js verify \
+            --release-mode "$RELEASE_MODE" \
             --expected-state active \
             --output release-evidence/gate-before-deploy.json
           bash scripts/release/verify-checkout-gate.sh \
+            --release-mode "$RELEASE_MODE" \
             "$PRODUCTION_API_URL" \
             "http://api.mosaicbizhub.com"
 
       - name: Deploy immutable exact SHA to Elastic Beanstalk
         run: |
           node scripts/release/manage-checkout-gate.js verify \
+            --release-mode "$RELEASE_MODE" \
             --expected-state active \
             --output release-evidence/gate-at-deploy-command.json
           bash scripts/release/verify-checkout-gate.sh \
+            --release-mode "$RELEASE_MODE" \
             "$PRODUCTION_API_URL" \
             "http://api.mosaicbizhub.com"
           bash scripts/release/deploy-eb-exact-sha.sh \
@@ -581,6 +627,7 @@ jobs:
             --expected-sha "$RELEASE_SHA" \
             --output release-evidence/public-deployed.json
           bash scripts/release/verify-checkout-gate.sh \
+            --release-mode "$RELEASE_MODE" \
             "$PRODUCTION_API_URL" \
             "http://api.mosaicbizhub.com"
 
@@ -591,7 +638,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           output-credentials: false
 
-      - name: Require zero active reservations after deploy
+      - name: Require zero release blockers after deploy
         run: |
           node scripts/release/run-ssm-reservation-check.js --require-zero \
             --output release-evidence/reservations-after.json
@@ -605,6 +652,7 @@ jobs:
 
       - name: Disable exact checkout gate
         id: ungate
+        if: ${{ needs.resolve-release.outputs.release_mode != 'focused-baseline' }}
         run: |
           node scripts/release/manage-checkout-gate.js disable \
             --confirm DISABLE_CHECKOUT_GATE \
@@ -613,6 +661,7 @@ jobs:
 
       - name: Prove normal checkout and exact production health
         id: final-open
+        if: ${{ needs.resolve-release.outputs.release_mode != 'focused-baseline' }}
         run: |
           node scripts/release/verify-production-public-surfaces.js \
             --mode ungated \
@@ -626,6 +675,21 @@ jobs:
             --expected-state inactive \
             --output release-evidence/gate-final.json
           echo "safe_open=true" >> "$GITHUB_OUTPUT"
+
+
+      - name: Confirm focused checkout gate remains active
+        id: focused-final-gate
+        if: ${{ needs.resolve-release.outputs.release_mode == 'focused-baseline' }}
+        run: |
+          node scripts/release/manage-checkout-gate.js verify \
+            --release-mode focused-baseline \
+            --expected-state active \
+            --output release-evidence/gate-final.json
+          RELEASE_MODE=focused-baseline bash scripts/release/verify-checkout-gate.sh \
+            --release-mode focused-baseline \
+            "$PRODUCTION_API_URL" \
+            "http://api.mosaicbizhub.com"
+          echo "safe_gated=true" >> "$GITHUB_OUTPUT"
 
       - name: Refresh AWS credentials for fail-safe gate control
         if: ${{ always() && steps.gate.outputs.attempted == 'true' && steps.final-open.outputs.safe_open != 'true' }}
@@ -732,9 +796,7 @@ jobs:
             jobs,
           }, null, 2)}\n`, { mode: 0o600 });
           NODE
-          if [ "$RELEASE_MODE" = "focused-baseline" ] && [ "$READINESS_RESULT" = "success" ]; then
-            job_status=success
-          elif [ "$RELEASE_JOB_RESULT" = "success" ]; then
+          if [ "$RELEASE_JOB_RESULT" = "success" ]; then
             job_status=success
           elif [ "$RELEASE_JOB_RESULT" = "cancelled" ]; then
             job_status=cancelled

@@ -1402,7 +1402,7 @@ test('successful focused validation emits no predicate and health AccessDenied w
   assert.equal(fatalHealth.writes.some(({ value }) => value.status === 'passed'), false);
 });
 
-test('production workflow limits the health adapter to focused AWS preflight and preserves production mutation block', () => {
+test('production workflow uses focused AWS adapter only for focused-baseline and keeps normal release strict', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../.github/workflows/deploy-eb-production.yml'), 'utf8');
   const preflight = source.slice(source.indexOf('  aws-preflight:'), source.indexOf('  release-readiness:'));
   const release = source.slice(source.indexOf('  production-approval-and-release:'));
@@ -1410,10 +1410,11 @@ test('production workflow limits the health adapter to focused AWS preflight and
   assert.ok(preflight.includes('aws-release-topology.js preflight'));
   assert.match(preflight, /RELEASE_MODE:\s*\$\{\{\s*needs\.resolve-release\.outputs\.release_mode\s*\}\}/);
   assert.match(preflight, /\$RELEASE_MODE[^\n]*focused-baseline|focused-baseline[^\n]*\$RELEASE_MODE/);
-  assert.match(release, /needs\.resolve-release\.outputs\.release_mode != 'focused-baseline'/);
+  assert.match(release, /if: \${\{ !cancelled\(\) && needs\.resolve-release\.result == 'success' && needs\.release-readiness\.result == 'success' \}\}/);
+  assert.match(release, /run-focused-baseline-preflight\.js/);
   assert.match(release, /aws-release-topology\.js preflight/);
   assert.match(release, /aws-release-topology\.js verify/);
-  assert.doesNotMatch(release, /run-focused-baseline-preflight\.js/);
+  assert.match(release, /Confirm focused checkout gate remains active/);
   assert.doesNotMatch(preflight, /\b(?:put-role-policy|attach-role-policy|create-bucket|send-command|update-environment)\b/i);
 });
 
