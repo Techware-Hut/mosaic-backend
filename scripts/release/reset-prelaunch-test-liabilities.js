@@ -13,7 +13,7 @@ const CHECKPOINT_ACTION_CODE = 'prelaunch_test_reset_checkpoint_created';
 const FINAL_ACTION_CODE = 'prelaunch_test_liability_retired';
 const APPLY_CONFIRMATION = 'RESET_PRELAUNCH_TEST_LIABILITIES';
 const BUSINESS_REASON = 'prelaunch_test_data_retirement';
-const EXPECTED = Object.freeze({ A1: 5, B: 3, D: 21, G: 34, H: 1, total: 63 });
+const EXPECTED = Object.freeze({ A1: 6, B: 3, D: 21, G: 33, H: 1, total: 63 });
 const REQUIRED_ARCHIVE_INDEXES = Object.freeze([
   Object.freeze({ field: 'archiveEntryId', name: 'archiveEntryId_1' }),
   Object.freeze({ field: 'sourceOrderId', name: 'sourceOrderId_1' }),
