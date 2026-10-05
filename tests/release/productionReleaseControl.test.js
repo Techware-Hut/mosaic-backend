@@ -160,7 +160,7 @@ test('checkout gate verification is ordered before every EB deployment mutation'
   assert.ok(gateIndex > 0);
   assert.ok(gateIndex < deployIndex);
   assert.equal((workflow.match(/beanstalk-deploy@/g) || []).length, 0);
-  assert.match(workflow, /Require zero active reservations before deploy/);
+  assert.match(workflow, /Require zero release blockers before deploy/);
 });
 
 test('gate verifier accepts initiate 503, invalid-signature webhook 400, and healthy surfaces', async () => {

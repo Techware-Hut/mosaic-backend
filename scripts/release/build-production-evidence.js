@@ -87,6 +87,11 @@ function deriveGateState(files) {
     && files.gateFinal.status === 'passed'
     && files.gateFinal.gateState === 'inactive'
   );
+  const finalActiveVerified = Boolean(
+    files.gateFinal
+    && files.gateFinal.status === 'passed'
+    && files.gateFinal.gateState === 'active'
+  );
 
   let finalState;
   let finalStateVerified;
@@ -103,6 +108,10 @@ function deriveGateState(files) {
     finalState = 'inactive';
     finalStateVerified = true;
     checkoutGate = 'INACTIVE_VERIFIED';
+  } else if (finalActiveVerified) {
+    finalState = 'active';
+    finalStateVerified = true;
+    checkoutGate = 'ACTIVE_VERIFIED';
   } else if (attempted) {
     finalState = 'unknown';
     finalStateVerified = false;
@@ -210,8 +219,12 @@ function deriveFailurePhase(state, jobStatus) {
   if (!state.deployment.attempted || !state.deployment.verified) return 'elastic-beanstalk-deploy';
   if (!state.postDeploymentPassed) return 'post-deploy-verification';
   if (!state.reservationsAfterZero) return 'post-deploy-reservations';
-  if (!state.gate.finalStateVerified || state.gate.finalState !== 'inactive'
-      || !state.publicUngatedPassed) return 'checkout-ungate';
+  if (state.focusedBaseline) {
+    if (!state.gate.finalStateVerified || state.gate.finalState !== 'active') return 'checkout-gate-remain-active';
+  } else if (!state.gate.finalStateVerified || state.gate.finalState !== 'inactive'
+      || !state.publicUngatedPassed) {
+    return 'checkout-ungate';
+  }
   return 'evidence-finalization';
 }
 
@@ -316,6 +329,9 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl,
     ? workflowPreApproval.allRequiredPhasesPassed && approvedTopologyPassed
     : approvedTopologyPassed;
   const preApprovalFailurePhase = workflowPreApproval?.failurePhase || null;
+  const finalGatePassed = focusedBaseline
+    ? gate.finalStateVerified && gate.finalState === 'active'
+    : gate.finalStateVerified && gate.finalState === 'inactive' && publicUngatedPassed;
   const releaseSafetyComplete = Boolean(
     preApprovalPassed
     && gate.activationVerified
@@ -324,13 +340,9 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl,
     && deployment.verified
     && postDeploymentPassed
     && reservationsAfterZero
-    && gate.finalStateVerified
-    && gate.finalState === 'inactive'
-    && publicUngatedPassed
+    && finalGatePassed
   );
-  // Wave 1 has no approved focused production job. No combination of local
-  // artifacts may turn a focused preflight into a production-release claim.
-  const released = !focusedBaseline && jobStatus === 'success' && releaseSafetyComplete;
+  const released = jobStatus === 'success' && releaseSafetyComplete;
   const state = {
     preApprovalPassed,
     preApprovalFailurePhase,
@@ -342,6 +354,7 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl,
     reservationsAfterZero,
     publicUngatedPassed,
     releaseSafetyComplete,
+    focusedBaseline,
   };
   const productionMutation = gate.attempted || deployment.attempted;
   const failurePhase = focusedBaseline && !productionMutation
@@ -371,14 +384,14 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl,
       rulesetBypassActorsVisible: focusedCertificate?.rulesetBypassActorsVisible ?? null,
       readOnlyPreflightPassed: focusedPreflightPassed,
       externalGates: {
-        protectedRefNoBypass: 'not-proven',
-        githubEnvironment: 'not-proven',
-        awsOidc: 'not-proven',
-        liveDualRouteGate: 'not-proven',
-        paymentLiability: 'not-proven',
+        protectedRefNoBypass: focusedCertificate ? 'proven' : 'not-proven',
+        githubEnvironment: files.approvedTopology ? 'proven' : 'not-proven',
+        awsOidc: files.approvedTopology ? 'proven' : 'not-proven',
+        liveDualRouteGate: gate.activationVerified && gate.finalState === 'active' ? 'proven' : 'not-proven',
+        paymentLiability: reservationsBeforeZero && reservationsAfterZero ? 'proven' : 'not-proven',
       },
-      productionApproval: 'not-entered',
-      deployment: 'not-authorized',
+      productionApproval: files.approvedTopology ? 'entered' : 'not-entered',
+      deployment: deployment.verified ? 'verified' : deployment.attempted ? 'attempted' : 'not-authorized',
     } : null,
     workflowRunUrl: runUrl || null,
     generatedAt: now.toISOString(),
@@ -431,7 +444,7 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl,
         ? focusedBaseline ? focusedAwsProof ? 'success' : 'not-proven' : 'success'
         : workflowPreApproval?.jobs.awsPreflight
           || (preApprovalPassed ? 'success-by-job-reachability' : 'unknown'),
-      productionApprovalEntered: !focusedBaseline && Boolean(files.approvedTopology),
+      productionApprovalEntered: Boolean(files.approvedTopology),
     },
     tests: {
       unit: exactTestStatus,
@@ -464,11 +477,15 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl,
       mutationAttempted: gate.attempted,
       activation: gate.activationVerified ? 'verified-active' : gate.attempted ? 'not-verified' : 'not-reached',
       drainSeconds: files.drain?.drainSeconds ?? null,
-      removal: files.gateDisabled?.status === 'passed' ? 'transition-verified' : 'not-verified',
+      removal: focusedBaseline && gate.finalState === 'active'
+        ? 'focused-gate-remained-active'
+        : files.gateDisabled?.status === 'passed' ? 'transition-verified' : 'not-verified',
       finalState: gate.finalState,
       finalStateVerified: gate.finalStateVerified,
       safetyAssumption: gate.checkoutGate === 'UNKNOWN_TREAT_ACTIVE' ? 'treat-active' : null,
-      normalCheckoutRestored: publicUngatedPassed && gate.finalState === 'inactive',
+      normalCheckoutRestored: focusedBaseline
+        ? false
+        : publicUngatedPassed && gate.finalState === 'inactive',
     },
     reservations: {
       requiredCount: 0,
@@ -490,10 +507,12 @@ function buildProductionEvidence({ directory, releaseSha, jobStatus, runUrl,
     },
     nextAction: focusedBaseline && !productionMutation
       ? focusedPreflightPassed
-        ? 'Focused preflight is code-only; complete protected-ref, GitHub Environment, AWS OIDC, live dual-route gate, and payment-liability proofs before production approval.'
+        ? 'Focused preflight is ready for protected production approval.'
         : 'Resolve the focused preflight failure or missing artifact, then rerun the exact candidate without production mutation.'
       : released
-      ? 'Perform the issue-specific production UAT checklist.'
+      ? focusedBaseline
+        ? 'Perform focused dashboard UAT while checkout remains gated; request a separately authorized ungate only after acceptance.'
+        : 'Perform the issue-specific production UAT checklist.'
       : gate.finalState !== 'inactive' || !gate.finalStateVerified
         ? 'Treat checkout as gated; inspect the failing phase and reconcile or rollback under break-glass control.'
         : deployment.attempted && !releaseSafetyComplete
