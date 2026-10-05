@@ -52,7 +52,7 @@ function order(classification, n, overrides = {}) {
 
 function fixtureOrders() {
   return [
-    ...Array.from({ length: 5 }, (_, i) => order('A1', i + 1)),
+    ...Array.from({ length: 6 }, (_, i) => order('A1', i + 1)),
     ...Array.from({ length: 3 }, (_, i) => order('B', i + 1)),
     ...Array.from({ length: 21 }, (_, i) => order('D', i + 1, {
       ...(i < 3 ? { status: 'cancelled' } : {}),
@@ -62,7 +62,7 @@ function fixtureOrders() {
         inventoryAdjustmentVersion: 1,
       } : {}),
     })),
-    ...Array.from({ length: 34 }, (_, i) => order('G', i + 1)),
+    ...Array.from({ length: 33 }, (_, i) => order('G', i + 1)),
     order('X', 1, { paymentStatus: 'paid', paidConfirmationEmailSentAt: new Date('2026-01-02T00:00:00Z') }),
   ];
 }
@@ -362,7 +362,7 @@ test('default dry-run classifies exact 63 prelaunch liabilities with zero writes
   const fixture = harness({ collectionExists: false });
   const result = await fixture.run();
   assert.deepEqual(result, {
-    mode: 'dry-run', A1: 5, B: 3, D: 21, G: 34, H: 1, total: 63, applied: 0,
+    mode: 'dry-run', A1: 6, B: 3, D: 21, G: 33, H: 1, total: 63, applied: 0,
   });
   assert.equal(fixture.collectionExists, false);
   assert.equal(fixture.sessionStarted, 0);
@@ -412,7 +412,7 @@ test('A1 refund evidence is anchored to test-mode PaymentIntent and Charge', asy
   assert.equal(Object.prototype.hasOwnProperty.call(
     accepted.stripe.refunds.get('ch_pi_A1_1').data[0], 'livemode'), false);
   assert.deepEqual(await accepted.run(), {
-    mode: 'dry-run', A1: 5, B: 3, D: 21, G: 34, H: 1, total: 63, applied: 0,
+    mode: 'dry-run', A1: 6, B: 3, D: 21, G: 33, H: 1, total: 63, applied: 0,
   });
 
   const liveIntent = harness();
@@ -456,7 +456,7 @@ test('B and D classification follows authoritative Stripe terminal state', async
   assert.equal(fixture.stripe.intents.get('pi_D_1').status, 'requires_payment_method');
   assert.equal(fixture.stripe.intents.get('pi_B_1').status, 'canceled');
   assert.deepEqual(await fixture.run(), {
-    mode: 'dry-run', A1: 5, B: 3, D: 21, G: 34, H: 1, total: 63, applied: 0,
+    mode: 'dry-run', A1: 6, B: 3, D: 21, G: 33, H: 1, total: 63, applied: 0,
   });
 });
 
@@ -514,7 +514,7 @@ test('apply cancels only D intents, restores H once, archives, audits, then dele
   const fixture = harness();
   const result = await fixture.run(APPLY, applyEnv());
   assert.deepEqual(result, {
-    mode: 'apply', A1: 5, B: 3, D: 21, G: 34, H: 1, total: 63, applied: 63,
+    mode: 'apply', A1: 6, B: 3, D: 21, G: 33, H: 1, total: 63, applied: 63,
   });
   assert.equal(fixture.sessionStarted, 2);
   assert.equal(fixture.sessionEnded, 2);
@@ -573,7 +573,7 @@ test('G is truthful archive-only and never fabricates email evidence', async () 
   const fixture = harness();
   await fixture.run(APPLY, applyEnv());
   const gArchives = fixture.archives.filter((entry) => entry.classification === 'G');
-  assert.equal(gArchives.length, 34);
+  assert.equal(gArchives.length, 33);
   for (const archive of gArchives) {
     assert.equal(archive.sourceOrder.paidConfirmationEmailSentAt, null);
     assert.notEqual(archive.sourceOrder.paidOrderEmailDelivery?.customer?.status, 'fabricated');
