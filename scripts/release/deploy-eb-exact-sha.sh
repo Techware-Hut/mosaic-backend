@@ -73,13 +73,10 @@ fi
 # S3 preprocessing caches extensions outside the authorized release prefix.
 # Focused bundles already undergo exact-tree validation that forbids EB hooks;
 # also reject the one remaining EB preprocessing manifest before opting out.
-application_version_process_args=(--process)
-if [ "$RELEASE_MODE_VALUE" = "focused-baseline" ]; then
-  if git cat-file -e "$RELEASE_SHA:env.yaml" 2>/dev/null; then
-    echo "Focused source bundle contains an EB environment manifest requiring preprocessing" >&2
-    exit 1
-  fi
-  application_version_process_args=(--no-process)
+if [ "$RELEASE_MODE_VALUE" = "focused-baseline" ] \
+  && git cat-file -e "$RELEASE_SHA:env.yaml" 2>/dev/null; then
+  echo "Focused source bundle contains an EB environment manifest requiring preprocessing" >&2
+  exit 1
 fi
 
 package_path=$(mktemp --suffix=.zip)
@@ -216,7 +213,7 @@ if [ "$existing_version" = "0" ]; then
     --source-bundle "S3Bucket=$bucket,S3Key=$object_key" \
     --region "$AWS_REGION_VALUE" \
     --no-auto-create-application \
-    "${application_version_process_args[@]}" \
+    --process \
     --output json >/dev/null
   application_version_state="created"
 else
@@ -288,10 +285,6 @@ if [ "$package_source" = "exact-git-tree" ]; then
   fi
 fi
 
-if [ "$RELEASE_MODE_VALUE" = "focused-baseline" ] \
-  && [ "$package_source" = "exact-git-tree" ]; then
-  application_version_args+=(--allow-unprocessed-focused-bundle)
-fi
 node scripts/release/require-eb-application-version.js \
   "${application_version_args[@]}"
 
