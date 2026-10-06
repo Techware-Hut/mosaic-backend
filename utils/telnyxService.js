@@ -131,10 +131,10 @@ async function sendSMS({ to, text, mediaUrls, from, messagingProfileId }) {
 }
 
 /**
- * Sends a one-time passcode (OTP) SMS.
+ * Sends a one-time passcode (OTP) SMS for signup/verification.
  */
 async function sendOtpSMS({ to, otp, appName = 'Mosaic Biz Hub', validMinutes = 10 }) {
-  const text = `Your ${appName} verification code is: ${otp}. Valid for ${validMinutes} minutes. Do not share this code with anyone.`;
+  const text = `${appName}: Your verification code is ${otp}. Enter it to complete your signup. It will expire in ${validMinutes} minutes.`;
   return sendSMS({ to, text });
 }
 
