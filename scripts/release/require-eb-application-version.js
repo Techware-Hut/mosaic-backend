@@ -22,7 +22,13 @@ function parsePositiveInteger(value, name, minimum, maximum) {
 }
 
 function parseConfig(argv, env = process.env) {
-  const options = parseOptions(argv, { booleans: ['--allow-unprocessed-reused'] });
+  const options = parseOptions(argv, {
+    booleans: ['--allow-unprocessed-reused', '--allow-unprocessed-focused-bundle'],
+  });
+  const allowUnprocessedFocusedBundle = options['--allow-unprocessed-focused-bundle'] === true;
+  if (allowUnprocessedFocusedBundle && env.RELEASE_MODE !== 'focused-baseline') {
+    throw new Error('Unprocessed focused bundles require focused-baseline release mode');
+  }
   const applicationName = options['--application-name'] || env.EB_APPLICATION_NAME;
   const versionLabel = options['--version-label'] || env.EB_VERSION_LABEL;
   const region = options['--region'] || env.AWS_REGION;
@@ -50,6 +56,7 @@ function parseConfig(argv, env = process.env) {
       60
     ),
     allowUnprocessedReused: options['--allow-unprocessed-reused'] === true,
+    allowUnprocessedFocusedBundle,
   };
 }
 
@@ -67,7 +74,13 @@ function readExactVersion(runAws, config) {
   if (version.VersionLabel !== config.versionLabel || typeof version.Status !== 'string') {
     throw new Error('Elastic Beanstalk application-version identity is invalid');
   }
-  return version.Status;
+  // Live EB responses can use uppercase enum values. Normalize only known
+  // states; unknown values remain fatal and FAILED is never accepted.
+  const statuses = {
+    PROCESSED: 'Processed', UNPROCESSED: 'Unprocessed',
+    PROCESSING: 'Processing', BUILDING: 'Building', FAILED: 'Failed',
+  };
+  return statuses[version.Status.toUpperCase()] || version.Status;
 }
 
 async function requireProcessedVersion(config, dependencies = {}) {
@@ -89,14 +102,17 @@ async function requireProcessedVersion(config, dependencies = {}) {
         applicationVersionStatus: status,
       };
     }
-    if (status === 'Unprocessed' && config.allowUnprocessedReused === true) {
+    if (status === 'Unprocessed' && (
+      config.allowUnprocessedReused === true || config.allowUnprocessedFocusedBundle === true
+    )) {
       return {
         schemaVersion: 1,
         status: 'passed',
         checkedAt: nowIso(clock),
         versionLabel: config.versionLabel,
         applicationVersionStatus: status,
-        historicalRollbackCompatibility: true,
+        ...(config.allowUnprocessedReused === true ? { historicalRollbackCompatibility: true } : {}),
+        ...(config.allowUnprocessedFocusedBundle === true ? { focusedValidatedSourceBundle: true } : {}),
       };
     }
     if (!TRANSITIONAL.has(status)) {

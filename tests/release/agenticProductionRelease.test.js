@@ -39,6 +39,7 @@ const {
 } = require('../../scripts/release/build-production-evidence');
 const {
   requireProcessedVersion,
+  parseConfig: parseApplicationVersionConfig,
 } = require('../../scripts/release/require-eb-application-version');
 const {
   analyzeCheckoutSurface,
@@ -598,10 +599,17 @@ test('pinned release bucket is mandatory and validated before bundle preparation
   fs.writeFileSync(path.join(temporary, 'deploy-fixture.sh'),
     source.slice(0, source.indexOf('\nwrite_deployment_evidence() {')).replaceAll('\r\n', '\n'));
   fs.writeFileSync(path.join(temporary, 'harness.sh'), `
-git() { if [ "$1" = fetch ]; then return 0; fi; command git "$@"; }
+git() {
+  if [ "$1" = fetch ]; then return 0; fi
+  if [ "$FIXTURE_ENV_MANIFEST" = true ] && [[ "$*" == *:env.yaml* ]]; then return 0; fi
+  command git "$@"
+}
 python3() { command ${process.platform === 'win32' ? 'python' : 'python3'} "$@"; }
 node() {
-  if [ "$1" = scripts/release/require-eb-application-version.js ]; then return 0; fi
+  if [ "$1" = scripts/release/require-eb-application-version.js ]; then
+    printf '%s\\n' "$*" >> version-checks.txt
+    return 0
+  fi
   command node "$@"
 }
 fake_aws() {
@@ -613,7 +621,13 @@ fake_aws() {
     'elasticbeanstalk describe-application-versions')
       if [[ "$*" == *length* ]]; then echo "$FIXTURE_EXISTING";
       else echo "$FIXTURE_SOURCE_BUCKET historical-baseline.zip"; fi ;;
-    's3api put-object'|'elasticbeanstalk create-application-version') echo '{}' ;;
+    's3api put-object') echo '{}' ;;
+    'elasticbeanstalk create-application-version')
+      if [ "$FIXTURE_FORBID_EXTENSION_CACHE" = true ] && [[ "$*" == *' --process '* ]]; then
+        echo 'AccessDenied: EB preprocessing requires internal extension-cache PutObject' >&2
+        return 42
+      fi
+      echo '{}' ;;
     's3api head-object')
       if [ "$FIXTURE_BAD_CHECKSUM" = true ]; then echo 'invalid-checksum invalid-release invalid-package';
       else printf '%s %s %s\\n' "$package_checksum_b64" "$RELEASE_SHA" "$package_sha"; fi ;;
@@ -630,17 +644,20 @@ source ./deploy-fixture.sh ${sha}
 `);
   const invoke = (overrides = {}) => {
     fs.writeFileSync(path.join(temporary, 'aws-calls.txt'), '');
+    fs.writeFileSync(path.join(temporary, 'version-checks.txt'), '');
     const fixtureEnv = { AWS_REGION: 'us-east-1', EB_APPLICATION_NAME: 'fixture',
       EB_ENVIRONMENT_NAME: 'fixture', EB_RELEASE_BUCKET: 'fixture-release-bucket',
       AWS_CLI: 'fake_aws', RELEASE_MODE: 'release', FIXTURE_SHA: sha,
       FIXTURE_LOCATION: 'None', FIXTURE_EXISTING: '0', FIXTURE_INACCESSIBLE: 'false',
-      FIXTURE_SOURCE_BUCKET: 'fixture-release-bucket', FIXTURE_BAD_CHECKSUM: 'false', ...overrides };
+      FIXTURE_SOURCE_BUCKET: 'fixture-release-bucket', FIXTURE_BAD_CHECKSUM: 'false',
+      FIXTURE_FORBID_EXTENSION_CACHE: 'false', FIXTURE_ENV_MANIFEST: 'false', ...overrides };
     const assignments = Object.entries(fixtureEnv)
       .map(([key, value]) => `${key}='${value.replaceAll("'", "'\\''")}'`).join(' ');
     const result = spawnSync(bashCommand, ['-c', `${assignments} bash harness.sh`], {
       cwd: temporary, encoding: 'utf8', timeout: 20000,
     });
-    return { ...result, calls: fs.readFileSync(path.join(temporary, 'aws-calls.txt'), 'utf8') };
+    return { ...result, calls: fs.readFileSync(path.join(temporary, 'aws-calls.txt'), 'utf8'),
+      versionChecks: fs.readFileSync(path.join(temporary, 'version-checks.txt'), 'utf8') };
   };
   for (const bucket of ['', 'INVALID_BUCKET']) {
     const result = invoke({ EB_RELEASE_BUCKET: bucket });
@@ -662,15 +679,30 @@ source ./deploy-fixture.sh ${sha}
     assert.match(result.calls, new RegExp(`s3api put-object .*--key mosaic-releases/${sha}/[a-f0-9]{64}\\.zip`));
     assert.match(result.calls, /s3api head-object .*--checksum-mode ENABLED/);
     assert.match(result.calls, /--metadata release-sha=.*package-sha256=/);
+    assert.match(result.calls, /create-application-version .* --process /);
+    assert.doesNotMatch(result.versionChecks, /allow-unprocessed/);
   }
   const focused = invoke({ RELEASE_MODE: 'focused-baseline',
     FOCUSED_BASELINE_SHA: FOCUSED_BASELINE_SHA,
-    FOCUSED_RELEASE_REF: 'refs/heads/release/focused/booking-filter' });
+    FOCUSED_RELEASE_REF: 'refs/heads/release/focused/booking-filter',
+    FIXTURE_FORBID_EXTENSION_CACHE: 'true' });
   assert.equal(focused.status, 0, focused.stderr);
   assert.match(focused.calls, new RegExp(`s3api put-object .*--key mosaic-releases/${sha}/[a-f0-9]{64}\\.zip`));
+  assert.match(focused.calls, /create-application-version .* --no-process /);
+  assert.match(focused.versionChecks, /--allow-unprocessed-focused-bundle/);
+  const processingFailure = invoke({ FIXTURE_FORBID_EXTENSION_CACHE: 'true' });
+  assert.equal(processingFailure.status, 42);
+  assert.match(processingFailure.stderr, /EB preprocessing requires internal extension-cache PutObject/);
+  const manifestBlocked = invoke({ RELEASE_MODE: 'focused-baseline',
+    FOCUSED_BASELINE_SHA, FOCUSED_RELEASE_REF: 'refs/heads/release/focused/booking-filter',
+    FIXTURE_ENV_MANIFEST: 'true' });
+  assert.equal(manifestBlocked.status, 1);
+  assert.match(manifestBlocked.stderr, /environment manifest requiring preprocessing/);
+  assert.equal(manifestBlocked.calls, '');
   const badChecksum = invoke({ FIXTURE_BAD_CHECKSUM: 'true' });
   assert.equal(badChecksum.status, 1);
   assert.match(badChecksum.stderr, /Stored deployment package checksum or identity metadata does not match/);
+  assert.equal(badChecksum.versionChecks, '');
   const wrongBucket = invoke({ RELEASE_MODE: 'rollback', FIXTURE_EXISTING: '1',
     EB_RELEASE_BUCKET: 'wrong-release-bucket' });
   assert.equal(wrongBucket.status, 1);
@@ -685,6 +717,8 @@ source ./deploy-fixture.sh ${sha}
   assert.equal(rollback.status, 0, rollback.stderr);
   assert.match(rollback.calls, /s3api get-object .*--key historical-baseline.zip/);
   assert.doesNotMatch(rollback.calls, /put-object|create-application-version/);
+  assert.match(rollback.versionChecks, /--allow-unprocessed-reused/);
+  assert.doesNotMatch(rollback.versionChecks, /--allow-unprocessed-focused-bundle/);
 });
 
 test('release storage contract removes creation and exposes a required Environment bucket', () => {
@@ -774,6 +808,36 @@ test('EB application version must transition to Processed and reused Failed vers
   assert.equal(historical.historicalRollbackCompatibility, true);
   const deploySource = fs.readFileSync(deployScriptPath, 'utf8');
   assert.match(deploySource, /historical-eb-source-bundle[\s\S]*--allow-unprocessed-reused/);
+});
+
+test('focused S3 versions accept UNPROCESSED only with explicit opt-in and reject FAILED', async () => {
+  const config = { applicationName: 'fixture', versionLabel: `mosaic-${shaA}`,
+    region: 'us-east-1', timeoutSeconds: 10, pollSeconds: 1 };
+  const response = (Status) => () => ({ ApplicationVersions: [{ VersionLabel: config.versionLabel, Status }] });
+  for (const Status of ['UNPROCESSED', 'Unprocessed']) {
+    await assert.rejects(requireProcessedVersion(config, { runAws: response(Status) }), /not deployable \(Unprocessed\)/);
+    const result = await requireProcessedVersion({ ...config, allowUnprocessedFocusedBundle: true }, {
+      runAws: response(Status),
+    });
+    assert.equal(result.focusedValidatedSourceBundle, true);
+    assert.equal(result.historicalRollbackCompatibility, undefined);
+  }
+  for (const Status of ['FAILED', 'Failed', 'unknown']) {
+    await assert.rejects(requireProcessedVersion({ ...config, allowUnprocessedFocusedBundle: true }, {
+      runAws: response(Status),
+    }), /not deployable/);
+  }
+  let reads = 0;
+  const result = await requireProcessedVersion(config, {
+    runAws: () => ({ ApplicationVersions: [{ VersionLabel: config.versionLabel,
+      Status: ['PROCESSING', 'BUILDING', 'PROCESSED'][reads++] }] }), wait: async () => {},
+  });
+  assert.equal(reads, 3);
+  assert.equal(result.applicationVersionStatus, 'Processed');
+  const args = ['--output', 'fixture.json', '--allow-unprocessed-focused-bundle'];
+  const env = { EB_APPLICATION_NAME: 'fixture', EB_VERSION_LABEL: config.versionLabel, AWS_REGION: config.region };
+  assert.throws(() => parseApplicationVersionConfig(args, env), /require focused-baseline release mode/);
+  assert.equal(parseApplicationVersionConfig(args, { ...env, RELEASE_MODE: 'focused-baseline' }).allowUnprocessedFocusedBundle, true);
 });
 
 test('rollback reuses and hashes the historical EB bundle after validating every member against Git', () => {
