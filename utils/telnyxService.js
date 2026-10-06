@@ -9,7 +9,7 @@ function getTelnyxClient() {
     return null;
   }
   if (!telnyxClient) {
-    telnyxClient = Telnyx(apiKey);
+    telnyxClient = new Telnyx({ apiKey });
   }
   return telnyxClient;
 }
@@ -55,7 +55,7 @@ function normalizePhoneNumber(phone, defaultCountry = 'US') {
  * @param {string[]} [options.mediaUrls] - Optional MMS media URLs
  * @param {string} [options.from] - Sender phone number (defaults to process.env.TELNYX_PHONE_NUMBER)
  * @param {string} [options.messagingProfileId] - Messaging Profile ID (defaults to process.env.TELNYX_MESSAGING_PROFILE_ID)
- * @returns {Promise<{ success: boolean, messageId?: string, status?: string, error?: string }>}
+ * @returns {Promise<{ success: boolean, messageId?: string, status?: string, error?: string, details?: any }>}
  */
 async function sendSMS({ to, text, mediaUrls, from, messagingProfileId }) {
   const normalizedTo = normalizePhoneNumber(to);
@@ -101,10 +101,10 @@ async function sendSMS({ to, text, mediaUrls, from, messagingProfileId }) {
   }
 
   try {
-    const response = await client.messages.create(payload);
+    const response = await client.messages.send(payload);
     const messageData = response?.data;
 
-    console.info('[Telnyx SMS] Message sent successfully:', {
+    console.info('[Telnyx SMS] Message dispatched successfully:', {
       messageId: messageData?.id,
       to: normalizedTo,
       status: messageData?.to?.[0]?.status || 'queued',
@@ -116,16 +116,17 @@ async function sendSMS({ to, text, mediaUrls, from, messagingProfileId }) {
       status: messageData?.to?.[0]?.status || 'queued',
     };
   } catch (error) {
+    const errorDetails = error.errors || error.raw?.errors || error.response?.data?.errors || null;
     console.error('[Telnyx SMS] Failed to send message:', {
       to: normalizedTo,
       error: error.message || error,
-      errors: error.raw?.errors || error.errors,
+      details: errorDetails,
     });
 
     return {
       success: false,
       error: error.message || 'Failed to send SMS via Telnyx',
-      details: error.raw?.errors || error.errors || null,
+      details: errorDetails,
     };
   }
 }
@@ -157,13 +158,6 @@ async function sendBookingNotificationSMS({ to, bookingType, businessName, date,
 
 /**
  * Verifies the incoming Telnyx webhook signature using the public key.
- *
- * @param {Object} options
- * @param {string|Buffer} options.rawBody - Raw request body
- * @param {string} options.signature - 'telnyx-signature-ed25519' header
- * @param {string} options.timestamp - 'telnyx-timestamp' header
- * @param {string} [options.publicKey] - Optional override for process.env.TELNYX_PUBLIC_KEY
- * @returns {Object|null} Parsed event object if valid, null otherwise
  */
 function verifyTelnyxWebhookSignature({ rawBody, signature, timestamp, publicKey }) {
   const key = publicKey || process.env.TELNYX_PUBLIC_KEY;
@@ -171,8 +165,9 @@ function verifyTelnyxWebhookSignature({ rawBody, signature, timestamp, publicKey
     throw new Error('TELNYX_PUBLIC_KEY is not configured');
   }
 
-  const client = getTelnyxClient() || Telnyx('dummy');
-  return client.webhooks.constructEvent(rawBody, signature, timestamp, key);
+  const client = getTelnyxClient() || new Telnyx({ apiKey: 'dummy' });
+  const payloadStr = Buffer.isBuffer(rawBody) ? rawBody.toString('utf8') : (typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody));
+  return client.webhooks.unwrap(payloadStr, { 'telnyx-signature-ed25519': signature, 'telnyx-timestamp': timestamp }, key);
 }
 
 module.exports = {
