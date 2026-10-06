@@ -18,6 +18,10 @@ const {
   recordAdminAuditFailure,
   buildFieldChangeSummary,
 } = require('../../services/adminAuditService');
+const {
+  sendVendorApprovedSMS,
+  sendVendorRejectedSMS,
+} = require('../../utils/telnyxService');
 
 // Admin pending queue contains only applications that have completed vendor
 // submission and are waiting for stage-1 review. Rejected resubmissions re-enter
@@ -1148,6 +1152,14 @@ exports.finalizeVerification = async (req, res) => {
 
       const emailDelivery = await deliverVendorOnboardingEmails(emailJobs);
 
+      // 2A — Send vendor approved SMS (non-blocking)
+      const vendorPhone = application.userId?.mobile;
+      if (vendorPhone) {
+        sendVendorApprovedSMS({ to: vendorPhone, vendorName }).catch((smsErr) =>
+          console.error('[Telnyx SMS] Vendor approved SMS failed:', smsErr.message)
+        );
+      }
+
       await recordAdminAuditSuccess(req, {
         actionCode: ADMIN_AUDIT_ACTIONS.VENDOR_APPLICATION_FINALIZE_APPROVED,
         targetType: ADMIN_AUDIT_TARGET_TYPES.VENDOR_APPLICATION,
@@ -1217,6 +1229,18 @@ exports.finalizeVerification = async (req, res) => {
             }),
           },
         ]);
+      }
+
+      // 2B — Send vendor rejected SMS (non-blocking)
+      const vendorPhoneForReject = application.userId?.mobile;
+      if (vendorPhoneForReject) {
+        sendVendorRejectedSMS({
+          to: vendorPhoneForReject,
+          vendorName,
+          reason: application.rejectionReason || undefined,
+        }).catch((smsErr) =>
+          console.error('[Telnyx SMS] Vendor rejected SMS failed:', smsErr.message)
+        );
       }
 
       const rejectionFingerprint = buildGuidanceFingerprint({

@@ -13,6 +13,13 @@ const {
 const {
   resolveVendorBookingNotificationRecipients,
 } = require('../utils/notificationPreferenceGate');
+const {
+  sendServiceBookingCreatedCustomerSMS,
+  sendServiceBookingAlertVendorSMS,
+  sendServiceBookingApprovedSMS,
+  sendServiceBookingRejectedSMS,
+  sendFoodReservationCreatedSMS,
+} = require('../utils/telnyxService');
 
 const ALLOWED_SEAT_OPTIONS = ['upto 2', 'upto 4', 'upto 8', 'more than 10'];
 
@@ -175,6 +182,17 @@ exports.createServiceBooking = async (req, res) => {
       );
     }
 
+    // 4A — Send customer service booking confirmed SMS (non-blocking)
+    if (phone) {
+      sendServiceBookingCreatedCustomerSMS({
+        to: phone,
+        businessName: business?.businessName || owner?.name || 'the vendor',
+        date: formatBookingDate(date),
+        time: slot,
+        bookingId: newBooking._id.toString().slice(-8),
+      }).catch(() => {});
+    }
+
     res.status(201).json({ success: true, booking: newBooking });
   } catch (error) {
     console.error('Failed to create service booking:', error);
@@ -265,6 +283,18 @@ exports.createFoodBooking = async (req, res) => {
       }
     } catch (mailError) {
       console.error('Failed to send new food booking email to vendor:', mailError?.message || mailError);
+    }
+
+    // 4E — Send customer food reservation SMS (non-blocking)
+    if (phone) {
+      sendFoodReservationCreatedSMS({
+        to: phone,
+        restaurantName: business?.businessName || food.title,
+        numberOfPeople: normalizedSeats,
+        date: formatBookingDate(date),
+        time: slot,
+        bookingId: newBooking._id.toString().slice(-8),
+      }).catch(() => {});
     }
 
     res.status(201).json({ success: true, booking: newBooking });
@@ -359,6 +389,17 @@ exports.approveServiceBooking = async (req, res) => {
       console.error('Failed to send approval email to customer:', mailError);
     }
 
+    // 4C — Send booking approved SMS to customer (non-blocking)
+    if (booking.customerInfo?.phone) {
+      sendServiceBookingApprovedSMS({
+        to: booking.customerInfo.phone,
+        businessName: undefined, // vendor name resolved from email send above
+        serviceName: booking.serviceTitle,
+        date: formatBookingDate(booking.date),
+        time: booking.slot || booking.time,
+      }).catch(() => {});
+    }
+
     res.json({
       success: true,
       message: 'Service booking approved successfully',
@@ -403,6 +444,15 @@ exports.rejectServiceBooking = async (req, res) => {
       });
     } catch (mailError) {
       console.error('Failed to send rejection email to customer:', mailError);
+    }
+
+    // 4D — Send booking rejected SMS to customer (non-blocking)
+    if (booking.customerInfo?.phone) {
+      sendServiceBookingRejectedSMS({
+        to: booking.customerInfo.phone,
+        businessName: undefined,
+        date: formatBookingDate(booking.date),
+      }).catch(() => {});
     }
 
     res.json({

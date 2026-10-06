@@ -9,6 +9,9 @@ const {
   publicPaidOrderEmailDelivery,
   sendOrderPaidConfirmationIfNeeded,
 } = require('../utils/sendOrderPaidConfirmation');
+const { sendVendorTierWelcomeSMS } = require('../utils/telnyxService');
+const User = require('../models/User');
+const SubscriptionPlan = require('../models/SubscriptionPlan');
 
 const toPublicEmailDelivery = (result) =>
   typeof publicPaidOrderEmailDelivery === 'function'
@@ -386,6 +389,29 @@ const handleSubscriptionWebhook = async (req, res) => {
       subscription.status = 'active';
       await subscription.save();
       console.log(`✅ Subscription payment succeeded: ${subscription._id}`);
+
+      // 1D — Send tier welcome SMS (non-blocking)
+      try {
+        const subUser = await User.findById(subscription.userId).select('mobile name').lean();
+        if (subUser?.mobile) {
+          const plan = subscription.subscriptionPlanId
+            ? await SubscriptionPlan.findById(subscription.subscriptionPlanId).select('name').lean()
+            : null;
+          const planName = (plan?.name || '').toLowerCase();
+          const tier = planName.includes('growth') ? 'growth'
+            : planName.includes('premium') ? 'premium'
+            : 'launch';
+          sendVendorTierWelcomeSMS({
+            to: subUser.mobile,
+            vendorName: subUser.name ? subUser.name.split(' ')[0] : undefined,
+            tier,
+          }).catch((smsErr) =>
+            console.error('[Telnyx SMS] Tier welcome SMS failed:', smsErr.message)
+          );
+        }
+      } catch (smsLookupErr) {
+        console.error('[Telnyx SMS] Tier welcome SMS lookup failed:', smsLookupErr.message);
+      }
       break;
 
     case 'invoice.payment_failed':

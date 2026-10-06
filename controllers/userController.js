@@ -7,7 +7,7 @@ const {
     sendWelcomeEmail,
     sendPasswordResetOtpEmail,
 } = require('../utils/mailer');
-const { sendOtpSMS } = require('../utils/telnyxService');
+const { sendOtpSMS, sendCustomerWelcomeSMS } = require('../utils/telnyxService');
 const {
     getCookieOptions,
     clearCookie,
@@ -231,6 +231,16 @@ exports.verifyOtp = async (req, res) => {
             }
         } catch (emailError) {
             console.error('Failed to send welcome email:', emailError);
+        }
+
+        // 1C — Send welcome SMS (non-blocking, customer only)
+        if (user.mobile && user.role !== 'business_owner') {
+            sendCustomerWelcomeSMS({
+                to: user.mobile,
+                firstName: user.name ? user.name.split(' ')[0] : undefined,
+            }).catch((smsErr) =>
+                console.error('[Telnyx SMS] Welcome SMS failed:', smsErr.message)
+            );
         }
 
         const token = buildSessionToken(user);

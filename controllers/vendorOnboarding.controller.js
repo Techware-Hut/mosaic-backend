@@ -18,6 +18,7 @@ const {
 } = require('../utils/syncBusinessFromOnboarding');
 const { validateStage1Payload } = require('../utils/vendorOnboardingValidation');
 const { deliverVendorOnboardingEmails } = require('../utils/vendorOnboardingEmailDelivery');
+const { sendVendorProfileCompleteSMS } = require('../utils/telnyxService');
 
 function logVendorOnboardingEvent(endpoint, req, onboarding, { httpStatus, category, message }) {
   const payload = {
@@ -735,6 +736,17 @@ exports.updateBusinessProfile = async (req, res) => {
           applicationId: onboarding.applicationId,
           businessName: onboarding.businessName,
         });
+
+        // 2C — Send vendor profile complete SMS (non-blocking)
+        const profileUser = await User.findById(userId).select('mobile name').lean();
+        if (profileUser?.mobile) {
+          sendVendorProfileCompleteSMS({
+            to: profileUser.mobile,
+            vendorName: profileUser.name ? profileUser.name.split(' ')[0] : onboarding.businessName,
+          }).catch((smsErr) =>
+            console.error('[Telnyx SMS] Profile complete SMS failed:', smsErr.message)
+          );
+        }
 
         onboarding.profileCompletionNotifiedAt = new Date();
         await onboarding.save();
