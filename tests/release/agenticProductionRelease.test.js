@@ -569,6 +569,136 @@ test('git-tree packaging primitive is deterministic and excludes mutable untrack
   });
 });
 
+test('pinned release bucket is mandatory and validated before bundle preparation', (t) => {
+  const gitExecutable = process.platform === 'win32'
+    ? spawnSync('where.exe', ['git'], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/)[0] : null;
+  const bashCommand = gitExecutable
+    ? path.resolve(path.dirname(gitExecutable), '../bin/bash.exe') : 'bash';
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-pinned-bucket-'));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const runGit = (...args) => {
+    const result = spawnSync('git', args, { cwd: temporary, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  runGit('init', '--quiet');
+  runGit('config', 'core.autocrlf', 'false');
+  fs.writeFileSync(path.join(temporary, 'app.js'), 'module.exports = "fixture";\n');
+  runGit('add', 'app.js');
+  runGit('-c', 'user.name=Release Test', '-c', 'user.email=release@example.invalid', 'commit', '--quiet', '-m', 'fixture');
+  const sha = runGit('rev-parse', 'HEAD');
+  assert.match(sha, /^[a-f0-9]{40}$/);
+  runGit('update-ref', 'refs/remotes/origin/main', sha);
+  fs.mkdirSync(path.join(temporary, 'scripts/release'), { recursive: true });
+  fs.copyFileSync(path.join(repoRoot, 'scripts/release/validate-eb-source-bundle.py'),
+    path.join(temporary, 'scripts/release/validate-eb-source-bundle.py'));
+  const source = fs.readFileSync(deployScriptPath, 'utf8');
+  // Execute the actual storage/package preparation path with mocked AWS only.
+  // Stop before the gate/deployment phase; real Git and bundle validation run.
+  fs.writeFileSync(path.join(temporary, 'deploy-fixture.sh'),
+    source.slice(0, source.indexOf('\nwrite_deployment_evidence() {')).replaceAll('\r\n', '\n'));
+  fs.writeFileSync(path.join(temporary, 'harness.sh'), `
+git() { if [ "$1" = fetch ]; then return 0; fi; command git "$@"; }
+python3() { command ${process.platform === 'win32' ? 'python' : 'python3'} "$@"; }
+node() {
+  if [ "$1" = scripts/release/require-eb-application-version.js ]; then return 0; fi
+  command node "$@"
+}
+fake_aws() {
+  printf '%s\\n' "$*" >> aws-calls.txt
+  case "$1 $2" in
+    's3api get-bucket-location')
+      if [ "$FIXTURE_INACCESSIBLE" = true ]; then echo 'sensitive AWS failure' >&2; return 42; fi
+      printf '%s\\n' "$FIXTURE_LOCATION" ;;
+    'elasticbeanstalk describe-application-versions')
+      if [[ "$*" == *length* ]]; then echo "$FIXTURE_EXISTING";
+      else echo "$FIXTURE_SOURCE_BUCKET historical-baseline.zip"; fi ;;
+    's3api put-object'|'elasticbeanstalk create-application-version') echo '{}' ;;
+    's3api head-object')
+      if [ "$FIXTURE_BAD_CHECKSUM" = true ]; then echo 'invalid-checksum invalid-release invalid-package';
+      else printf '%s %s %s\\n' "$package_checksum_b64" "$RELEASE_SHA" "$package_sha"; fi ;;
+    's3api get-object')
+      for argument in "$@"; do
+        if [[ "$argument" == *.zip && "$argument" != historical-baseline.zip ]]; then
+          cp historical.zip "$argument"; break
+        fi
+      done ;;
+    *) echo 'Unexpected mock AWS operation' >&2; return 43 ;;
+  esac
+}
+source ./deploy-fixture.sh ${sha}
+`);
+  const invoke = (overrides = {}) => {
+    fs.writeFileSync(path.join(temporary, 'aws-calls.txt'), '');
+    const fixtureEnv = { AWS_REGION: 'us-east-1', EB_APPLICATION_NAME: 'fixture',
+      EB_ENVIRONMENT_NAME: 'fixture', EB_RELEASE_BUCKET: 'fixture-release-bucket',
+      AWS_CLI: 'fake_aws', RELEASE_MODE: 'release', FIXTURE_SHA: sha,
+      FIXTURE_LOCATION: 'None', FIXTURE_EXISTING: '0', FIXTURE_INACCESSIBLE: 'false',
+      FIXTURE_SOURCE_BUCKET: 'fixture-release-bucket', FIXTURE_BAD_CHECKSUM: 'false', ...overrides };
+    const assignments = Object.entries(fixtureEnv)
+      .map(([key, value]) => `${key}='${value.replaceAll("'", "'\\''")}'`).join(' ');
+    const result = spawnSync(bashCommand, ['-c', `${assignments} bash harness.sh`], {
+      cwd: temporary, encoding: 'utf8', timeout: 20000,
+    });
+    return { ...result, calls: fs.readFileSync(path.join(temporary, 'aws-calls.txt'), 'utf8') };
+  };
+  for (const bucket of ['', 'INVALID_BUCKET']) {
+    const result = invoke({ EB_RELEASE_BUCKET: bucket });
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.calls, '');
+  }
+  const inaccessible = invoke({ FIXTURE_INACCESSIBLE: 'true' });
+  assert.equal(inaccessible.status, 1, inaccessible.stderr);
+  assert.match(inaccessible.stderr, /Unable to read pinned release bucket location/);
+  assert.doesNotMatch(inaccessible.stderr, /sensitive AWS failure/);
+  assert.doesNotMatch(inaccessible.calls, /put-object|create-application-version/);
+  const wrongRegion = invoke({ FIXTURE_LOCATION: 'us-west-2' });
+  assert.equal(wrongRegion.status, 1);
+  assert.match(wrongRegion.stderr, /bucket region does not match/);
+  assert.doesNotMatch(wrongRegion.calls, /put-object|create-application-version/);
+  for (const location of ['None', 'null', '']) {
+    const result = invoke({ FIXTURE_LOCATION: location });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.calls, new RegExp(`s3api put-object .*--key mosaic-releases/${sha}/[a-f0-9]{64}\\.zip`));
+    assert.match(result.calls, /s3api head-object .*--checksum-mode ENABLED/);
+    assert.match(result.calls, /--metadata release-sha=.*package-sha256=/);
+  }
+  const focused = invoke({ RELEASE_MODE: 'focused-baseline',
+    FOCUSED_BASELINE_SHA: FOCUSED_BASELINE_SHA,
+    FOCUSED_RELEASE_REF: 'refs/heads/release/focused/booking-filter' });
+  assert.equal(focused.status, 0, focused.stderr);
+  assert.match(focused.calls, new RegExp(`s3api put-object .*--key mosaic-releases/${sha}/[a-f0-9]{64}\\.zip`));
+  const badChecksum = invoke({ FIXTURE_BAD_CHECKSUM: 'true' });
+  assert.equal(badChecksum.status, 1);
+  assert.match(badChecksum.stderr, /Stored deployment package checksum or identity metadata does not match/);
+  const wrongBucket = invoke({ RELEASE_MODE: 'rollback', FIXTURE_EXISTING: '1',
+    EB_RELEASE_BUCKET: 'wrong-release-bucket' });
+  assert.equal(wrongBucket.status, 1);
+  assert.match(wrongBucket.stderr, /outside the controlled bucket/);
+  assert.doesNotMatch(wrongBucket.calls, /get-object|put-object|create-application-version/);
+  const tree = runGit('rev-parse', `${sha}^{tree}`);
+  const manifest = JSON.stringify({ schemaVersion: 1, commit: sha, sourceTree: tree,
+    environment: 'production', deploymentVersion: `mosaic-${sha}` });
+  runGit('archive', '--format=zip', '--output=historical.zip',
+    `--add-virtual-file=release-manifest.json:${manifest}`, sha);
+  const rollback = invoke({ RELEASE_MODE: 'rollback', FIXTURE_EXISTING: '1' });
+  assert.equal(rollback.status, 0, rollback.stderr);
+  assert.match(rollback.calls, /s3api get-object .*--key historical-baseline.zip/);
+  assert.doesNotMatch(rollback.calls, /put-object|create-application-version/);
+});
+
+test('release storage contract removes creation and exposes a required Environment bucket', () => {
+  const source = fs.readFileSync(deployScriptPath, 'utf8');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.doesNotMatch(source, /create-storage-location|create-bucket|list-buckets|list-objects|delete-object/);
+  assert.match(source, /EB_RELEASE_BUCKET_VALUE="\$\{EB_RELEASE_BUCKET:-\}"/);
+  assert.match(workflow, /EB_RELEASE_BUCKET: \$\{\{ vars\.EB_RELEASE_BUCKET \}\}/);
+  assert.match(workflow, /if \[ -z "\$EB_RELEASE_BUCKET" \]/);
+  assert.ok(source.indexOf('s3api get-bucket-location') < source.indexOf('s3api put-object'));
+  assert.match(source, /Stored deployment package checksum or identity metadata does not match/);
+  assert.match(source, /Exact-tree source bundle changed during deployment/);
+});
+
 test('deploy evidence is persisted as attempted before update and verified only after readiness', () => {
   const source = fs.readFileSync(deployScriptPath, 'utf8');
   const firstFreshnessCall = source.indexOf('\nassert_current_main\n');

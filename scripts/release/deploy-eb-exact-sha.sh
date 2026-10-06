@@ -6,6 +6,7 @@ OUTPUT_PATH="${2:-release-evidence/eb-deployment.json}"
 AWS_REGION_VALUE="${AWS_REGION:-}"
 EB_APPLICATION_VALUE="${EB_APPLICATION_NAME:-}"
 EB_ENVIRONMENT_VALUE="${EB_ENVIRONMENT_NAME:-}"
+EB_RELEASE_BUCKET_VALUE="${EB_RELEASE_BUCKET:-}"
 RELEASE_MODE_VALUE="${RELEASE_MODE:-release}"
 AWS_CLI="${AWS_CLI:-aws}"
 APPROVED_FOCUSED_BASELINE_SHA="9bc75c257a9f483a287f122dbd38514b7a4b55d4"
@@ -35,7 +36,7 @@ if [ "$RELEASE_MODE_VALUE" != "release" ] && [ "$RELEASE_MODE_VALUE" != "rollbac
   echo "RELEASE_MODE must be release, rollback, or focused-baseline" >&2
   exit 2
 fi
-for name in AWS_REGION_VALUE EB_APPLICATION_VALUE EB_ENVIRONMENT_VALUE; do
+for name in AWS_REGION_VALUE EB_APPLICATION_VALUE EB_ENVIRONMENT_VALUE EB_RELEASE_BUCKET_VALUE; do
   if [ -z "${!name}" ]; then
     echo "Required deployment configuration is missing" >&2
     exit 2
@@ -139,10 +140,27 @@ assert_current_main() {
 # Refuse stale work before even creating or uploading a deployment artifact.
 assert_current_main
 
-bucket=$($AWS_CLI elasticbeanstalk create-storage-location \
+bucket="$EB_RELEASE_BUCKET_VALUE"
+if ! [[ "$bucket" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]; then
+  echo "Pinned release bucket name is invalid" >&2
+  exit 2
+fi
+if ! bucket_region=$($AWS_CLI s3api get-bucket-location \
+  --bucket "$bucket" \
   --region "$AWS_REGION_VALUE" \
-  --query S3Bucket \
-  --output text)
+  --query LocationConstraint \
+  --output text 2>/dev/null); then
+  echo "Unable to read pinned release bucket location" >&2
+  exit 1
+fi
+case "$bucket_region" in
+  ""|None|null) bucket_region="us-east-1" ;;
+  EU) bucket_region="eu-west-1" ;;
+esac
+if [ "$bucket_region" != "$AWS_REGION_VALUE" ]; then
+  echo "Pinned release bucket region does not match the configured release region" >&2
+  exit 1
+fi
 existing_version=$($AWS_CLI elasticbeanstalk describe-application-versions \
   --application-name "$EB_APPLICATION_VALUE" \
   --version-labels "$VERSION_LABEL" \

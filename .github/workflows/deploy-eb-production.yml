@@ -427,6 +427,7 @@ jobs:
       FOCUSED_BASELINE_SHA: ${{ needs.resolve-release.outputs.baseline_sha }}
       FOCUSED_RELEASE_REF: ${{ needs.resolve-release.outputs.release_ref }}
       FOCUSED_SOURCE_PR: ${{ needs.resolve-release.outputs.source_pr }}
+      EB_RELEASE_BUCKET: ${{ vars.EB_RELEASE_BUCKET }}
       CHECKOUT_GATE_LOAD_BALANCER_ARN: ${{ vars.CHECKOUT_GATE_LOAD_BALANCER_ARN }}
       CHECKOUT_GATE_HTTP_RULE_ARN: ${{ vars.CHECKOUT_GATE_HTTP_RULE_ARN }}
       CHECKOUT_GATE_HTTPS_RULE_ARN: ${{ vars.CHECKOUT_GATE_HTTPS_RULE_ARN }}
@@ -449,6 +450,10 @@ jobs:
         env:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
+          if [ -z "$EB_RELEASE_BUCKET" ]; then
+            echo "::error::Pinned EB release bucket is required."
+            exit 1
+          fi
           git fetch --no-tags origin main
           current_main=$(git rev-parse origin/main)
           if [ "$(git rev-parse HEAD)" != "$current_main" ]; then
