@@ -381,6 +381,28 @@ than using service wildcards.
 The production Actions job does not need `pull-requests: write`; PR commenting
 belongs in a separate reporting job without AWS credentials.
 
+### Pinned existing deployment bucket
+
+Set `EB_RELEASE_BUCKET` only on `production-release-control` to the independently
+verified, already-existing regional Elastic Beanstalk bucket. The production
+job and deploy script fail closed if it is missing. Before reading or writing
+a bundle, the deploy script uses `s3:GetBucketLocation` and requires the bucket
+region to equal `AWS_REGION`; null/empty location means `us-east-1`.
+The release path does not call `CreateStorageLocation`, so no
+`elasticbeanstalk:CreateStorageLocation` permission is required.
+
+Grant `s3:GetBucketLocation` on the exact bucket ARN. Grant `s3:PutObject` and
+`s3:GetObject` only on that bucket's `mosaic-releases/*` objects. New bundles
+remain under `mosaic-releases/<exact release SHA>/<package SHA256>.zip`.
+Do not grant `s3:ListBucket`, `s3:CreateBucket`, or `s3:DeleteObject`.
+
+The current legacy production rollback baseline may additionally receive one
+exact-object `s3:GetObject` exception for its reviewed historical SourceBundle,
+until all supported rollback versions use controlled release objects. Resolve
+and independently pin that exact key before granting access; do not grant a
+legacy-prefix wildcard. Rollback downloads and validates the original bundle
+without migrating or overwriting it, and still requires the same pinned bucket.
+
 ## `DescribeConfigurationSettings` secret-read caveat
 
 Elastic Beanstalk exposes deployment policy, rolling-update policy, and Enhanced
@@ -500,6 +522,7 @@ comments or artifacts.
 ### `production-release-control` (main-only, one required reviewer)
 
 - `AWS_RELEASE_CONTROL_ROLE_TO_ASSUME`
+- `EB_RELEASE_BUCKET` (existing regional EB bucket; never created by release)
 - `AWS_REGION`
 - `EB_APPLICATION_NAME`
 - `EB_ENVIRONMENT_NAME`
