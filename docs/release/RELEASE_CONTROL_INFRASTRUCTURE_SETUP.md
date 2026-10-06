@@ -403,15 +403,10 @@ and independently pin that exact key before granting access; do not grant a
 legacy-prefix wildcard. Rollback downloads and validates the original bundle
 without migrating or overwriting it, and still requires the same pinned bucket.
 
-Focused-baseline S3 bundles use `--no-process`: EB preprocessing otherwise writes
-an internal extension cache outside the controlled release prefix using the
-caller's permissions. This path rejects `env.yaml`, validates the exact Git
-bundle (including the existing `.ebextensions/` and `.platform/` prohibition),
-and proves S3 checksum/identity metadata before explicitly accepting an
-`Unprocessed` focused version. A `Failed` version remains fatal and must never
-be silently reused or deleted by the workflow. Normal releases retain
-`--process`; historical rollback compatibility is unchanged. No extension-cache
-S3 write permission is required by the focused path.
+Focused-baseline S3 bundles use `--process`. The release-control role permits
+the required embedded-extension cache reads and writes on the environment
+specific prefix, so focused versions must reach `Processed` before deployment.
+This path rejects `env.yaml` and validates the exact Git bundle (including the+existing `.ebextensions/` and `.platform/` prohibition). A `Failed` or+`Unprocessed` focused version remains fatal. Historical rollback compatibility+may still explicitly accept an existing `Unprocessed` version after validating+its source bundle; normal release behavior is unchanged.
 
 ## `DescribeConfigurationSettings` secret-read caveat
 

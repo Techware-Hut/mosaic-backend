@@ -684,12 +684,11 @@ source ./deploy-fixture.sh ${sha}
   }
   const focused = invoke({ RELEASE_MODE: 'focused-baseline',
     FOCUSED_BASELINE_SHA: FOCUSED_BASELINE_SHA,
-    FOCUSED_RELEASE_REF: 'refs/heads/release/focused/booking-filter',
-    FIXTURE_FORBID_EXTENSION_CACHE: 'true' });
+    FOCUSED_RELEASE_REF: 'refs/heads/release/focused/booking-filter' });
   assert.equal(focused.status, 0, focused.stderr);
   assert.match(focused.calls, new RegExp(`s3api put-object .*--key mosaic-releases/${sha}/[a-f0-9]{64}\\.zip`));
-  assert.match(focused.calls, /create-application-version .* --no-process /);
-  assert.match(focused.versionChecks, /--allow-unprocessed-focused-bundle/);
+  assert.match(focused.calls, /create-application-version .* --process /);
+  assert.doesNotMatch(focused.versionChecks, /allow-unprocessed-focused-bundle/);
   const processingFailure = invoke({ FIXTURE_FORBID_EXTENSION_CACHE: 'true' });
   assert.equal(processingFailure.status, 42);
   assert.match(processingFailure.stderr, /EB preprocessing requires internal extension-cache PutObject/);
@@ -810,20 +809,16 @@ test('EB application version must transition to Processed and reused Failed vers
   assert.match(deploySource, /historical-eb-source-bundle[\s\S]*--allow-unprocessed-reused/);
 });
 
-test('focused S3 versions accept UNPROCESSED only with explicit opt-in and reject FAILED', async () => {
+test('focused S3 versions require PROCESSED and reject UNPROCESSED or FAILED', async () => {
   const config = { applicationName: 'fixture', versionLabel: `mosaic-${shaA}`,
     region: 'us-east-1', timeoutSeconds: 10, pollSeconds: 1 };
   const response = (Status) => () => ({ ApplicationVersions: [{ VersionLabel: config.versionLabel, Status }] });
   for (const Status of ['UNPROCESSED', 'Unprocessed']) {
     await assert.rejects(requireProcessedVersion(config, { runAws: response(Status) }), /not deployable \(Unprocessed\)/);
-    const result = await requireProcessedVersion({ ...config, allowUnprocessedFocusedBundle: true }, {
-      runAws: response(Status),
-    });
-    assert.equal(result.focusedValidatedSourceBundle, true);
-    assert.equal(result.historicalRollbackCompatibility, undefined);
+    await assert.rejects(requireProcessedVersion(config, { runAws: response(Status) }), /not deployable \(Unprocessed\)/);
   }
   for (const Status of ['FAILED', 'Failed', 'unknown']) {
-    await assert.rejects(requireProcessedVersion({ ...config, allowUnprocessedFocusedBundle: true }, {
+    await assert.rejects(requireProcessedVersion(config, {
       runAws: response(Status),
     }), /not deployable/);
   }
@@ -834,10 +829,6 @@ test('focused S3 versions accept UNPROCESSED only with explicit opt-in and rejec
   });
   assert.equal(reads, 3);
   assert.equal(result.applicationVersionStatus, 'Processed');
-  const args = ['--output', 'fixture.json', '--allow-unprocessed-focused-bundle'];
-  const env = { EB_APPLICATION_NAME: 'fixture', EB_VERSION_LABEL: config.versionLabel, AWS_REGION: config.region };
-  assert.throws(() => parseApplicationVersionConfig(args, env), /require focused-baseline release mode/);
-  assert.equal(parseApplicationVersionConfig(args, { ...env, RELEASE_MODE: 'focused-baseline' }).allowUnprocessedFocusedBundle, true);
 });
 
 test('rollback reuses and hashes the historical EB bundle after validating every member against Git', () => {
