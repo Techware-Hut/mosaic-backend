@@ -14,7 +14,7 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   EB_APPLICATION_NAME: ${{ vars.EB_APPLICATION_NAME || 'mosaic-biz-hub-backend' }}
   EB_ENVIRONMENT_NAME: mosaic-backend-staging
-  STAGING_API_URL: http://mosaic-backend-staging.eba-ubmvnp2m.us-east-1.elasticbeanstalk.com
+  STAGING_API_URL: https://api-staging.mosaicbizhub.com
 
 jobs:
   test:
