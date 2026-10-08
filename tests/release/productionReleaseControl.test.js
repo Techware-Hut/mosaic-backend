@@ -15,9 +15,15 @@ const instanceScriptPath = path.join(repoRoot, 'scripts/release/verify-eb-instan
 const reservationScriptPath = path.join(repoRoot, 'scripts/release/query-active-reservations.js');
 const appPath = path.join(repoRoot, 'app.js');
 
+const bashBin = process.platform === 'win32'
+  ? (fs.existsSync('C:\\Program Files\\Git\\bin\\bash.exe')
+      ? 'C:\\Program Files\\Git\\bin\\bash.exe'
+      : (fs.existsSync('C:\\Program Files\\Git\\usr\\bin\\bash.exe') ? 'C:\\Program Files\\Git\\usr\\bin\\bash.exe' : 'bash'))
+  : 'bash';
+
 function toBashPath(filePath) {
   return process.platform === 'win32'
-    ? `/mnt/${filePath[0].toLowerCase()}${filePath.slice(2).replaceAll('\\', '/')}`
+    ? `/${filePath[0].toLowerCase()}${filePath.slice(2).replaceAll('\\', '/')}`
     : filePath;
 }
 
@@ -109,7 +115,7 @@ esac
       shellQuote('https://release-control.test'),
     ].join(' ');
 
-    return await execFileAsync('bash', ['-lc', command], {
+    return await execFileAsync(bashBin, ['-lc', command], {
       cwd: repoRoot,
       timeout: 15000,
     });
@@ -250,7 +256,7 @@ test('EB wrapper uses current Deployment attribute shape and fails closed on AWS
       'a'.repeat(40),
     ].join(' ');
     await assert.rejects(
-      execFileAsync('bash', ['-lc', command], {
+      execFileAsync(bashBin, ['-lc', command], {
         cwd: repoRoot,
         timeout: 10000,
       }),
