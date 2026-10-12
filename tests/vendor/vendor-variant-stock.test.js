@@ -4,6 +4,7 @@ const path = require('node:path');
 const Module = require('node:module');
 
 const productControllerPath = path.resolve(__dirname, '../../controllers/productController.js');
+const listingQuotaServicePath = path.resolve(__dirname, '../../services/listingQuotaService.js');
 const ownerId = '507f1f77bcf86cd799439011';
 
 function mockResponse() {
@@ -69,6 +70,7 @@ function loadStockController(variant = buildVariant()) {
   };
 
   delete require.cache[productControllerPath];
+  delete require.cache[listingQuotaServicePath];
   const controller = require(productControllerPath);
   Module._load = originalLoad;
   return controller;
@@ -103,6 +105,7 @@ function loadProductControllerWithMocks(mocks) {
   };
 
   delete require.cache[productControllerPath];
+  delete require.cache[listingQuotaServicePath];
   const controller = require(productControllerPath);
   Module._load = originalLoad;
   return controller;
@@ -132,15 +135,35 @@ function buildVariantMutationMocks(captured) {
       },
     },
     Business: {
-      findById: async () => ({ _id: businessId }),
+      findById: async () => ({
+        _id: businessId,
+        owner: ownerId,
+        subscriptionId: '507f1f77bcf86cd799439015',
+      }),
     },
     Subscription: {
+      findById: async () => ({
+        _id: '507f1f77bcf86cd799439015',
+        userId: ownerId,
+        businessId,
+        subscriptionPlanId: '507f1f77bcf86cd799439014',
+        status: 'active',
+        endDate: new Date(Date.now() + 86_400_000),
+      }),
       findOne: () => mockQueryResult({
         subscriptionPlanId: '507f1f77bcf86cd799439014',
       }),
     },
     SubscriptionPlan: {
-      findById: async () => ({ limits: { productListings: 10 } }),
+      findById: async () => ({
+        name: 'Silver Plan',
+        limits: {
+          productListings: 10,
+          serviceListings: 5,
+          foodListings: 5,
+          imageLimit: 3,
+        },
+      }),
     },
   };
 }
