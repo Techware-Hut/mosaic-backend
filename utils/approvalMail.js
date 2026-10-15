@@ -1,12 +1,11 @@
 // mailer/businessStatusEmails.js
 const nodemailer = require("nodemailer");
-const { getFrontendBaseUrl } = require("./frontendUrl");
+const { buildFrontendUrl, getFrontendBaseUrl } = require("./frontendUrl");
 const {
   buildSmtpTransportConfig,
   formatMosaicFromHeader,
 } = require("./smtpTransport");
 
-const APP_URL = getFrontendBaseUrl();
 const SUPPORT_EMAIL ="support@mosaicbizhub.com";
 
 const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
@@ -81,7 +80,7 @@ function baseLayout({ preheader, heading, introHtml, bodyHtml, ctaHref, ctaText 
 
 /** APPROVED (neutral: works for first-time or re-approval) */
 async function sendApproved({ to, vendorName = "there", business }) {
-  const partnersUrl = `${APP_URL}/partners/${encodeURIComponent(business.slug)}`;
+  const partnersUrl = buildFrontendUrl(`/partners/${encodeURIComponent(business.slug)}`);
   const typeTitle = titleForType(business.type);
 
   const introHtml = `

@@ -1,5 +1,6 @@
 const Telnyx = require('telnyx');
 const { parsePhoneNumberFromString } = require('libphonenumber-js');
+const { buildFrontendUrl } = require('./frontendUrl');
 
 let telnyxClient = null;
 
@@ -143,7 +144,8 @@ async function sendOtpSMS({ to, otp, appName = 'Mosaic Biz Hub', validMinutes = 
  */
 async function sendOrderNotificationSMS({ to, orderNumber, status, customerName }) {
   const greeting = customerName ? `Hi ${customerName}, ` : '';
-  const text = `${greeting}your Mosaic Biz Hub order #${orderNumber} is now: ${status.toUpperCase()}. Track updates at https://mosaicbizhub.com/orders/${orderNumber}`;
+  const trackingUrl = buildFrontendUrl(`/orders/${orderNumber}`);
+  const text = `${greeting}your Mosaic Biz Hub order #${orderNumber} is now: ${status.toUpperCase()}. Track updates at ${trackingUrl}`;
   return sendSMS({ to, text });
 }
 
