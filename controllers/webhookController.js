@@ -9,6 +9,10 @@ const {
   publicPaidOrderEmailDelivery,
   sendOrderPaidConfirmationIfNeeded,
 } = require('../utils/sendOrderPaidConfirmation');
+const {
+  buildSucceededPaymentReconciliationFilter,
+  buildSucceededPaymentReconciliationPipeline,
+} = require('../utils/orderPaidEmailEligibility');
 
 const toPublicEmailDelivery = (result) =>
   typeof publicPaidOrderEmailDelivery === 'function'
@@ -68,18 +72,20 @@ const cancelRetryablePaymentIntent = async (paymentIntent) => {
 };
 
 const reconcileSucceededOrderPayment = async (orderId, paymentIntent) => {
-  const updatedOrder = await Order.findByIdAndUpdate(
-    orderId,
-    {
-      paymentStatus: 'paid',
-      status: 'ordered',
-    },
+  if (!orderId || !paymentIntent?.id) {
+    console.warn('Order webhook succeeded event is missing correlation metadata');
+    return { reconciled: false };
+  }
+
+  const updatedOrder = await Order.findOneAndUpdate(
+    buildSucceededPaymentReconciliationFilter(orderId, paymentIntent.id),
+    buildSucceededPaymentReconciliationPipeline(),
     { new: true }
   );
 
   if (!updatedOrder) {
     console.warn(
-      `Order webhook could not find order ${orderId} for payment intent ${paymentIntent.id}.`
+      `Order webhook could not correlate order ${orderId} with the succeeded payment intent.`
     );
     return { reconciled: false };
   }
@@ -219,7 +225,7 @@ const handleStripeWebhook = async (req, res) => {
   switch (event.type) {
     case 'payment_intent.succeeded':
       const paymentIntent = event.data.object;
-      const orderId = paymentIntent.metadata.orderId;
+      const orderId = paymentIntent.metadata?.orderId;
       console.log('Order payment succeeded event', {
         paymentIntentId: paymentIntent.id,
         orderId,
