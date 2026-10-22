@@ -7,6 +7,7 @@ const {
     sendWelcomeEmail,
     sendPasswordResetOtpEmail,
 } = require('../utils/mailer');
+const { sendOtpSMS, sendCustomerWelcomeSMS } = require('../utils/telnyxService');
 const {
     getCookieOptions,
     clearCookie,
@@ -153,11 +154,16 @@ exports.registerUser = async (req, res) => {
 
         try {
             const firstName = name ? name.split(' ')[0] : '';
-            await sendOtpEmail(email, otp, 'register', firstName, safeRole);
-        } catch (emailError) {
-            logOtpDeliveryFailure('register', emailError);
+            if (email) {
+                await sendOtpEmail(email, otp, 'register', firstName, safeRole);
+            }
+            if (mobile) {
+                await sendOtpSMS({ to: mobile, otp });
+            }
+        } catch (deliveryError) {
+            logOtpDeliveryFailure('register', deliveryError);
             return respondOtpDeliveryFailed(res, 'register', {
-                user: { email, role: safeRole },
+                user: { email, mobile, role: safeRole },
             });
         }
 
@@ -165,7 +171,9 @@ exports.registerUser = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: 'User registered successfully. OTP sent to email.',
+            message: email
+                ? 'User registered successfully. OTP sent to email.'
+                : 'User registered successfully. OTP sent.',
         });
     } catch (err) {
         console.error('Registration error:', err);
@@ -181,10 +189,15 @@ exports.registerUser = async (req, res) => {
 };
 
 exports.verifyOtp = async (req, res) => {
-    const { email, otp } = req.body;
+    const { email, mobile, otp } = req.body;
 
     try {
-        const user = await User.findOne({ email });
+        const query = email ? { email } : (mobile ? { mobile } : null);
+        if (!query) {
+            return res.status(400).json({ success: false, message: 'Email or mobile is required' });
+        }
+
+        const user = await User.findOne(query);
         if (!user || !user.otp || !user.otpExpiry) {
             return res.status(400).json({
                 success: false,
@@ -216,9 +229,21 @@ exports.verifyOtp = async (req, res) => {
 
         try {
             const firstName = user.name.split(' ')[0];
-            await sendWelcomeEmail(user.email, firstName, user.role);
+            if (user.email) {
+                await sendWelcomeEmail(user.email, firstName, user.role);
+            }
         } catch (emailError) {
             console.error('Failed to send welcome email:', emailError);
+        }
+
+        // 1C — Send welcome SMS (non-blocking, customer only)
+        if (user.mobile && user.role !== 'business_owner') {
+            sendCustomerWelcomeSMS({
+                to: user.mobile,
+                firstName: user.name ? user.name.split(' ')[0] : undefined,
+            }).catch((smsErr) =>
+                console.error('[Telnyx SMS] Welcome SMS failed:', smsErr.message)
+            );
         }
 
         const token = buildSessionToken(user);
@@ -239,10 +264,15 @@ exports.verifyOtp = async (req, res) => {
 };
 
 exports.resendOtp = async (req, res) => {
-    const { email } = req.body;
+    const { email, mobile } = req.body;
 
     try {
-        const user = await User.findOne({ email });
+        const query = email ? { email } : (mobile ? { mobile } : null);
+        if (!query) {
+            return res.status(400).json({ success: false, message: 'Email or mobile is required' });
+        }
+
+        const user = await User.findOne(query);
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
@@ -269,9 +299,14 @@ exports.resendOtp = async (req, res) => {
 
         try {
             const firstName = user.name ? user.name.split(' ')[0] : '';
-            await sendOtpEmail(user.email, otp, 'resend', firstName, user.role);
-        } catch (emailError) {
-            logOtpDeliveryFailure('resend', emailError);
+            if (user.email) {
+                await sendOtpEmail(user.email, otp, 'resend', firstName, user.role);
+            }
+            if (user.mobile) {
+                await sendOtpSMS({ to: user.mobile, otp });
+            }
+        } catch (deliveryError) {
+            logOtpDeliveryFailure('resend', deliveryError);
             return respondOtpDeliveryFailed(res, 'resend', { user });
         }
 

@@ -87,7 +87,8 @@ router.post(
   '/verify-otp',
   otpVerifyLimiter,
   [
-    body('email').isEmail().normalizeEmail({ gmail_remove_dots: false, gmail_remove_subaddress: false }).withMessage('Valid email is required'),
+    body('email').optional().isEmail().normalizeEmail({ gmail_remove_dots: false, gmail_remove_subaddress: false }).withMessage('Valid email is required'),
+    body('mobile').optional().trim().notEmpty().withMessage('Valid mobile number is required'),
     body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits'),
   ],
   userController.verifyOtp
@@ -96,7 +97,10 @@ router.post(
 router.post(
   '/resend-otp',
   otpResendLimiter,
-  [body('email').isEmail().normalizeEmail({ gmail_remove_dots: false, gmail_remove_subaddress: false }).withMessage('Valid email is required')],
+  [
+    body('email').optional().isEmail().normalizeEmail({ gmail_remove_dots: false, gmail_remove_subaddress: false }).withMessage('Valid email is required'),
+    body('mobile').optional().trim().notEmpty().withMessage('Valid mobile number is required'),
+  ],
   userController.resendOtp
 );
 

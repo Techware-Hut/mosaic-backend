@@ -122,6 +122,14 @@ const {
 } = require("../utils/vendorTax");
 
 const { evaluateCouponDiscount } = require("../utils/couponDiscount");
+const {
+  sendOrderAcceptedSMS,
+  sendOrderCancelledCustomerSMS,
+  sendOrderShippedSMS,
+  sendOrderDeliveredSMS,
+  sendOrderRefundedSMS,
+  sendOrderCancelledVendorSMS,
+} = require('../utils/telnyxService');
 
 const toNum = (value) => {
   if (value && typeof value === "object" && value.$numberDecimal != null) {
@@ -1174,6 +1182,16 @@ exports.acceptOrder = async (req, res) => {
       send: (customerEmail) => sendOrderStatusEmail(customerEmail, order, "accepted"),
     });
 
+    // 3C — Send order accepted SMS to customer (non-blocking)
+    const acceptedCustomerPhone = order?.userId?.mobile;
+    if (acceptedCustomerPhone) {
+      sendOrderAcceptedSMS({
+        to: acceptedCustomerPhone,
+        orderNumber: order.orderNumber || order._id.toString().slice(-8),
+        vendorName: order.businessId?.businessName || undefined,
+      }).catch(() => {});
+    }
+
     res.json({
       success: true,
       message: "Order accepted",
@@ -1250,6 +1268,15 @@ exports.rejectOrder = async (req, res) => {
       send: (customerEmail) => sendOrderStatusEmail(customerEmail, order, "rejected"),
     });
 
+    // 3F — Send order cancelled SMS to customer (non-blocking)
+    const rejectedCustomerPhone = order?.userId?.mobile;
+    if (rejectedCustomerPhone) {
+      sendOrderCancelledCustomerSMS({
+        to: rejectedCustomerPhone,
+        orderNumber: order.orderNumber || order._id.toString().slice(-8),
+      }).catch(() => {});
+    }
+
     res.json({
       success: true,
       message: "Order rejected and refunded (if paid)",
@@ -1309,6 +1336,17 @@ exports.shipOrder = async (req, res) => {
         sendOrderUpdateEmail(customerEmail, "shipped", trackingUrl, { trackingId }),
     });
 
+    // 3D — Send order shipped SMS to customer (non-blocking)
+    const shippedCustomerPhone = order?.userId?.mobile;
+    if (shippedCustomerPhone) {
+      sendOrderShippedSMS({
+        to: shippedCustomerPhone,
+        orderNumber: order.orderNumber || order._id.toString().slice(-8),
+        trackingId: trackingId || undefined,
+        trackingUrl: trackingUrl || undefined,
+      }).catch(() => {});
+    }
+
     res.json({
       success: true,
       message: "Order marked as shipped",
@@ -1355,6 +1393,16 @@ exports.deliverOrder = async (req, res) => {
       send: (customerEmail) => sendOrderUpdateEmail(customerEmail, "delivered", null, { order }),
     });
 
+    // 3E — Send order delivered SMS to customer (non-blocking)
+    const deliveredCustomerPhone = order?.userId?.mobile;
+    if (deliveredCustomerPhone) {
+      sendOrderDeliveredSMS({
+        to: deliveredCustomerPhone,
+        orderNumber: order.orderNumber || order._id.toString().slice(-8),
+        vendorName: order.businessId?.businessName || undefined,
+      }).catch(() => {});
+    }
+
     res.json({
       success: true,
       message: "Order marked as delivered successfully",
@@ -1396,6 +1444,15 @@ exports.initiateReturn = async (req, res) => {
       event: "return_initiated",
       send: (customerEmail) => sendOrderLifecycleEmail(customerEmail, order, "return_initiated"),
     });
+
+    // 3G — Send return/refund SMS to customer (non-blocking)
+    const returnCustomerPhone = order?.userId?.mobile;
+    if (returnCustomerPhone) {
+      sendOrderRefundedSMS({
+        to: returnCustomerPhone,
+        orderNumber: order.orderNumber || order._id.toString().slice(-8),
+      }).catch(() => {});
+    }
 
     res.json({
       success: true,
@@ -1470,6 +1527,15 @@ exports.acceptReturn = async (req, res) => {
       event: "order_refunded",
       send: (customerEmail) => sendOrderLifecycleEmail(customerEmail, order, "order_refunded"),
     });
+
+    // 3G — Send refunded SMS to customer (non-blocking)
+    const refundedCustomerPhone = order?.userId?.mobile;
+    if (refundedCustomerPhone) {
+      sendOrderRefundedSMS({
+        to: refundedCustomerPhone,
+        orderNumber: order.orderNumber || order._id.toString().slice(-8),
+      }).catch(() => {});
+    }
 
     res.json({
       success: true,
@@ -1815,6 +1881,15 @@ exports.cancelOrderByUser = async (req, res) => {
       event: "order_cancelled",
       send: (customerEmail) => sendOrderLifecycleEmail(customerEmail, order, "order_cancelled"),
     });
+
+    // 3F — Send cancelled SMS to customer + vendor (non-blocking)
+    const cancelledCustomerPhone = order?.userId?.mobile;
+    if (cancelledCustomerPhone) {
+      sendOrderCancelledCustomerSMS({
+        to: cancelledCustomerPhone,
+        orderNumber: order.orderNumber || order._id.toString().slice(-8),
+      }).catch(() => {});
+    }
 
     return res.json({
       success: true,
