@@ -7,6 +7,7 @@ const {
   sendVendorNewServiceBookingEmail,
   sendVendorNewFoodBookingEmail,
   sendCustomerNewServiceBookingConfirmationEmail,
+  sendCustomerNewFoodBookingConfirmationEmail,
   sendCustomerServicePaymentRequestEmail,
   sendCustomerServiceBookingDecisionEmail,
 } = require('../utils/bookingMailer');
@@ -265,6 +266,32 @@ exports.createFoodBooking = async (req, res) => {
       }
     } catch (mailError) {
       console.error('Failed to send new food booking email to vendor:', mailError?.message || mailError);
+    }
+
+    try {
+      const customerEmail = String(email || '').trim();
+      if (!customerEmail) {
+        console.warn('Skipping customer food booking confirmation: missing email', {
+          bookingId: newBooking._id.toString(),
+        });
+      } else {
+        await sendCustomerNewFoodBookingConfirmationEmail({
+          to: customerEmail,
+          customerName: name,
+          restaurantName: business?.businessName || owner?.name || food.title || 'Restaurant',
+          vendorName: owner?.name || business?.businessName || 'Vendor',
+          foodTitle: food.title,
+          date: formatBookingDate(date),
+          slot,
+          seats: normalizedSeats,
+          bookingId: newBooking._id.toString(),
+        });
+      }
+    } catch (mailError) {
+      console.error(
+        'Failed to send food booking confirmation email to customer:',
+        mailError?.message || mailError
+      );
     }
 
     res.status(201).json({ success: true, booking: newBooking });

@@ -11,69 +11,162 @@ const {
   withOptionalLogoAttachment,
 } = require("./emailLogoAttachment");
 
+const { baseLayout, esc } = require("./emailTemplates/baseLayout");
+
 const transporter =
   global.__MAILER__ ||
   nodemailer.createTransport(buildSmtpTransportConfig());
 
-const escapeHtml = (s = "") =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-
-function baseLayout({ heading, introHtml, ctaHref, ctaText, logoSrc = "cid:platformLogo" }) {
-  return `
-  <div style="margin:0;padding:0;background:#f6f8fa;">
-    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f6f8fa;">
-      <tr><td align="center" style="padding:24px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:640px;background:#ffffff;border-radius:12px;overflow:hidden;">
-          <tr><td align="center" style="padding:24px 24px 8px;">
-            <img src="${logoSrc}" alt="Mosaic Biz Hub" width="120" style="display:block;margin:0 auto 8px;" />
-            <h1 style="font-family:Arial,Helvetica,sans-serif;font-size:22px;line-height:28px;margin:12px 0 0;color:#111827;">${heading}</h1>
-            ${introHtml || ""}
-            ${ctaHref ? `<div style="height:8px;"></div><a href="${ctaHref}" style="display:inline-block;background:#0d6efd;color:#fff;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;padding:10px 16px;border-radius:8px;">${escapeHtml(ctaText || "Open Dashboard")}</a>` : ""}
-          </td></tr>
-          <tr><td align="center" style="padding:16px;background:#f9fafb;">
-            <p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#9ca3af;margin:0;">&copy; ${new Date().getFullYear()} Mosaic Biz Hub. All rights reserved.</p>
-          </td></tr>
-        </table>
-      </td></tr>
-    </table>
-  </div>`;
-}
-
-function customerIntro({ order, businessName, invoiceAttached }) {
+function buildCustomerOrderHtml({ order, businessName, invoiceAttached, customerOrdersUrl }) {
   const orderNo = order.groupOrderId || order._id?.toString();
-  const invoiceLine = invoiceAttached
-    ? `<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b7280;margin:10px 0 0;">
-    We've attached your invoice (PDF). You can view your order any time from your account.
-  </p>`
-    : `<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b7280;margin:10px 0 0;">
-    You can view your order any time from your account.
-  </p>`;
-  return `
-  <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#374151;margin:8px 0 0;">
-    Hi ${escapeHtml(order.userId?.name || "there")},<br/>
-    Your payment to <strong>${escapeHtml(businessName)}</strong> is confirmed. Order <strong>#${escapeHtml(orderNo)}</strong> is now placed.
-  </p>
-  ${invoiceLine}`;
-}
-
-function vendorIntro({ order, businessName, invoiceAttached }) {
-  const orderNo = order.groupOrderId || order._id?.toString();
+  const safeName = esc(order.userId?.name || 'there');
+  const safeBizName = esc(businessName);
   const itemCount = (order.items || []).reduce((n, it) => n + Number(it.quantity || 1), 0);
-  const invoiceLine = invoiceAttached
-    ? `<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b7280;margin:10px 0 0;">
-    The customer invoice is attached. Manage this order in your Partners dashboard.
-  </p>`
-    : `<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b7280;margin:10px 0 0;">
-    Manage this order in your Partners dashboard.
-  </p>`;
+  const totalAmount = order.totalAmount !== undefined && order.totalAmount !== null
+    ? `$${Number(order.totalAmount).toFixed(2)}`
+    : null;
+
   return `
-  <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#374151;margin:8px 0 0;">
-    Hi ${escapeHtml(businessName)},<br/>
-    You received a <strong>paid order</strong> <strong>#${escapeHtml(orderNo)}</strong> with ${itemCount} item${itemCount === 1 ? "" : "s"}.
-  </p>
-  ${invoiceLine}`;
+    <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+      Payment Received — Order Confirmed
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Hi ${safeName},
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Your payment to <strong>${safeBizName}</strong> is confirmed. Order <strong>#${esc(orderNo)}</strong> has been placed.
+    </p>
+
+    ${invoiceAttached ? `
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0 0 20px;line-height:1.6;">
+      We've attached your invoice (PDF). You can view your order any time from your account.
+    </p>` : ''}
+
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+          <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+            Order Summary:
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+            <tr>
+              <td style="padding:4px 0;width:140px;color:#6B7280;">Order Number:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">#${esc(orderNo)}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Merchant:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${safeBizName}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Total Items:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${itemCount} item${itemCount === 1 ? '' : 's'}</td>
+            </tr>
+            ${totalAmount ? `
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Total Amount:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${totalAmount}</td>
+            </tr>` : ''}
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${customerOrdersUrl}"
+             style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            View Your Order &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Thank you for shopping with Mosaic Biz Hub!
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Mosaic Biz Hub
+    </p>
+  `;
+}
+
+function buildVendorOrderHtml({ order, businessName, invoiceAttached, partnerOrdersUrl }) {
+  const orderNo = order.groupOrderId || order._id?.toString();
+  const ownerName = order.businessId?.owner?.name;
+  const rawName = ownerName || order.vendorId?.name || businessName;
+  const safeFirstName = esc(rawName ? rawName.split(' ')[0] : 'there');
+  const itemCount = (order.items || []).reduce((n, it) => n + Number(it.quantity || 1), 0);
+  const totalAmount = order.totalAmount !== undefined && order.totalAmount !== null
+    ? `$${Number(order.totalAmount).toFixed(2)}`
+    : null;
+
+  return `
+    <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+      New Order Received
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Hi ${safeFirstName},
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      You’ve received a new order.${invoiceAttached ? ' The invoice is attached for your records.' : ''}
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 24px;line-height:1.6;">
+      Please review the order details and begin fulfillment.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+          <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+            Order Summary:
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+            <tr>
+              <td style="padding:4px 0;width:140px;color:#6B7280;">Order Number:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">#${esc(orderNo)}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Total Items:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${itemCount} item${itemCount === 1 ? '' : 's'}</td>
+            </tr>
+            ${totalAmount ? `
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Total Amount:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">${totalAmount}</td>
+            </tr>` : ''}
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${partnerOrdersUrl}"
+             style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            View Order &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Thank you for being part of the Mosaic Biz Hub community.
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Mosaic Biz Hub
+    </p>
+  `;
 }
 
 /**
@@ -291,14 +384,19 @@ exports.sendOrderPaidEmails = async ({
 
   // CUSTOMER EMAIL
   if (needsCustomerSend) {
-    const customerHtml = baseLayout({
-      heading: "🧾 Payment received — your order is confirmed",
-      introHtml: customerIntro({ order, businessName, invoiceAttached }),
-      ctaHref: customerOrdersUrl,
-      ctaText: "View Your Order",
-      logoSrc: logoSrcForHtml,
-    });
     const orderNo = order.groupOrderId || order._id?.toString();
+    const customerBodyHtml = buildCustomerOrderHtml({
+      order,
+      businessName,
+      invoiceAttached,
+      customerOrdersUrl,
+    });
+    const customerHtml = baseLayout({
+      preheader: `Your payment to ${businessName} is confirmed. Order #${orderNo} is placed.`,
+      bodyHtml: customerBodyHtml,
+      footerReason: 'You are receiving this email because you placed an order on Mosaic Biz Hub.',
+      logoUrl: logoSrcForHtml,
+    });
     const customerText = [
       `Hi ${order.userId?.name || "there"},`,
       ``,
@@ -323,28 +421,39 @@ exports.sendOrderPaidEmails = async ({
 
   // VENDOR EMAIL
   if (needsVendorSend) {
-    const vendorHtml = baseLayout({
-      heading: "💸 You’ve received a paid order",
-      introHtml: vendorIntro({ order, businessName, invoiceAttached }),
-      ctaHref: partnerOrdersUrl,
-      ctaText: "Open Partners Dashboard",
-      logoSrc: logoSrcForHtml,
-    });
     const orderNo = order.groupOrderId || order._id?.toString();
+    const vendorBodyHtml = buildVendorOrderHtml({
+      order,
+      businessName,
+      invoiceAttached,
+      partnerOrdersUrl,
+    });
+    const vendorHtml = baseLayout({
+      preheader: `You’ve received a new order #${orderNo} on Mosaic Biz Hub.`,
+      bodyHtml: vendorBodyHtml,
+      footerReason: 'You are receiving this email because you are a registered vendor on Mosaic Biz Hub.',
+      logoUrl: logoSrcForHtml,
+    });
+    const ownerName = order.businessId?.owner?.name;
+    const rawName = ownerName || order.vendorId?.name || businessName;
+    const safeFirstName = rawName ? rawName.split(' ')[0] : 'there';
     const vendorText = [
-      `Hi ${businessName},`,
+      `Hi ${safeFirstName},`,
       ``,
-      `You received a paid order #${orderNo}.`,
-      `Manage: ${partnerOrdersUrl}`,
+      `You’ve received a new order.`,
+      `Please review the order details and begin fulfillment.`,
       ``,
-      ...(invoiceAttached ? [`Customer invoice attached (PDF).`, ``] : []),
-      `— Mosaic Biz Hub Team`,
+      `View Order: ${partnerOrdersUrl}`,
+      ``,
+      ...(invoiceAttached ? [`The invoice is attached for your records.`, ``] : []),
+      `Thank you for being part of the Mosaic Biz Hub community.`,
+      `Mosaic Biz Hub`,
     ].join("\n");
 
     results.vendor = await sendRoleEmail({
       from: formatMosaicFromHeader(),
       to: filteredVendorEmails,
-      subject: `🛍️ New paid order #${orderNo}`,
+      subject: `New Order Received - #${orderNo}`,
       text: vendorText,
       html: vendorHtml,
       attachments,

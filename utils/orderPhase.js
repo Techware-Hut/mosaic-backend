@@ -5,6 +5,7 @@ const {
   buildSmtpTransportConfig,
   formatMosaicFromHeader,
 } = require("./smtpTransport");
+const { baseLayout, esc } = require("./emailTemplates/baseLayout");
 
 const APP_NAME = process.env.APP_NAME || "Mosaic Biz Hub";
 const LOGO_URL = getFrontendLogoUrl();
@@ -204,88 +205,209 @@ async function sendVendorNewOrderEmail(to, order) {
   });
 }
 
-async function sendOrderStatusEmail(to, orderId, status) {
+async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
   const isAccepted = status === "accepted";
+  const isObject = typeof orderOrId === 'object' && orderOrId !== null;
+  const orderNo = isObject
+    ? (orderOrId.groupOrderId || orderOrId._id?.toString() || 'N/A')
+    : String(orderOrId || 'N/A');
 
-  const title = isAccepted
-    ? `Order Accepted`
-    : `Order Rejected`;
-
+  const rawCustomerName = (isObject ? orderOrId.userId?.name : null) || extra.customerName || extra.firstName || '';
+  const safeFirstName = esc(rawCustomerName ? rawCustomerName.split(' ')[0] : 'there');
+  const safeOrderNo = esc(orderNo);
   const orderUrl = buildFrontendUrl("/customer/order");
 
-  const bodyHtml = isAccepted
-    ? `
-      <p>Great news! Your order has been <strong>accepted by our partner</strong> and is now moving forward.</p>
-      <p>We’ll keep you updated as it progresses to shipping or pickup.</p>
+  if (isAccepted) {
+    const preheader = `Great news! Your order #${safeOrderNo} has been accepted and is now being prepared.`;
+    const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
-      <div style="text-align:center; margin:30px 0;">
-        <a href="${orderUrl}" target="_blank"
-          style="
-            background:#C7A040;
-            color:#ffffff;
-            padding:14px 28px;
-            text-decoration:none;
-            border-radius:6px;
-            font-weight:600;
-            display:inline-block;
-          ">
-          View Your Orders
-        </a>
-      </div>
-    `
-    : `
-      <p>We’re sorry—your order has been <strong>rejected</strong>.</p>
-      <p>We truly appreciate your interest and apologize for the inconvenience.</p>
-      <p>If payment was captured, a refund will be processed shortly.</p>
+    const bodyHtml = `
+      <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+        Your Order Has Been Accepted
+      </h1>
 
-      <div style="text-align:center; margin:30px 0;">
-        <a href="${orderUrl}" target="_blank"
-          style="
-            background:#C7A040;
-            color:#ffffff;
-            padding:14px 28px;
-            text-decoration:none;
-            border-radius:6px;
-            font-weight:600;
-            display:inline-block;
-          ">
-          View Your Orders
-        </a>
-      </div>
+      <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+        Hi ${safeFirstName},
+      </p>
+
+      <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 16px;line-height:1.6;">
+        Great news &mdash; your order <strong>#${safeOrderNo}</strong> has been accepted by the vendor and is now being prepared.
+      </p>
+
+      <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 24px;line-height:1.6;">
+        We’ll notify you when it ships.
+      </p>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+        <tr>
+          <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+            <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+              Order Summary:
+            </p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+              <tr>
+                <td style="padding:4px 0;width:140px;color:#6B7280;">Order Number:</td>
+                <td style="padding:4px 0;font-weight:600;color:#111827;">#${safeOrderNo}</td>
+              </tr>
+              <tr>
+                <td style="padding:4px 0;color:#6B7280;">Status:</td>
+                <td style="padding:4px 0;font-weight:600;color:#15803D;">Accepted &bull; Preparing</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <!-- CTA Button -->
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+        <tr>
+          <td>
+            <a href="${orderUrl}"
+               style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+              View Order Status &rarr;
+            </a>
+          </td>
+        </tr>
+      </table>
+
+      <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+        Thank you for being part of the Mosaic Biz Hub community. Shop in confidence!
+      </p>
+
+      <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+        Mosaic Biz Hub
+      </p>
     `;
 
-  const html = wrapHtml({ title, bodyHtml });
+    const html = baseLayout({
+      preheader,
+      bodyHtml,
+      footerReason,
+    });
 
-  const text = isAccepted
-    ? plainText({
-        title,
-        lines: [
-          `Your order has been accepted.`,
-          `We’ll notify you with updates soon.`,
-          `View your orders: ${orderUrl}`,
-        ],
-      })
-    : plainText({
-        title,
-        lines: [
-          `Your order has been rejected.`,
-          `We apologize for the inconvenience.`,
-          `If payment was captured, a refund will be processed shortly.`,
-          `View your orders: ${orderUrl}`,
-        ],
-      });
+    const text = [
+      `Hi ${safeFirstName},`,
+      ``,
+      `Great news — your order #${safeOrderNo} has been accepted by the vendor and is now being prepared.`,
+      `We’ll notify you when it ships.`,
+      ``,
+      `View Order Status: ${orderUrl}`,
+      ``,
+      `Thank you for being part of the Mosaic Biz Hub community. Shop in confidence!`,
+      `Mosaic Biz Hub`,
+    ].join("\n");
+
+    const mailOptions = {
+      from: formatMosaicFromHeader(),
+      to,
+      subject: `Your Order Has Been Accepted - #${safeOrderNo}`,
+      html,
+      text,
+    };
+
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      console.log("Order accepted email sent", { to, orderNo, messageId: info?.messageId });
+      return info;
+    } catch (err) {
+      console.error("Error sending order accepted email:", err);
+      throw err;
+    }
+  }
+
+  // REJECTED
+  const browseVendorsUrl = buildFrontendUrl("/");
+  const preheader = `We’re sorry — your order #${safeOrderNo} could not be fulfilled by the vendor.`;
+  const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
+
+  const bodyHtml = `
+    <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+      Your Order Could Not Be Fulfilled
+    </h1>
+
+    <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+      Hi ${safeFirstName},
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      We’re sorry &mdash; the vendor was unable to accept your order. If you need help finding alternatives, we’re here to support you.
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 24px;line-height:1.6;">
+      If payment was processed, a full refund has been initiated to your original payment method.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+      <tr>
+        <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+          <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+            Order Summary:
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+            <tr>
+              <td style="padding:4px 0;width:140px;color:#6B7280;">Order Number:</td>
+              <td style="padding:4px 0;font-weight:600;color:#111827;">#${safeOrderNo}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;color:#6B7280;">Status:</td>
+              <td style="padding:4px 0;font-weight:600;color:#DC2626;">Unfulfilled &bull; Refund Initiated</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <!-- CTA Button -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+      <tr>
+        <td>
+          <a href="${browseVendorsUrl}"
+             style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            Browse Vendors &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+      Thank you for being part of the Mosaic Biz Hub community.
+    </p>
+
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+      Mosaic Biz Hub
+    </p>
+  `;
+
+  const html = baseLayout({
+    preheader,
+    bodyHtml,
+    footerReason,
+  });
+
+  const text = [
+    `Hi ${safeFirstName},`,
+    ``,
+    `We’re sorry — the vendor was unable to accept your order. If you need help finding alternatives, we’re here to support you.`,
+    `If payment was processed, a full refund has been initiated to your original payment method.`,
+    ``,
+    `Browse Vendors: ${browseVendorsUrl}`,
+    ``,
+    `Thank you for being part of the Mosaic Biz Hub community.`,
+    `Mosaic Biz Hub`,
+  ].join("\n");
 
   const mailOptions = {
     from: formatMosaicFromHeader(),
     to,
-    subject: `${APP_NAME} • ${title}`,
+    subject: `Your Order Could Not Be Fulfilled - #${safeOrderNo}`,
     html,
     text,
   };
 
   try {
-    await transporter.sendMail(mailOptions);
-    console.log("Order status email sent", { status });
+    const info = await transporter.sendMail(mailOptions);
+    console.log("Order rejected email sent", { to, orderNo, messageId: info?.messageId });
+    return info;
   } catch (err) {
     console.error("Error sending email:", err);
     throw err;
@@ -294,96 +416,180 @@ async function sendOrderStatusEmail(to, orderId, status) {
 
 async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}) {
   const orderUrl = buildFrontendUrl("/customer/order");
-
-  let title = "";
-  let message = "";
-  let extraButton = "";
+  const order = details.order;
+  const orderNo = order?.groupOrderId || order?._id?.toString() || details.orderId || details.orderNo || '';
+  const rawCustomerName = order?.userId?.name || details.customerName || details.firstName || '';
+  const safeFirstName = esc(rawCustomerName ? rawCustomerName.split(' ')[0] : 'there');
+  const safeOrderNo = esc(orderNo);
+  const safeTrackingId = esc(details.trackingId || 'N/A');
+  const safeTrackingUrl = trackingUrl || orderUrl;
 
   if (status === "shipped") {
-    title = "Your Order Has Been Shipped";
+    const preheader = `Your order is on the way! Tracking Number: ${safeTrackingId}`;
+    const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
-    message = `
-      <p>Good news! Your order has been <strong>shipped</strong> and is on its way.</p>
-      <p>You can track your shipment using the link below.</p>
-      ${details.trackingId ? `<p><strong>Tracking ID:</strong> ${escapeHtml(details.trackingId)}</p>` : ""}
+    const bodyHtml = `
+      <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+        Your Order Is On the Way!
+      </h1>
+
+      <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+        Hi ${safeFirstName},
+      </p>
+
+      <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 16px;line-height:1.6;">
+        Your order has shipped.
+      </p>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+        <tr>
+          <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+            <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+              Shipping &amp; Tracking Details:
+            </p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+              ${safeOrderNo ? `
+              <tr>
+                <td style="padding:4px 0;width:140px;color:#6B7280;">Order Number:</td>
+                <td style="padding:4px 0;font-weight:600;color:#111827;">#${safeOrderNo}</td>
+              </tr>` : ''}
+              <tr>
+                <td style="padding:4px 0;width:140px;color:#6B7280;">Tracking Number:</td>
+                <td style="padding:4px 0;font-weight:700;color:#2563EB;">${safeTrackingId}</td>
+              </tr>
+              <tr>
+                <td style="padding:4px 0;color:#6B7280;">Status:</td>
+                <td style="padding:4px 0;font-weight:600;color:#15803D;">Shipped &bull; In Transit</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 24px;line-height:1.6;">
+        You can follow your package using the link below.
+      </p>
+
+      <!-- CTA Button -->
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;border-collapse:collapse;">
+        <tr>
+          <td>
+            <a href="${safeTrackingUrl}"
+               style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:700;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+              Track My Order &rarr;
+            </a>
+          </td>
+        </tr>
+      </table>
+
+      <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+        Thank you for supporting diverse businesses on Mosaic Biz Hub.
+      </p>
+
+      <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+        Mosaic Biz Hub
+      </p>
     `;
 
-    // ✅ Add tracking button if URL exists
-    if (trackingUrl) {
-      extraButton = `
-        <div style="text-align:center; margin:20px 0;">
-          <a href="${escapeHtml(trackingUrl)}" target="_blank"
-            style="
-              background:#333;
-              color:#ffffff;
-              padding:12px 24px;
-              text-decoration:none;
-              border-radius:6px;
-              font-weight:600;
-              display:inline-block;
-            ">
-            Track Your Shipment
-          </a>
-        </div>
-      `;
-    }
+    const html = baseLayout({
+      preheader,
+      bodyHtml,
+      footerReason,
+    });
+
+    const text = [
+      `Hi ${safeFirstName},`,
+      ``,
+      `Your order has shipped.`,
+      `Tracking Number: ${details.trackingId || 'N/A'}`,
+      `You can follow your package using the link below.`,
+      ``,
+      `Track My Order: ${safeTrackingUrl}`,
+      ``,
+      `Thank you for supporting diverse businesses on Mosaic Biz Hub.`,
+      `Mosaic Biz Hub`,
+    ].join("\n");
+
+    return transporter.sendMail({
+      from: formatMosaicFromHeader(),
+      to,
+      subject: `Your Order Is On the Way!${safeOrderNo ? ` - #${safeOrderNo}` : ''}`,
+      html,
+      text,
+    });
   }
 
+  // DELIVERED
   if (status === "delivered") {
-    title = "Your Order Has Been Delivered";
+    const preheader = `Your order ${safeOrderNo ? `#${safeOrderNo} ` : ''}has been delivered! Thank you for supporting our vendor community.`;
+    const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
-    message = `
-      <p>Your order has been <strong>successfully delivered</strong>.</p>
-      <p>We hope you enjoy your purchase. Thank you for choosing us!</p>
+    const bodyHtml = `
+      <h1 style="font-family:Arial,sans-serif;font-size:26px;font-weight:700;color:#111827;margin:0 0 12px;line-height:1.3;">
+        Your Order Has Been Delivered
+      </h1>
+
+      <p style="font-family:Arial,sans-serif;font-size:16px;color:#374151;margin:0 0 20px;line-height:1.6;">
+        Hi ${safeFirstName},
+      </p>
+
+      <p style="font-family:Arial,sans-serif;font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">
+        Your order ${safeOrderNo ? `<strong>#${safeOrderNo}</strong> ` : ''}has been delivered. We hope you enjoy your purchase &mdash; thank you for supporting our vendor community.
+      </p>
+
+      ${safeOrderNo ? `
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border-collapse:collapse;">
+        <tr>
+          <td style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;">
+            <p style="font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111827;margin:0 0 12px;">
+              Delivery Details:
+            </p>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="font-family:Arial,sans-serif;font-size:14px;color:#374151;line-height:1.8;">
+              <tr>
+                <td style="padding:4px 0;width:140px;color:#6B7280;">Order Number:</td>
+                <td style="padding:4px 0;font-weight:600;color:#111827;">#${safeOrderNo}</td>
+              </tr>
+              <tr>
+                <td style="padding:4px 0;color:#6B7280;">Status:</td>
+                <td style="padding:4px 0;font-weight:600;color:#15803D;">Delivered</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>` : ''}
+
+      <p style="font-family:Arial,sans-serif;font-size:14px;color:#374151;margin:0 0 16px;line-height:1.6;">
+        Thank you for being part of the Mosaic Biz Hub community.
+      </p>
+
+      <p style="font-family:Arial,sans-serif;font-size:14px;color:#6B7280;margin:0;line-height:1.6;">
+        Mosaic Biz Hub
+      </p>
     `;
+
+    const html = baseLayout({
+      preheader,
+      bodyHtml,
+      footerReason,
+    });
+
+    const text = [
+      `Hi ${safeFirstName},`,
+      ``,
+      `Your order ${safeOrderNo ? `#${safeOrderNo} ` : ''}has been delivered. We hope you enjoy your purchase — thank you for supporting our vendor community.`,
+      ``,
+      `Thank you for being part of the Mosaic Biz Hub community.`,
+      `Mosaic Biz Hub`,
+    ].join("\n");
+
+    return transporter.sendMail({
+      from: formatMosaicFromHeader(),
+      to,
+      subject: `Your Order Has Been Delivered${safeOrderNo ? ` - #${safeOrderNo}` : ''}`,
+      html,
+      text,
+    });
   }
-
-  const bodyHtml = `
-    ${message}
-    ${extraButton}
-
-    <div style="text-align:center; margin:30px 0;">
-      <a href="${orderUrl}" target="_blank"
-        style="
-          background:#C7A040;
-          color:#ffffff;
-          padding:14px 28px;
-          text-decoration:none;
-          border-radius:6px;
-          font-weight:600;
-          display:inline-block;
-        ">
-        View Your Orders
-      </a>
-    </div>
-  `;
-
-  const html = wrapHtml({ title, bodyHtml });
-
-  const textLines = [
-    status === "shipped"
-      ? "Your order has been shipped."
-      : "Your order has been delivered.",
-  ];
-
-  if (trackingUrl && status === "shipped") {
-    textLines.push(`Track your shipment: ${trackingUrl}`);
-  }
-
-  textLines.push(`View your orders: ${orderUrl}`);
-
-  const text = plainText({
-    title,
-    lines: textLines,
-  });
-
-  await transporter.sendMail({
-    from: formatMosaicFromHeader(),
-    to,
-    subject: `${APP_NAME} • ${title}`,
-    html,
-    text,
-  });
 }
 
 async function sendOrderLifecycleEmail(to, order, event) {

@@ -152,7 +152,8 @@ exports.registerUser = async (req, res) => {
         await newUser.save();
 
         try {
-            await sendOtpEmail(email, otp, 'register');
+            const firstName = name ? name.split(' ')[0] : '';
+            await sendOtpEmail(email, otp, 'register', firstName, safeRole);
         } catch (emailError) {
             logOtpDeliveryFailure('register', emailError);
             return respondOtpDeliveryFailed(res, 'register', {
@@ -267,7 +268,8 @@ exports.resendOtp = async (req, res) => {
         await user.save();
 
         try {
-            await sendOtpEmail(user.email, otp, 'resend');
+            const firstName = user.name ? user.name.split(' ')[0] : '';
+            await sendOtpEmail(user.email, otp, 'resend', firstName, user.role);
         } catch (emailError) {
             logOtpDeliveryFailure('resend', emailError);
             return respondOtpDeliveryFailed(res, 'resend', { user });
@@ -310,7 +312,8 @@ exports.forgotPassword = async (req, res) => {
         await user.save();
 
         try {
-            await sendPasswordResetOtpEmail(user.email, otp);
+            const firstName = user.name ? user.name.split(' ')[0] : '';
+            await sendPasswordResetOtpEmail(user.email, otp, firstName);
         } catch (emailError) {
             logOtpDeliveryFailure('passwordReset', emailError);
             return res.status(200).json(FORGOT_PASSWORD_RESPONSE);
@@ -432,7 +435,8 @@ exports.loginUser = async (req, res) => {
             await user.save();
 
             try {
-                await sendOtpEmail(user.email, otp, 'unverifiedLogin');
+                const firstName = user.name ? user.name.split(' ')[0] : '';
+                await sendOtpEmail(user.email, otp, 'unverifiedLogin', firstName, user.role);
             } catch (emailError) {
                 logOtpDeliveryFailure('unverifiedLogin', emailError);
                 return respondOtpDeliveryFailed(res, 'unverifiedLogin', { user });
