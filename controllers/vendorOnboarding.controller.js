@@ -738,7 +738,12 @@ exports.updateBusinessProfile = async (req, res) => {
         });
 
         // 2C — Send vendor profile complete SMS (non-blocking)
-        const profileUser = await User.findById(userId).select('mobile name').lean();
+        const mongoose = require("mongoose");
+        const profileUser = req.user?.mobile
+          ? req.user
+          : (mongoose.connection?.readyState === 1
+              ? await User.findById(userId).select('mobile name').lean()
+              : null);
         if (profileUser?.mobile) {
           sendVendorProfileCompleteSMS({
             to: profileUser.mobile,

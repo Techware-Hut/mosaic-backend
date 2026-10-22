@@ -1278,6 +1278,8 @@ exports.rejectOrder = async (req, res) => {
     }
 
     res.json({
+      success: true,
+      message: "Order rejected and refunded (if paid)",
       emailDelivery,
       order: serializeOrderForResponse(order),
     });
@@ -1346,6 +1348,8 @@ exports.shipOrder = async (req, res) => {
     }
 
     res.json({
+      success: true,
+      message: "Order marked as shipped",
       emailDelivery,
       order: serializeOrderForResponse(order),
     });
@@ -1400,6 +1404,8 @@ exports.deliverOrder = async (req, res) => {
     }
 
     res.json({
+      success: true,
+      message: "Order marked as delivered successfully",
       emailDelivery,
       order: serializeOrderForResponse(order),
     });
@@ -1449,6 +1455,8 @@ exports.initiateReturn = async (req, res) => {
     }
 
     res.json({
+      success: true,
+      message: 'Return initiated successfully',
       emailDelivery,
       order: serializeOrderForResponse(order),
     });

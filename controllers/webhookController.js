@@ -392,22 +392,25 @@ const handleSubscriptionWebhook = async (req, res) => {
 
       // 1D — Send tier welcome SMS (non-blocking)
       try {
-        const subUser = await User.findById(subscription.userId).select('mobile name').lean();
-        if (subUser?.mobile) {
-          const plan = subscription.subscriptionPlanId
-            ? await SubscriptionPlan.findById(subscription.subscriptionPlanId).select('name').lean()
-            : null;
-          const planName = (plan?.name || '').toLowerCase();
-          const tier = planName.includes('growth') ? 'growth'
-            : planName.includes('premium') ? 'premium'
-            : 'launch';
-          sendVendorTierWelcomeSMS({
-            to: subUser.mobile,
-            vendorName: subUser.name ? subUser.name.split(' ')[0] : undefined,
-            tier,
-          }).catch((smsErr) =>
-            console.error('[Telnyx SMS] Tier welcome SMS failed:', smsErr.message)
-          );
+        const mongoose = require('mongoose');
+        if (mongoose.connection?.readyState === 1) {
+          const subUser = await User.findById(subscription.userId).select('mobile name').lean();
+          if (subUser?.mobile) {
+            const plan = subscription.subscriptionPlanId
+              ? await SubscriptionPlan.findById(subscription.subscriptionPlanId).select('name').lean()
+              : null;
+            const planName = (plan?.name || '').toLowerCase();
+            const tier = planName.includes('growth') ? 'growth'
+              : planName.includes('premium') ? 'premium'
+              : 'launch';
+            sendVendorTierWelcomeSMS({
+              to: subUser.mobile,
+              vendorName: subUser.name ? subUser.name.split(' ')[0] : undefined,
+              tier,
+            }).catch((smsErr) =>
+              console.error('[Telnyx SMS] Tier welcome SMS failed:', smsErr.message)
+            );
+          }
         }
       } catch (smsLookupErr) {
         console.error('[Telnyx SMS] Tier welcome SMS lookup failed:', smsLookupErr.message);
