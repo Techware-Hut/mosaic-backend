@@ -27,6 +27,8 @@ const DISALLOWED_FRONTEND_ORIGINS = new Set([
   'https://api.mosaicbizhub.com',
 ]);
 
+const VERCEL_PREVIEW_PATTERN = /^https:\/\/mosaic-biz-frontend-launch(?:-[a-z0-9-]+)?\.vercel\.app$/i;
+
 function parseAbsoluteUrl(value) {
   if (!value) return null;
 
@@ -41,6 +43,15 @@ function isProductionEnv(env = process.env) {
   return env.NODE_ENV === 'production';
 }
 
+function isStagingEnv(env = process.env) {
+  return env.RELEASE_ENVIRONMENT === 'staging' || env.SENTRY_ENVIRONMENT === 'staging';
+}
+
+function isAllowedPreviewOrigin(origin) {
+  if (!origin || typeof origin !== 'string') return false;
+  return VERCEL_PREVIEW_PATTERN.test(origin);
+}
+
 function getAllowedFrontendOrigins(env = process.env) {
   const origins = [...APPROVED_FRONTEND_ORIGINS];
 
@@ -52,6 +63,15 @@ function getAllowedFrontendOrigins(env = process.env) {
     origins.push(...DEV_FRONTEND_ORIGINS);
   }
 
+  for (const key of ENV_PRIORITY) {
+    const origin = getOrigin(env[key]);
+    if (origin && !DISALLOWED_FRONTEND_ORIGINS.has(origin)) {
+      if (isAllowedPreviewOrigin(origin) || isStagingEnv(env)) {
+        origins.push(origin);
+      }
+    }
+  }
+
   return [...new Set(origins)];
 }
 
@@ -60,6 +80,15 @@ function getGeneratedFrontendOrigins(env = process.env) {
 
   if (!isProductionEnv(env)) {
     origins.push(...DEV_FRONTEND_ORIGINS);
+  }
+
+  for (const key of ENV_PRIORITY) {
+    const origin = getOrigin(env[key]);
+    if (origin && !DISALLOWED_FRONTEND_ORIGINS.has(origin)) {
+      if (isAllowedPreviewOrigin(origin) || isStagingEnv(env)) {
+        origins.push(origin);
+      }
+    }
   }
 
   return [...new Set(origins)];
@@ -75,13 +104,15 @@ function getOrigin(value) {
 function isAllowedFrontendOrigin(value, env = process.env) {
   const origin = getOrigin(value);
   if (!origin || DISALLOWED_FRONTEND_ORIGINS.has(origin)) return false;
-  return getAllowedFrontendOrigins(env).includes(origin);
+  if (getAllowedFrontendOrigins(env).includes(origin)) return true;
+  return isAllowedPreviewOrigin(origin);
 }
 
 function isAllowedGeneratedFrontendOrigin(value, env = process.env) {
   const origin = getOrigin(value);
   if (!origin || DISALLOWED_FRONTEND_ORIGINS.has(origin)) return false;
-  return getGeneratedFrontendOrigins(env).includes(origin);
+  if (getGeneratedFrontendOrigins(env).includes(origin)) return true;
+  return isAllowedPreviewOrigin(origin);
 }
 
 function toBaseUrlString(url) {
@@ -156,6 +187,7 @@ module.exports = {
   GENERATED_FRONTEND_ORIGINS,
   LAUNCH_QA_FRONTEND_URL,
   LEGACY_FRONTEND_URL,
+  VERCEL_PREVIEW_PATTERN,
   buildFrontendUrl,
   getAllowedFrontendOrigins,
   getFrontendBaseUrl,
@@ -163,6 +195,8 @@ module.exports = {
   getFrontendLogoUrl,
   isAllowedGeneratedFrontendOrigin,
   isAllowedFrontendOrigin,
+  isAllowedPreviewOrigin,
+  isStagingEnv,
   normalizeFrontendUrl,
   sanitizeFrontendRedirectUrl,
 };

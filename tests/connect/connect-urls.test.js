@@ -120,3 +120,45 @@ test('getReturnAndRefreshUrls preserves legacy app overrides only for explicit r
     'https://app.mosaicbizhub.com/partners/connect/refresh?businessId=507f1f77bcf86cd799439011'
   );
 });
+
+test('getReturnAndRefreshUrls routes to candidate preview frontend and redirects away from stale apex in staging', () => {
+  const stagingEnv = {
+    NODE_ENV: 'production',
+    RELEASE_ENVIRONMENT: 'staging',
+    FRONTEND_URL: 'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app',
+    CONNECT_RETURN_URL: 'https://mosaicbizhub.com/partners/payout-setup',
+    CONNECT_REFRESH_URL: 'https://mosaicbizhub.com/partners/payout-setup',
+  };
+
+  const urls = getReturnAndRefreshUrls(businessId, stagingEnv);
+
+  assert.equal(
+    urls.returnUrl,
+    'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app/partners/payout-setup?businessId=507f1f77bcf86cd799439011'
+  );
+  assert.equal(
+    urls.refreshUrl,
+    'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app/partners/payout-setup?businessId=507f1f77bcf86cd799439011'
+  );
+});
+
+test('getReturnAndRefreshUrls routes to preview when CONNECT_RETURN_URL is explicitly preview', () => {
+  const stagingEnv = {
+    NODE_ENV: 'production',
+    RELEASE_ENVIRONMENT: 'staging',
+    FRONTEND_URL: 'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app',
+    CONNECT_RETURN_URL: 'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app/partners/payout-setup',
+    CONNECT_REFRESH_URL: 'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app/partners/payout-setup',
+  };
+
+  const urls = getReturnAndRefreshUrls(businessId, stagingEnv);
+
+  assert.equal(
+    urls.returnUrl,
+    'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app/partners/payout-setup?businessId=507f1f77bcf86cd799439011'
+  );
+  assert.equal(
+    urls.refreshUrl,
+    'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app/partners/payout-setup?businessId=507f1f77bcf86cd799439011'
+  );
+});

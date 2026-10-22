@@ -1043,6 +1043,41 @@ exports.createVerificationPayment = async (req, res) => {
       });
     }
 
+    // Reuse existing unpaid PaymentIntent if still active on Stripe (idempotent recovery)
+    if (onboarding.verificationPayment?.paymentIntentId) {
+      try {
+        const existingIntent = await stripe.paymentIntents.retrieve(
+          onboarding.verificationPayment.paymentIntentId
+        );
+        if (
+          existingIntent &&
+          existingIntent.status !== "succeeded" &&
+          existingIntent.status !== "canceled"
+        ) {
+          onboarding.status = "payment_pending";
+          await onboarding.save();
+
+          return res.status(200).json({
+            success: true,
+            message: "Payment intent retrieved successfully. Complete payment to continue.",
+            data: {
+              clientSecret: existingIntent.client_secret,
+              amount: 24.99,
+              currency: "usd",
+              status: "pending",
+              applicationStatus: "payment_pending",
+              applicationId: onboarding.applicationId || "N/A"
+            }
+          });
+        }
+      } catch (retrieveError) {
+        console.warn(
+          "Could not retrieve existing payment intent from Stripe, proceeding to create new:",
+          retrieveError.message
+        );
+      }
+    }
+
     const paymentIntent = await stripe.paymentIntents.create({
       amount: 2499,
       currency: 'usd',
@@ -1077,7 +1112,8 @@ exports.createVerificationPayment = async (req, res) => {
         amount: 24.99,
         currency: 'usd',
         status: 'pending',
-        applicationStatus: 'payment_pending'
+        applicationStatus: 'payment_pending',
+        applicationId: onboarding.applicationId || "N/A"
       }
     });
 

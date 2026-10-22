@@ -1179,7 +1179,7 @@ exports.acceptOrder = async (req, res) => {
     const emailDelivery = await sendCustomerOrderLifecycleEmail({
       order,
       event: "order_accepted",
-      send: (customerEmail) => sendOrderStatusEmail(customerEmail, order._id.toString(), "accepted"),
+      send: (customerEmail) => sendOrderStatusEmail(customerEmail, order, "accepted"),
     });
 
     // 3C — Send order accepted SMS to customer (non-blocking)
@@ -1265,7 +1265,7 @@ exports.rejectOrder = async (req, res) => {
     const emailDelivery = await sendCustomerOrderLifecycleEmail({
       order,
       event: "order_rejected",
-      send: (customerEmail) => sendOrderStatusEmail(customerEmail, order._id.toString(), "rejected"),
+      send: (customerEmail) => sendOrderStatusEmail(customerEmail, order, "rejected"),
     });
 
     // 3F — Send order cancelled SMS to customer (non-blocking)
@@ -1303,7 +1303,7 @@ exports.shipOrder = async (req, res) => {
     }
 
     const order = await Order.findOne({ _id: orderId, vendorId })
-      .populate("userId", "email"); // ✅ FIX
+      .populate("userId", "name email");
 
     if (!order) {
       return res.status(404).json({
@@ -1365,7 +1365,7 @@ exports.deliverOrder = async (req, res) => {
     const orderId = req.params.orderId;
 
     const order = await Order.findOne({ _id: orderId, vendorId })
-      .populate("userId", "email"); // ✅ IMPORTANT FIX
+      .populate("userId", "name email"); // ✅ IMPORTANT FIX
 
     if (!order) {
       return res.status(404).json({
@@ -1390,7 +1390,7 @@ exports.deliverOrder = async (req, res) => {
     const emailDelivery = await sendCustomerOrderLifecycleEmail({
       order,
       event: "order_delivered",
-      send: (customerEmail) => sendOrderUpdateEmail(customerEmail, "delivered"),
+      send: (customerEmail) => sendOrderUpdateEmail(customerEmail, "delivered", null, { order }),
     });
 
     // 3E — Send order delivered SMS to customer (non-blocking)

@@ -172,8 +172,33 @@ test('isAllowedFrontendOrigin approves apex, launch Vercel, explicit legacy roll
     isAllowedFrontendOrigin('https://mosaic-biz-frontend-launch.vercel.app', { NODE_ENV: 'production' }),
     true
   );
+  assert.equal(
+    isAllowedFrontendOrigin('https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app', { NODE_ENV: 'production' }),
+    true
+  );
   assert.equal(isAllowedFrontendOrigin('https://www.mosaicbizhub.com', { NODE_ENV: 'production' }), false);
   assert.equal(isAllowedFrontendOrigin('https://api.mosaicbizhub.com', { NODE_ENV: 'production' }), false);
   assert.equal(isAllowedFrontendOrigin('http://localhost:3000', { NODE_ENV: 'development' }), true);
   assert.equal(isAllowedFrontendOrigin('http://localhost:3000', { NODE_ENV: 'production' }), false);
+});
+
+test('getFrontendBaseUrl and buildFrontendUrl support candidate Vercel preview origins', () => {
+  const env = {
+    NODE_ENV: 'production',
+    RELEASE_ENVIRONMENT: 'staging',
+    FRONTEND_URL: 'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app',
+  };
+
+  assert.equal(
+    getFrontendBaseUrl(env),
+    'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app'
+  );
+  assert.equal(
+    buildFrontendUrl('/partners/business/payment', env),
+    'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app/partners/business/payment'
+  );
+  assert.equal(
+    buildFrontendUrl('/login?type=vendor', env),
+    'https://mosaic-biz-frontend-launch-23bhu2726-digital-builders.vercel.app/login?type=vendor'
+  );
 });
