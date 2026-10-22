@@ -1,6 +1,6 @@
 // mailer/businessStatusEmails.js
 const nodemailer = require("nodemailer");
-const { buildFrontendUrl } = require("./frontendUrl");
+const { buildFrontendUrl, getFrontendBaseUrl } = require("./frontendUrl");
 const {
   buildSmtpTransportConfig,
   formatMosaicFromHeader,

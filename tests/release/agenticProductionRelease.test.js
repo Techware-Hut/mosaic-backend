@@ -650,8 +650,21 @@ test('EB source-bundle validator accepts an exact Git archive and rejects extra 
   const hookZip = path.join(temporary, 'root-hook.zip');
   assert.equal(run('git', ['archive', '--format=zip', `--output=${hookZip}`,
     `--add-virtual-file=release-manifest.json:${hookManifest}`, hookSha]).status, 0);
-  const python = process.platform === 'win32' ? 'py' : 'python3';
-  const prefix = process.platform === 'win32' ? ['-3'] : [];
+  let python = process.platform === 'win32' ? 'py' : 'python3';
+  let prefix = process.platform === 'win32' ? ['-3'] : [];
+  if (process.platform === 'win32') {
+    const pyCheck = spawnSync('py', ['-3', '--version']);
+    if (pyCheck.status !== 0) {
+      const pythonCheck = spawnSync('python', ['--version']);
+      if (pythonCheck.status === 0) {
+        python = 'python';
+        prefix = [];
+      } else {
+        t.skip('Python is not installed on this host');
+        return;
+      }
+    }
+  }
   const validator = path.join(repoRoot, 'scripts/release/validate-eb-source-bundle.py');
   const args = (bundle) => [...prefix, validator, '--bundle', bundle, '--release-sha', sha,
     '--source-tree', sourceTree, '--version-label', version];
