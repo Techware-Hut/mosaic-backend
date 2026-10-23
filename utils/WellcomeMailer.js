@@ -491,7 +491,7 @@ exports.sendVendorApprovedEmail = async ({
     : new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
   const continueOnboardingUrl = buildFrontendUrl('/login?type=vendor');
-  const ctaUrl = buildFrontendUrl('/partners/dashboard');
+  const ctaUrl = buildFrontendUrl('/partners');
   const ctaText = 'Add Your First Listing';
   const preheader = `Congratulations ${safeFirstName}! Your business has passed initial verification.`;
   const footerReason = 'You are receiving this email because your vendor application was approved on Mosaic Biz Hub.';
