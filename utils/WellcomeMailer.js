@@ -492,7 +492,7 @@ exports.sendVendorApprovedEmail = async ({
 
   const continueOnboardingUrl = buildFrontendUrl('/login?type=vendor');
   const ctaUrl = buildFrontendUrl('/partners');
-  const ctaText = 'Add Your First Listing';
+  const ctaText = 'Continue Tier Plan';
   const preheader = `Congratulations ${safeFirstName}! Your business has passed initial verification.`;
   const footerReason = 'You are receiving this email because your vendor application was approved on Mosaic Biz Hub.';
 
@@ -592,7 +592,7 @@ exports.sendVendorApprovedEmail = async ({
     '• Add product/service listings',
     '• Customize your vendor profile',
     '',
-    `Add Your First Listing: ${ctaUrl}`,
+    `${ctaText}: ${ctaUrl}`,
     '',
     'Thank you for being part of the Mosaic Biz Hub community.',
     '— The Mosaic Biz Hub Team',
