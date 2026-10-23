@@ -45,9 +45,12 @@ function normalizeListingType(value) {
 
 function tierFromPlanName(value) {
   const name = String(value || '').trim().toLowerCase();
-  if (name === 'silver' || name === 'silver plan') return 'Silver';
-  if (name === 'gold' || name === 'gold plan') return 'Gold';
-  if (name === 'platinum' || name === 'platinum plan') return 'Platinum';
+  // Align with migrate-rename-plan-tiers.js while preserving historical quota
+  // keys and compatibility with plan records not yet renamed. Names only:
+  // approved caps, stored top-tier floors, and subscription ownership are unchanged.
+  if (name === 'silver' || name === 'silver plan' || name === 'launch' || name === 'launch plan') return 'Silver';
+  if (name === 'gold' || name === 'gold plan' || name === 'growth' || name === 'growth plan') return 'Gold';
+  if (name === 'platinum' || name === 'platinum plan' || name === 'legacy' || name === 'legacy plan') return 'Platinum';
   return null;
 }
 
