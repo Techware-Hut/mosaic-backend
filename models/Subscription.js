@@ -46,6 +46,10 @@ const SubscriptionSchema = new mongoose.Schema({
     type: String,
     enum: ['active', 'expired', 'cancelled','pending'],
     default: 'active',
+  },
+  welcomeEmailSent: {
+    type: Boolean,
+    default: false,
   }
 }, { timestamps: true });
 

@@ -6,6 +6,7 @@ const Business = require("../models/Business");
 const { sendWelcomeEmail } = require("../utils/WellcomeMailer");
 const { ensurePlanPrice } = require('../helpers/stripePlan');
 const { buildFrontendUrl } = require('../utils/frontendUrl');
+const { triggerTierWelcomeNotifications } = require('../utils/vendorTierWelcomeEmail');
 
 exports.createCheckoutSession = async (req, res) => {
   try {
@@ -194,6 +195,7 @@ exports.handleStripeWebhook = async (req, res) => {
           : `Business created successfully.`;
 
       sendWelcomeEmail(business.email, businessName);
+      triggerTierWelcomeNotifications(newSubscription);
       return res.status(200).json({
         message: responseMessage,
         business,
