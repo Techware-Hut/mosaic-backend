@@ -2,6 +2,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Subscription = require('../models/Subscription');
 const SubscriptionPlan = require('../models/SubscriptionPlan');
 const { ensurePlanPrice } = require('../helpers/stripePlan'); // ← ADD THIS
+const { triggerTierWelcomeNotifications } = require('../utils/vendorTierWelcomeEmail');
 
 exports.createSubscription = async (req, res) => {
   try {
@@ -103,6 +104,10 @@ exports.createSubscription = async (req, res) => {
     });
 
     await subscription.save();
+
+    if (!requiresPayment) {
+      triggerTierWelcomeNotifications(subscription);
+    }
 
     return res.status(201).json({
       success: true,
