@@ -14,7 +14,8 @@ function getOnboardingReminderConfig() {
   const batchLimit = Number(process.env.ONBOARDING_REMINDER_BATCH_LIMIT);
 
   return {
-    enabled: process.env.ENABLE_ONBOARDING_REMINDERS !== 'false',
+    // Reminders stay off until the resume-onboarding journey is approved for use.
+    enabled: process.env.ENABLE_ONBOARDING_REMINDERS === 'true',
     cronExpression: process.env.ONBOARDING_REMINDER_CRON || '0 9 * * *',
     minAgeHours: Number.isFinite(minAgeHours) && minAgeHours > 0 ? minAgeHours : 24,
     cooldownHours: Number.isFinite(cooldownHours) && cooldownHours > 0 ? cooldownHours : 72,
@@ -158,7 +159,7 @@ function startOnboardingReminderScheduler() {
   const config = getOnboardingReminderConfig();
 
   if (!config.enabled) {
-    console.log('Onboarding reminder scheduler disabled (ENABLE_ONBOARDING_REMINDERS=false)');
+    console.log('Onboarding reminder scheduler disabled (explicit opt-in required)');
     return null;
   }
 
