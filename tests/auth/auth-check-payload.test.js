@@ -118,6 +118,7 @@ test('GET /auth/check response uses toPublicAuthUser whitelist', async () => {
   const req = { user: mockUser };
   const res = {
     body: null,
+    locals: { authCheckSessionPolicy: 'legacy' },
     json(payload) {
       this.body = payload;
       return this;
@@ -127,10 +128,178 @@ test('GET /auth/check response uses toPublicAuthUser whitelist', async () => {
   await handler(req, res);
 
   assert.equal(res.body.loggedIn, true);
+  assert.equal(res.body.sessionPolicy, 'legacy');
   assert.deepEqual(Object.keys(res.body.user).sort(), EXPECTED_KEYS.sort());
   for (const key of FORBIDDEN_KEYS) {
     assert.equal(key in res.body.user, false, `forbidden key in auth/check: ${key}`);
   }
+});
+
+// Exercise the actual route stack/guard. Only the downstream authentication
+// boundary is stubbed here; integration tests below use the real middleware.
+function loadAuthCheckStack(onAuthenticate) {
+  const originalLoad = Module._load;
+  const controllerMocks = new Proxy({}, { get: () => () => {} });
+  try {
+    Module._load = function loadRouteMocks(request, parent, isMain) {
+      if (request === '../controllers/userController') return controllerMocks;
+      if (request === '../middlewares/authenticate') return onAuthenticate;
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    delete require.cache[userRoutesPath];
+    return require(userRoutesPath).stack.find((layer) => layer.route?.path === '/auth/check').route.stack;
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[userRoutesPath];
+  }
+}
+
+async function withAuthCheckPolicy(mode, fn, overrides = {}) {
+  const values = {
+    AUTH_SESSION_POLICY: mode, RELEASE_ENVIRONMENT: 'staging', SENTRY_ENVIRONMENT: 'staging',
+    API_BASE_URL: 'https://api-staging.mosaicbizhub.com', COOKIE_DOMAIN: '.mosaicbizhub.com',
+    COOKIE_SECURE: 'true', COOKIE_SAMESITE: 'none', TEMP_COOKIE_NAME: undefined, ...overrides,
+  };
+  const saved = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await fn();
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+}
+
+async function invokeAuthCheck({ query = '', headers = {}, rawHeaders, cookies = {} } = {}) {
+  let authenticateCalls = 0;
+  const stack = loadAuthCheckStack((req, _res, next) => {
+    authenticateCalls += 1;
+    req.user = { _id: '507f1f77bcf86cd799439011', role: 'business_owner', name: 'Synthetic Vendor', isOtpVerified: true };
+    next();
+  });
+  const req = { originalUrl: `/api/users/auth/check${query}`, headers, rawHeaders, cookies };
+  const res = {
+    statusCode: 200, body: null, headers: {}, locals: {},
+    setHeader(name, value) { this.headers[name.toLowerCase()] = value; return this; },
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; },
+  };
+  for (const layer of stack) {
+    let next = false;
+    await layer.handle(req, res, () => { next = true; });
+    if (!next) break;
+  }
+  assert.equal(res.headers['cache-control'], 'no-store');
+  assert.equal(res.headers['set-cookie'], undefined);
+  return { res, authenticateCalls };
+}
+
+test('STG-005 auth-check default and explicit legacy preserve downstream authentication and public user shape', async () => {
+  for (const mode of [undefined, 'legacy']) {
+    await withAuthCheckPolicy(mode, async () => {
+      for (const query of ['', '?sessionPolicy=legacy']) {
+        const { res, authenticateCalls } = await invokeAuthCheck({ query, headers: { authorization: 'Basic legacy-ignored-value' } });
+        assert.equal(res.statusCode, 200);
+        assert.equal(authenticateCalls, 1);
+        assert.equal(res.body.sessionPolicy, 'legacy');
+        assert.equal(res.body.user.role, 'business_owner');
+        assert.equal('sessionVersion' in res.body.user, false);
+      }
+    });
+  }
+});
+
+for (const mode of ['legacy', 'staging-v1']) {
+  for (const query of [
+    '?sessionPolicy=', '?sessionPolicy=unknown', '?sessionPolicy=STAGING-V1',
+    '?sessionPolicy=%20staging-v1', '?sessionPolicy=legacy&sessionPolicy=legacy',
+    '?sessionPolicy=staging-v1&sessionPolicy=legacy', '?sessionPolicy[]=staging-v1',
+    '?sessionPolicy[mode]=staging-v1', '?sessionPolicy.value=staging-v1',
+    '?sessionPolicy=staging-v1&sessionPolicy[]=staging-v1',
+  ]) {
+    test(`STG-005 auth-check ${mode} rejects invalid/ambiguous reserved query ${query}`, async () => {
+      await withAuthCheckPolicy(mode, async () => {
+        const { res, authenticateCalls } = await invokeAuthCheck({ query });
+        assert.equal(res.statusCode, 409);
+        assert.equal(res.body.code, 'AUTH_SESSION_POLICY_MISMATCH');
+        assert.equal(authenticateCalls, 0, 'compatibility denial must precede JWT/DB authentication');
+        assert.equal(res.body.user, undefined);
+        assert.equal(res.body.sessionPolicy, undefined);
+      });
+    });
+  }
+}
+
+test('STG-005 auth-check rejects either explicit policy mismatch before authentication', async () => {
+  for (const [mode, requested] of [['legacy', 'staging-v1'], ['staging-v1', 'legacy']]) {
+    await withAuthCheckPolicy(mode, async () => {
+      const { res, authenticateCalls } = await invokeAuthCheck({ query: `?sessionPolicy=${requested}` });
+      assert.equal(res.statusCode, 409);
+      assert.equal(res.body.code, 'AUTH_SESSION_POLICY_MISMATCH');
+      assert.equal(authenticateCalls, 0);
+    });
+  }
+});
+
+test('STG-005 auth-check active selected cookie requires marker even alongside bearer', async () => {
+  await withAuthCheckPolicy('staging-v1', async () => {
+    for (const headers of [
+      { cookie: 'mbh_stg_token=synthetic-cookie' },
+      { cookie: 'mbh_stg_token=synthetic-cookie', authorization: 'Bearer synthetic-bearer' },
+    ]) {
+      const { res, authenticateCalls } = await invokeAuthCheck({ headers });
+      assert.equal(res.statusCode, 409);
+      assert.equal(res.body.code, 'AUTH_SESSION_POLICY_MISMATCH');
+      assert.equal(authenticateCalls, 0);
+    }
+  });
+});
+
+test('STG-005 auth-check matching active marker and unmarked no-selected-cookie clients still authenticate downstream', async () => {
+  await withAuthCheckPolicy('staging-v1', async () => {
+    for (const request of [
+      { query: '?sessionPolicy=staging-v1', headers: { cookie: 'mbh_stg_token=synthetic-cookie' } },
+      { headers: { authorization: 'Bearer synthetic-bearer' } },
+      { headers: { cookie: 'token=legacy-cookie' } },
+      {},
+    ]) {
+      const { res, authenticateCalls } = await invokeAuthCheck(request);
+      assert.equal(authenticateCalls, 1, 'guard must not substitute for real authentication');
+      assert.equal(res.body.sessionPolicy, 'staging-v1');
+    }
+  });
+});
+
+test('STG-005 auth-check active raw credential ambiguity wins before compatibility and never clears cookies', async () => {
+  await withAuthCheckPolicy('staging-v1', async () => {
+    for (const request of [
+      { headers: { cookie: 'mbh_stg_token=a; mbh_stg_token=a' } },
+      { headers: { cookie: 'mbh_stg_token=b; mbh_stg_token=a' } },
+      { headers: { cookie: 'mbh_stg_token=%ZZ' } },
+      { headers: { authorization: '' } },
+      { headers: { authorization: 'Basic synthetic' } },
+      { headers: { authorization: 'Bearer a, Bearer b' } },
+      { headers: { authorization: 'Bearer a' }, rawHeaders: ['Authorization', 'Bearer a', 'Authorization', 'Bearer a'] },
+    ]) {
+      const { res, authenticateCalls } = await invokeAuthCheck({ query: '?sessionPolicy=unknown', ...request });
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.body.code, 'AUTH_CREDENTIAL_CONFLICT');
+      assert.equal(authenticateCalls, 0);
+    }
+  });
+});
+
+test('STG-005 auth-check configuration failure is safe, non-destructive and precedes authentication', async () => {
+  await withAuthCheckPolicy('staging-v1', async () => {
+    const { res, authenticateCalls } = await invokeAuthCheck({ query: '?sessionPolicy=staging-v1' });
+    assert.equal(res.statusCode, 401);
+    assert.equal(res.body.code, 'INVALID_AUTH_SESSION_POLICY');
+    assert.equal(authenticateCalls, 0);
+    assert.equal(JSON.stringify(res.body).includes('synthetic-password'), false);
+  }, { API_BASE_URL: 'https://synthetic-user:synthetic-password@api-staging.mosaicbizhub.com' });
 });
 
 test('buildSessionToken uses sub claim for session JWT', () => {

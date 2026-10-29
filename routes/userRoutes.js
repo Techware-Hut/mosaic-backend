@@ -4,6 +4,10 @@ const rateLimit = require('express-rate-limit');
 const userController = require('../controllers/userController');
 const authenticate = require('../middlewares/authenticate')
 const toPublicAuthUser = require('../utils/toPublicAuthUser');
+const {
+  resolveSessionPolicy, readCredentialCookie, readBearerCredential,
+} = require('../utils/sessionPolicy');
+const { sendError, sendUnauthorized } = require('../utils/apiError');
 
 const router = express.Router();
 
@@ -122,8 +126,55 @@ router.post(
   userController.resetPassword
 );
 
-router.get('/auth/check', authenticate, (req, res) => {
-  res.json({ loggedIn: true, user: toAuthCheckUser(req.user) });
+// Compatibility metadata is not an authentication credential. Keep all JWT,
+// identity and session-version checks in the existing authenticate middleware.
+function requireAuthCheckCompatibility(req, res, next) {
+  res.setHeader('Cache-Control', 'no-store');
+  let policy;
+  try { policy = resolveSessionPolicy(); }
+  catch {
+    return sendUnauthorized(req, res, 'Invalid authentication session policy configuration', {
+      code: 'INVALID_AUTH_SESSION_POLICY',
+    });
+  }
+
+  let selectedCookie;
+  if (policy.staging) {
+    try {
+      selectedCookie = readCredentialCookie(req, policy.cookieNames.token);
+      readBearerCredential(req);
+    } catch {
+      return sendUnauthorized(req, res, 'Conflicting authentication credentials', {
+        code: 'AUTH_CREDENTIAL_CONFLICT',
+      });
+    }
+  }
+
+  // Read the raw query so Express parser choices cannot hide duplicates/arrays.
+  const query = new URL(req.originalUrl || req.url || '/auth/check', 'http://auth-check.invalid').searchParams;
+  const values = query.getAll('sessionPolicy');
+  const structured = [...query.keys()].some((key) => /^sessionPolicy[\[.]/.test(key));
+  const supplied = values.length > 0 || structured;
+  if ((supplied && (structured || values.length !== 1 ||
+      !['legacy', 'staging-v1'].includes(values[0]) || values[0] !== policy.mode)) ||
+      (!supplied && policy.staging && selectedCookie.present)) {
+    return sendError(req, res, 409, {
+      message: 'Frontend and backend session policies do not match',
+      code: 'AUTH_SESSION_POLICY_MISMATCH',
+    });
+  }
+
+  // Unmarked anonymous and bearer-only clients retain the existing auth path.
+  res.locals.authCheckSessionPolicy = policy.mode;
+  return next();
+}
+
+router.get('/auth/check', requireAuthCheckCompatibility, authenticate, (req, res) => {
+  res.json({
+    loggedIn: true,
+    sessionPolicy: res.locals.authCheckSessionPolicy,
+    user: toAuthCheckUser(req.user),
+  });
 });
 
 // ── Vendor Settings ────────────────────────────────────────────────────────────
