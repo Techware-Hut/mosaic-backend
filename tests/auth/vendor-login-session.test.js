@@ -204,3 +204,100 @@ test('loginUser uses same session token shape as customer (sub claim via jwt.sig
   assert.equal(signedPayload.role, 'business_owner');
   assert.equal(signedPayload.sessionVersion, 0);
 });
+
+async function withStagingLoginEnv(overrides, fn) {
+  const values = {
+    AUTH_SESSION_POLICY: 'staging-v1',
+    RELEASE_ENVIRONMENT: 'staging',
+    SENTRY_ENVIRONMENT: 'staging',
+    API_BASE_URL: 'https://api-staging.mosaicbizhub.com',
+    COOKIE_DOMAIN: '.mosaicbizhub.com',
+    COOKIE_SECURE: 'true',
+    COOKIE_SAMESITE: 'none',
+    JWT_SECRET: 'synthetic-stg005-controller-key',
+    TEMP_COOKIE_NAME: undefined,
+    ...overrides,
+  };
+  const saved = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  const cookiePath = path.resolve(__dirname, '../../utils/cookieHelper.js');
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    delete require.cache[cookiePath];
+    await fn(require(cookiePath));
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    delete require.cache[userControllerPath];
+    delete require.cache[cookiePath];
+  }
+}
+
+test('STG-005 opt-in password login mints a real scoped JWT and namespaced cookie family', async () => {
+  await withStagingLoginEnv({}, async (cookieHelper) => {
+    const realJwt = require('jsonwebtoken');
+    const { mocks } = baseMocks({ extra: {
+      jsonwebtoken: realJwt,
+      '../utils/cookieHelper': cookieHelper,
+      '../utils/telnyxService': { sendOtpSMS: async () => {}, sendCustomerWelcomeSMS: async () => {} },
+    } });
+    const controller = withMocks(userControllerPath, mocks);
+    const res = createResponse();
+    const issued = [];
+    res.cookie = (name, value, options) => { issued.push({ name, value, options }); return res; };
+    await controller.loginUser({ body: { email: verifiedVendor.email, password: 'synthetic-password' } }, res);
+    assert.equal(res.statusCode, 200);
+    const payload = realJwt.verify(res.body.token, process.env.JWT_SECRET, {
+      algorithms: ['HS256'], issuer: 'https://api-staging.mosaicbizhub.com', audience: 'mosaic-staging-api',
+    });
+    assert.equal(payload.sub, verifiedVendor._id);
+    assert.equal(payload.token_use, 'session');
+    assert.equal(payload.sessionVersion, verifiedVendor.sessionVersion);
+    assert.equal(payload.exp - payload.iat, 604800);
+    assert.deepEqual(issued.map((cookie) => cookie.name), ['mbh_stg_token', 'mbh_stg_user_session', 'mbh_stg_user_gender']);
+    assert.equal(issued[0].value, res.body.token);
+    assert.equal(issued[0].options.httpOnly, true);
+    assert.equal(issued[0].options.maxAge, 604800000);
+    assert.equal(res.body.user.role, 'business_owner');
+  });
+});
+
+test('STG-005 invalid explicit policy rejects login before DB or provider work', async () => {
+  await withStagingLoginEnv({ COOKIE_SECURE: 'false' }, async (cookieHelper) => {
+    let effects = 0;
+    const { mocks } = baseMocks({ User: { findOne: async () => { effects += 1; return verifiedVendor; } }, extra: {
+      '../utils/cookieHelper': cookieHelper,
+      '../utils/telnyxService': { sendOtpSMS: async () => { effects += 1; }, sendCustomerWelcomeSMS: async () => { effects += 1; } },
+    } });
+    const controller = withMocks(userControllerPath, mocks);
+    const res = createResponse();
+    res.cookie = () => { effects += 1; };
+    await controller.loginUser({ body: { email: verifiedVendor.email, password: 'synthetic-password' } }, res);
+    assert.ok(res.statusCode >= 400);
+    assert.equal(effects, 0);
+  });
+});
+
+test('STG-005 logout clears five owned names without changing legacy logout or revoking tokens', async () => {
+  for (const selector of ['legacy', 'staging-v1']) {
+    await withStagingLoginEnv({ AUTH_SESSION_POLICY: selector }, async (cookieHelper) => {
+      const { mocks } = baseMocks({ extra: { '../utils/cookieHelper': cookieHelper } });
+      const controller = withMocks(userControllerPath, mocks);
+      const res = createResponse();
+      const cleared = [];
+      res.clearCookie = (name, options) => { cleared.push({ name, options }); return res; };
+      await controller.logout({}, res);
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(res.body, { message: 'Logged out successfully' });
+      assert.deepEqual(cleared.map((cookie) => cookie.name), selector === 'legacy'
+        ? ['token', 'user_session', 'user_gender', 'otpPending']
+        : ['mbh_stg_token', 'mbh_stg_user_session', 'mbh_stg_user_gender', 'mbh_stg_otp_pending', 'mbh_stg_tmp']);
+      assert.equal(verifiedVendor.sessionVersion, 0);
+      assert.equal(cleared.every((cookie) => cookie.options.maxAge === 0), true);
+    });
+  }
+});

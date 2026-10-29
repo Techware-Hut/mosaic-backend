@@ -164,3 +164,102 @@ test('clearCookie sets expires and maxAge zero for logout compatibility', () => 
   assert.ok(cleared[0].options.expires instanceof Date);
   assert.equal(cleared[0].options.domain, getCookieOptions(1000).domain);
 });
+
+function withSessionCookieEnv(overrides, fn) {
+  const values = {
+    NODE_ENV: 'production',
+    AUTH_SESSION_POLICY: 'staging-v1',
+    RELEASE_ENVIRONMENT: 'staging',
+    SENTRY_ENVIRONMENT: 'staging',
+    API_BASE_URL: 'https://api-staging.mosaicbizhub.com',
+    COOKIE_DOMAIN: '.mosaicbizhub.com',
+    COOKIE_SECURE: 'true',
+    COOKIE_SAMESITE: 'none',
+    TEMP_COOKIE_NAME: undefined,
+    ...overrides,
+  };
+  const saved = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    delete require.cache[cookieHelperPath];
+    return fn(require(cookieHelperPath));
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    delete require.cache[cookieHelperPath];
+  }
+}
+
+test('STG-005 staging markers and production runtime do not activate cookie names by default', () => {
+  for (const selector of [undefined, 'legacy']) {
+    withSessionCookieEnv({ AUTH_SESSION_POLICY: selector }, (helper) => {
+      const issued = [];
+      const cleared = [];
+      const res = {
+        cookie: (name, value, options) => issued.push({ name, value, options }),
+        clearCookie: (name, options) => cleared.push({ name, options }),
+      };
+      helper.setAuthCookies(res, 'synthetic-session', { gender: 'other' }, 604800000);
+      helper.clearAuthCookies(res);
+      assert.deepEqual(issued.map((cookie) => cookie.name), ['token', 'user_session', 'user_gender']);
+      assert.deepEqual(cleared.map((cookie) => cookie.name), ['token', 'user_session', 'user_gender']);
+      assert.equal(issued[0].options.domain, '.mosaicbizhub.com');
+      assert.equal(issued[0].options.secure, true);
+      assert.equal(issued[0].options.sameSite, 'none');
+      assert.equal(issued[0].options.path, '/');
+      assert.equal(issued[0].options.maxAge, 604800000);
+    });
+  }
+});
+
+test('STG-005 opt-in cookie issuance and clearing own only the five staging names', () => {
+  withSessionCookieEnv({}, (helper) => {
+    const issued = [];
+    const cleared = [];
+    const res = {
+      cookie: (name, value, options) => issued.push({ name, value, options }),
+      clearCookie: (name, options) => cleared.push({ name, options }),
+    };
+    helper.setAuthCookies(res, 'synthetic-session', { gender: 'other' }, 604800000);
+    helper.setCookie(res, 'otpPending', 'true', { maxAge: 600000 });
+    helper.setCookie(res, 'mbh_tmp', 'synthetic-temp', { maxAge: 900000 });
+    helper.clearAuthCookies(res);
+    helper.clearCookie(res, 'otpPending');
+    helper.clearCookie(res, 'mbh_tmp');
+    const names = ['mbh_stg_token', 'mbh_stg_user_session', 'mbh_stg_user_gender', 'mbh_stg_otp_pending', 'mbh_stg_tmp'];
+    assert.deepEqual(issued.map((cookie) => cookie.name), names);
+    assert.deepEqual(cleared.map((cookie) => cookie.name), names);
+    assert.deepEqual(issued.map((cookie) => cookie.options.httpOnly), [true, false, false, true, true]);
+    assert.deepEqual(issued.map((cookie) => cookie.options.maxAge), [604800000, 604800000, 604800000, 600000, 900000]);
+    for (let i = 0; i < names.length; i += 1) {
+      assert.equal(issued[i].options.domain.replace(/^\./, ''), 'mosaicbizhub.com');
+      assert.equal(issued[i].options.secure, true);
+      assert.equal(issued[i].options.sameSite, 'none');
+      assert.equal(issued[i].options.path, '/');
+      assert.equal(cleared[i].options.domain, issued[i].options.domain);
+      assert.equal(cleared[i].options.path, issued[i].options.path);
+      assert.equal(cleared[i].options.maxAge, 0);
+      assert.equal(cleared[i].options.expires.getTime(), 0);
+    }
+  });
+});
+
+test('STG-005 incompatible cookie configuration fails before issuing a cookie', () => {
+  for (const overrides of [
+    { COOKIE_DOMAIN: 'app.mosaicbizhub.com' },
+    { COOKIE_SECURE: 'false' },
+    { COOKIE_SAMESITE: 'lax' },
+    { TEMP_COOKIE_NAME: 'token' },
+  ]) {
+    withSessionCookieEnv(overrides, (helper) => {
+      let calls = 0;
+      assert.throws(() => helper.setAuthCookies({ cookie() { calls += 1; } }, 'synthetic', {}));
+      assert.equal(calls, 0);
+    });
+  }
+});

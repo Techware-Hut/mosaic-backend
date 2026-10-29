@@ -187,3 +187,68 @@ test('authenticate accepts JWTs whose sessionVersion matches the user record', a
   assert.equal(req.user, user);
   assert.equal(res.statusCode, null);
 });
+
+test('STG-005 scoped credentials retain DB-derived role and password-reset session invalidation', async () => {
+  const values = {
+    AUTH_SESSION_POLICY: 'staging-v1', RELEASE_ENVIRONMENT: 'staging', SENTRY_ENVIRONMENT: 'staging',
+    API_BASE_URL: 'https://api-staging.mosaicbizhub.com', COOKIE_DOMAIN: '.mosaicbizhub.com',
+    COOKIE_SECURE: 'true', COOKIE_SAMESITE: 'none', TEMP_COOKIE_NAME: undefined,
+    JWT_SECRET: 'synthetic-stg005-reset-key',
+  };
+  const saved = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  const cookiePath = path.resolve(__dirname, '../../utils/cookieHelper.js');
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    delete require.cache[cookiePath];
+    const cookieHelper = require(cookiePath);
+    const user = {
+      _id: '507f1f77bcf86cd799439012', email: 'reset-stg005@example.test', role: 'customer',
+      resetPasswordOtp: 'synthetic-reset-hash', resetPasswordOtpExpiry: new Date(Date.now() + 60000),
+      passwordHash: 'old-synthetic-hash', sessionVersion: 0, isDeleted: false, isBlocked: false,
+      async save() {},
+    };
+    const token = jwt.sign({ sub: user._id, role: 'admin', sessionVersion: 0, token_use: 'session' }, process.env.JWT_SECRET, {
+      algorithm: 'HS256', issuer: 'https://api-staging.mosaicbizhub.com', audience: 'mosaic-staging-api', expiresIn: '7d',
+    });
+    const authenticate = withMocks(authenticatePath, {
+      '../models/User': { findById: async () => user },
+      '../utils/cookieHelper': cookieHelper,
+    });
+    const request = () => ({ headers: { authorization: `Bearer ${token}` }, cookies: {} });
+    const accepted = request();
+    let nextCalls = 0;
+    await authenticate(accepted, createResponse(), () => { nextCalls += 1; });
+    assert.equal(nextCalls, 1);
+    assert.equal(accepted.user, user);
+    assert.equal(accepted.user.role, 'customer');
+
+    const controller = withMocks(userControllerPath, {
+      '../models/User': { findOne: async () => user },
+      '../utils/cookieHelper': cookieHelper,
+      '../utils/mailer': { sendOtpEmail: async () => {}, sendWelcomeEmail: async () => {}, sendPasswordResetOtpEmail: async () => {} },
+      '../utils/telnyxService': { sendOtpSMS: async () => {}, sendCustomerWelcomeSMS: async () => {} },
+      bcryptjs: { compare: async () => true, hash: async () => 'new-synthetic-hash' },
+      'express-validator': { validationResult: () => ({ isEmpty: () => true, array: () => [] }) },
+    });
+    const resetResponse = createResponse();
+    await controller.resetPassword({ body: { email: user.email, otp: '654321', newPassword: 'SyntheticPass123!' } }, resetResponse);
+    assert.equal(resetResponse.statusCode, 200);
+    assert.equal(user.sessionVersion, 1);
+    const rejected = createResponse();
+    await authenticate(request(), rejected, () => { nextCalls += 1; });
+    assert.equal(rejected.statusCode, 401);
+    assert.equal(nextCalls, 1);
+    assert.deepEqual(rejected.clearedCookies, []);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    delete require.cache[userControllerPath];
+    delete require.cache[authenticatePath];
+    delete require.cache[cookiePath];
+  }
+});
