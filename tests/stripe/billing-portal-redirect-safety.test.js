@@ -115,3 +115,29 @@ test('billing portal honors approved return_url values', async () => {
     'https://mosaicbizhub.com/partners/507f1f77bcf86cd799439011/my-account?billing=updated'
   );
 });
+
+for (const frontend of ['https://app.mosaicbizhub.com', 'https://mosaic-biz-frontend-launch.vercel.app']) {
+  test('STG004 billing hands the Stripe stub only the selected staging destination ' + frontend, async () => {
+    const keys = ['NODE_ENV', 'RELEASE_ENVIRONMENT', 'SENTRY_ENVIRONMENT', 'CANONICAL_FRONTEND_URL', 'PUBLIC_FRONTEND_URL', 'NEXT_PUBLIC_APP_URL', 'FRONTEND_URL', 'APP_URL', 'BILLING_PORTAL_RETURN_URL'];
+    const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+    try {
+      keys.forEach(key => delete process.env[key]);
+      process.env.NODE_ENV = 'production'; process.env.RELEASE_ENVIRONMENT = 'staging'; process.env.FRONTEND_URL = frontend;
+      process.env.BILLING_PORTAL_RETURN_URL = 'https://mosaicbizhub.com/unsafe-stale';
+      const { createBillingPortalSessionForBusiness, getSessionCalls } = loadController();
+      for (const input of [undefined, 'https://evil.example/steal', 'https://mosaicbizhub.com/after', frontend + '/partners/' + businessId + '/my-account?billing=updated']) {
+        const res = mockResponse();
+        await createBillingPortalSessionForBusiness(baseRequest(input), res);
+        assert.equal(res.statusCode, 200);
+        const url = new URL(getSessionCalls().at(-1).return_url);
+        assert.equal(url.origin, frontend);
+        assert.equal(url.pathname, '/partners/' + businessId + '/my-account');
+        assert.equal(url.searchParams.get('billing'), input?.startsWith(frontend) ? 'updated' : null);
+      }
+      assert.equal(getSessionCalls().length, 4);
+    } finally {
+      keys.forEach(key => { if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; });
+      delete require.cache[controllerPath];
+    }
+  });
+}

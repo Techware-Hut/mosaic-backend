@@ -147,3 +147,66 @@ test('vendor order email falls back to partners dashboard when business slug is 
   assert.ok(sentMessages[0].html.includes('https://mosaicbizhub.com/partners/dashboard'));
   assert.ok(sentMessages[0].text.includes('https://mosaicbizhub.com/partners/dashboard'));
 });
+
+for (const frontend of ['https://app.mosaicbizhub.com', 'https://mosaic-biz-frontend-launch.vercel.app', undefined]) {
+  test('STG004 real-helper order emails keep application CTAs in staging for ' + frontend, async () => {
+    const keys = [...ENV_KEYS, 'RELEASE_ENVIRONMENT', 'SENTRY_ENVIRONMENT'];
+    const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+    const sentMessages = [];
+    const expected = frontend || 'https://mosaic-biz-frontend-launch.vercel.app';
+    try {
+      keys.forEach(key => delete process.env[key]);
+      process.env.NODE_ENV = 'production'; process.env.RELEASE_ENVIRONMENT = 'staging'; process.env.MAIL_USER = 'synthetic-sender@example.test';
+      if (frontend) process.env.FRONTEND_URL = frontend;
+      const { sendOrderPaidEmails } = loadOrderMail(sentMessages);
+      await sendOrderPaidEmails({ order: buildPaidOrder(), currency: 'usd', customerEmails: ['customer@example.test'], vendorEmails: ['vendor@example.test'] });
+      assert.equal(sentMessages.length, 2);
+      const paths = ['/customer/order', '/partners/the-digital-builders/orders'];
+      for (let index = 0; index < paths.length; index++) {
+        const hrefs = [...sentMessages[index].html.matchAll(/href=["']([^"']+)["']/gi)]
+          .map(match => match[1].replace(/&amp;/g, '&'));
+        const textUrls = sentMessages[index].text.match(/https?:\/\/[^\s<>]+/g) || [];
+        for (const urls of [hrefs, textUrls]) {
+          const actualCtas = urls.map(value => new URL(value))
+            .filter(url => url.pathname === paths[index]);
+          assert.ok(actualCtas.length > 0, 'captured mail must contain the actual CTA');
+          for (const actual of actualCtas) {
+            assert.equal(actual.origin, expected);
+            assert.equal(actual.pathname, paths[index]);
+            assert.equal(actual.username, '');
+            assert.equal(actual.password, '');
+          }
+        }
+      }
+      // Separate static email footer links are outside this helper's CTA contract.
+    } finally {
+      keys.forEach(key => { if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; });
+      cleanupOrderMail();
+    }
+  });
+}
+
+test('STG004 module-level orderPhase URL construction is safe with missing known-staging configuration', () => {
+  const phasePath = path.join(root, 'utils/orderPhase.js');
+  const keys = [...ENV_KEYS, 'RELEASE_ENVIRONMENT', 'SENTRY_ENVIRONMENT'];
+  const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  const cached = require.cache[phasePath];
+  const originalLoad = Module._load;
+  let transportCreations = 0;
+  try {
+    keys.forEach(key => delete process.env[key]);
+    process.env.NODE_ENV = 'production'; process.env.RELEASE_ENVIRONMENT = 'staging';
+    Module._load = function (request, parent, isMain) {
+      if (request === 'nodemailer') return { createTransport: () => { transportCreations++; return { sendMail: () => { throw new Error('No mail operation expected during import'); } }; } };
+      return originalLoad(request, parent, isMain);
+    };
+    delete require.cache[phasePath];
+    assert.doesNotThrow(() => require(phasePath));
+    assert.equal(transportCreations, 1);
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[phasePath];
+    if (cached) require.cache[phasePath] = cached;
+    keys.forEach(key => { if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; });
+  }
+});
