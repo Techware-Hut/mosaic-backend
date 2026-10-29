@@ -15,6 +15,7 @@ const {
     clearAuthCookies,
 } = require('../utils/cookieHelper');
 const toPublicAuthUser = require('../utils/toPublicAuthUser');
+const { resolveSessionPolicy, jwtClaims, jwtSignOptions } = require('../utils/sessionPolicy');
 
 function getSafePublicRole(role) {
     return role === 'business_owner' ? 'business_owner' : 'customer';
@@ -26,9 +27,10 @@ function buildSessionToken(user) {
             sub: user._id.toString(),
             role: user.role,
             sessionVersion: user.sessionVersion || 0,
+            ...jwtClaims('session'),
         },
         process.env.JWT_SECRET,
-        { expiresIn: '7d' }
+        { expiresIn: '7d', ...jwtSignOptions('session') }
     );
 }
 
@@ -103,7 +105,7 @@ function respondOtpDeliveryFailed(res, context, { user } = {}) {
 
     if (context === 'register') {
         body.accountCreated = true;
-        res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
+        res.cookie(resolveSessionPolicy().cookieNames.otpPending, 'true', getCookieOptions(10 * 60 * 1000));
     }
 
     return res.status(502).json(body);
@@ -123,6 +125,7 @@ exports.registerUser = async (req, res) => {
     }
 
     try {
+        const sessionPolicy = resolveSessionPolicy();
         const { name, email, password, role, mobile, gender, minorityType } = req.body;
         const safeRole = getSafePublicRole(role);
 
@@ -167,7 +170,7 @@ exports.registerUser = async (req, res) => {
             });
         }
 
-        res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
+        res.cookie(sessionPolicy.cookieNames.otpPending, 'true', getCookieOptions(10 * 60 * 1000));
 
         return res.status(201).json({
             success: true,
@@ -192,6 +195,7 @@ exports.verifyOtp = async (req, res) => {
     const { email, mobile, otp } = req.body;
 
     try {
+        resolveSessionPolicy();
         const query = email ? { email } : (mobile ? { mobile } : null);
         if (!query) {
             return res.status(400).json({ success: false, message: 'Email or mobile is required' });
@@ -267,6 +271,7 @@ exports.resendOtp = async (req, res) => {
     const { email, mobile } = req.body;
 
     try {
+        const sessionPolicy = resolveSessionPolicy();
         const query = email ? { email } : (mobile ? { mobile } : null);
         if (!query) {
             return res.status(400).json({ success: false, message: 'Email or mobile is required' });
@@ -310,7 +315,7 @@ exports.resendOtp = async (req, res) => {
             return respondOtpDeliveryFailed(res, 'resend', { user });
         }
 
-        res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
+        res.cookie(sessionPolicy.cookieNames.otpPending, 'true', getCookieOptions(10 * 60 * 1000));
 
         return res.status(200).json({
             success: true,
@@ -440,6 +445,7 @@ exports.loginUser = async (req, res) => {
     }
 
     try {
+        const sessionPolicy = resolveSessionPolicy();
         const { email, password } = req.body;
 
         const user = await User.findOne({ email });
@@ -477,7 +483,7 @@ exports.loginUser = async (req, res) => {
                 return respondOtpDeliveryFailed(res, 'unverifiedLogin', { user });
             }
 
-            res.cookie('otpPending', 'true', getCookieOptions(10 * 60 * 1000));
+            res.cookie(sessionPolicy.cookieNames.otpPending, 'true', getCookieOptions(10 * 60 * 1000));
 
             return res.status(403).json({
                 success: false,
@@ -507,8 +513,10 @@ exports.loginUser = async (req, res) => {
 };
 
 exports.logout = (req, res) => {
+    const sessionPolicy = resolveSessionPolicy();
     clearAuthCookies(res);
     clearCookie(res, 'otpPending');
+    if (sessionPolicy.staging) clearCookie(res, 'mbh_tmp');
 
     res.status(200).json({ message: 'Logged out successfully' });
 };

@@ -322,3 +322,116 @@ test('Google OAuth routes include rate limiting middleware before the controller
   assert.notEqual(completeRoute.route.stack[0].handle, controllerMocks.completeGoogleProfile);
   assert.equal(completeRoute.route.stack[1].handle, controllerMocks.completeGoogleProfile);
 });
+
+async function withStagingOAuthEnv(overrides, fn) {
+  const values = {
+    NODE_ENV: 'production', AUTH_SESSION_POLICY: 'staging-v1',
+    RELEASE_ENVIRONMENT: 'staging', SENTRY_ENVIRONMENT: 'staging',
+    API_BASE_URL: 'https://api-staging.mosaicbizhub.com',
+    FRONTEND_URL: 'https://mosaic-biz-frontend-launch.vercel.app',
+    COOKIE_DOMAIN: '.mosaicbizhub.com', COOKIE_SECURE: 'true', COOKIE_SAMESITE: 'none',
+    TEMP_COOKIE_NAME: undefined, TEMP_COOKIE_TTL_SEC: '900', REQUIRE_PROFILE_COMPLETION: 'true',
+    GOOGLE_CLIENT_ID: 'synthetic-stg005-client', GOOGLE_CLIENT_SECRET: 'synthetic-stg005-oauth-secret',
+    JWT_SECRET: 'synthetic-stg005-oauth-signing-key', ...overrides,
+  };
+  const saved = snapshotEnv(Object.keys(values));
+  const cookiePath = path.resolve(__dirname, '../../utils/cookieHelper.js');
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    delete require.cache[cookiePath];
+    await fn(require(cookiePath));
+  } finally {
+    delete require.cache[authControllerPath];
+    delete require.cache[cookiePath];
+    restoreEnv(saved);
+  }
+}
+
+function stagingOAuthFixture(cookieHelper) {
+  let profileLookups = 0;
+  const user = {
+    _id: '507f1f77bcf86cd799439011', email: 'google-stg005@example.test', name: 'Synthetic OAuth',
+    role: 'customer', mobile: '', minorityType: '', gender: 'other', sessionVersion: 3,
+    isOtpVerified: true, isDeleted: false, isBlocked: false, async save() {},
+  };
+  const controller = withMocks(authControllerPath, {
+    'google-auth-library': { OAuth2Client: class {
+      async getToken() { return { tokens: { id_token: 'synthetic-provider-token' } }; }
+      async verifyIdToken() { return { getPayload: () => ({ sub: 'synthetic-provider-id', email: user.email, name: user.name }) }; }
+    } },
+    '../models/User': {
+      findOne: async () => user,
+      findById: async () => { profileLookups += 1; return user; },
+    },
+    '../utils/cookieHelper': cookieHelper,
+  });
+  const res = createResponse();
+  res.issued = [];
+  res.cleared = [];
+  res.cookie = (name, value, options) => { res.issued.push({ name, value, options }); return res; };
+  res.clearCookie = (name, options) => { res.cleared.push({ name, options }); return res; };
+  const request = { query: {
+    code: 'synthetic-code',
+    state: Buffer.from(JSON.stringify({ redirect: process.env.FRONTEND_URL + '/partners' })).toString('base64'),
+  } };
+  return { user, controller, res, request, lookups: () => profileLookups };
+}
+
+test('STG-005 Google profile completion separates temporary and ordinary session credentials', async () => {
+  await withStagingOAuthEnv({}, async (cookieHelper) => {
+    const { controller, user, res, request, lookups } = stagingOAuthFixture(cookieHelper);
+    await controller.handleGoogleCallback(request, res);
+    assert.equal(res.issued.length, 1);
+    const temporary = res.issued[0];
+    assert.equal(temporary.name, 'mbh_stg_tmp');
+    assert.equal(temporary.options.maxAge, 900000);
+    const payload = jwt.verify(temporary.value, process.env.JWT_SECRET, {
+      algorithms: ['HS256'], issuer: 'https://api-staging.mosaicbizhub.com', audience: 'mosaic-staging-profile',
+    });
+    assert.equal(payload.token_use, 'profile_completion');
+    assert.equal(payload.exp - payload.iat, 900);
+
+    const ordinarySession = jwt.sign({ sub: user._id, role: user.role, sessionVersion: 3, token_use: 'session' }, process.env.JWT_SECRET, {
+      algorithm: 'HS256', issuer: 'https://api-staging.mosaicbizhub.com', audience: 'mosaic-staging-api', expiresIn: '7d',
+    });
+    const denied = createResponse();
+    await controller.completeGoogleProfile({ cookies: { mbh_stg_tmp: ordinarySession }, body: { mobile: '+15551234567' } }, denied);
+    assert.equal(denied.statusCode, 401);
+    assert.equal(lookups(), 0);
+
+    const complete = createResponse();
+    complete.issued = [];
+    complete.cleared = [];
+    complete.cookie = (name, value, options) => { complete.issued.push({ name, value, options }); return complete; };
+    complete.clearCookie = (name, options) => { complete.cleared.push({ name, options }); return complete; };
+    await controller.completeGoogleProfile({ cookies: { mbh_stg_tmp: temporary.value }, body: { mobile: '+15551234567' } }, complete);
+    assert.equal(complete.body.success, true);
+    assert.equal(lookups(), 1);
+    assert.deepEqual(complete.cleared.map((cookie) => cookie.name), ['mbh_stg_tmp']);
+    assert.deepEqual(complete.issued.map((cookie) => cookie.name), ['mbh_stg_token', 'mbh_stg_user_session', 'mbh_stg_user_gender']);
+    const session = jwt.verify(complete.issued[0].value, process.env.JWT_SECRET, {
+      algorithms: ['HS256'], issuer: 'https://api-staging.mosaicbizhub.com', audience: 'mosaic-staging-api',
+    });
+    assert.equal(session.token_use, 'session');
+    assert.equal(session.sessionVersion, 3);
+    assert.equal(session.exp - session.iat, 604800);
+  });
+});
+
+test('STG-005 direct Google login uses the same scoped seven-day session as password and OTP login', async () => {
+  await withStagingOAuthEnv({ REQUIRE_PROFILE_COMPLETION: 'false' }, async (cookieHelper) => {
+    const { controller, res, request } = stagingOAuthFixture(cookieHelper);
+    await controller.handleGoogleCallback(request, res);
+    assert.deepEqual(res.issued.map((cookie) => cookie.name), ['mbh_stg_token', 'mbh_stg_user_session', 'mbh_stg_user_gender']);
+    assert.equal(res.redirectUrl, process.env.FRONTEND_URL + '/partners');
+    const session = jwt.verify(res.issued[0].value, process.env.JWT_SECRET, {
+      algorithms: ['HS256'], issuer: 'https://api-staging.mosaicbizhub.com', audience: 'mosaic-staging-api',
+    });
+    assert.equal(session.token_use, 'session');
+    assert.equal(session.exp - session.iat, 604800);
+    assert.equal(res.issued[0].options.maxAge, 604800000);
+  });
+});

@@ -208,3 +208,73 @@ test('buildSessionToken uses sub claim for session JWT', () => {
     assert.equal(decoded.sessionVersion, 0);
   })();
 });
+
+test('STG-005 OTP issuance uses scoped real JWT/cookies while public user response remains unchanged', async () => {
+  const values = {
+    AUTH_SESSION_POLICY: 'staging-v1', RELEASE_ENVIRONMENT: 'staging', SENTRY_ENVIRONMENT: 'staging',
+    API_BASE_URL: 'https://api-staging.mosaicbizhub.com', COOKIE_DOMAIN: '.mosaicbizhub.com',
+    COOKIE_SECURE: 'true', COOKIE_SAMESITE: 'none', TEMP_COOKIE_NAME: undefined,
+    JWT_SECRET: 'synthetic-stg005-otp-key',
+  };
+  const saved = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  const cookiePath = path.resolve(__dirname, '../../utils/cookieHelper.js');
+  const originalLoad = Module._load;
+  const user = {
+    _id: '507f1f77bcf86cd799439011', email: 'otp-stg005@example.test', name: 'Synthetic OTP',
+    mobile: '+15551234567', role: 'business_owner', gender: 'other', isOtpVerified: false,
+    otp: 'synthetic-otp-hash', otpExpiry: new Date(Date.now() + 60000), sessionVersion: 4,
+    isBlocked: false, isDeleted: false, async save() {},
+  };
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    delete require.cache[cookiePath];
+    const actualCookieHelper = require(cookiePath);
+    Module._load = function loadOtpMocks(request, parent, isMain) {
+      if (request === '../models/User') return { findOne: async () => user };
+      if (request === '../utils/cookieHelper') return actualCookieHelper;
+      if (request === '../utils/mailer') return { sendOtpEmail: async () => {}, sendWelcomeEmail: async () => {}, sendPasswordResetOtpEmail: async () => {} };
+      if (request === '../utils/telnyxService') return { sendOtpSMS: async () => {}, sendCustomerWelcomeSMS: async () => {} };
+      if (request === 'bcryptjs') return { compare: async () => true, hash: async (value) => value };
+      if (request === 'express-validator') return { validationResult: () => ({ isEmpty: () => true, array: () => [] }) };
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    delete require.cache[userControllerPath];
+    const controller = require(userControllerPath);
+    Module._load = originalLoad;
+    const issued = [];
+    const cleared = [];
+    const res = {
+      statusCode: null, body: null,
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; },
+      cookie(name, value, options) { issued.push({ name, value, options }); return this; },
+      clearCookie(name, options) { cleared.push({ name, options }); return this; },
+    };
+    await controller.verifyOtp({ body: { email: user.email, otp: '123456' } }, res);
+    assert.equal(res.statusCode, 200);
+    const payload = jwt.verify(res.body.token, process.env.JWT_SECRET, {
+      algorithms: ['HS256'], issuer: 'https://api-staging.mosaicbizhub.com', audience: 'mosaic-staging-api',
+    });
+    assert.equal(payload.sub, user._id);
+    assert.equal(payload.sessionVersion, 4);
+    assert.equal(payload.token_use, 'session');
+    assert.equal(payload.exp - payload.iat, 604800);
+    assert.deepEqual(issued.map((cookie) => cookie.name), ['mbh_stg_token', 'mbh_stg_user_session', 'mbh_stg_user_gender']);
+    assert.deepEqual(cleared.map((cookie) => cookie.name), ['mbh_stg_otp_pending']);
+    assert.deepEqual(Object.keys(res.body.user).sort(), EXPECTED_KEYS.sort());
+    for (const key of [...FORBIDDEN_KEYS, 'iss', 'aud', 'token_use', 'exp', 'iat']) {
+      assert.equal(key in res.body.user, false, `public user leaked internal field: ${key}`);
+    }
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[userControllerPath];
+    delete require.cache[cookiePath];
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});

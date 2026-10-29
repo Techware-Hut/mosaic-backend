@@ -9,6 +9,13 @@ const {
 } = require('../utils/cookieHelper');
 const toPublicAuthUser = require('../utils/toPublicAuthUser');
 const { buildFrontendUrl, sanitizeFrontendRedirectUrl } = require('../utils/frontendUrl');
+const {
+    resolveSessionPolicy,
+    jwtClaims,
+    jwtSignOptions,
+    verifyPolicyToken,
+    readCredentialCookie,
+} = require('../utils/sessionPolicy');
 
 const {
     GOOGLE_CLIENT_ID,
@@ -57,9 +64,10 @@ function mintSessionJWT(user) {
             sub: user._id.toString(),
             role: user.role,
             sessionVersion: user.sessionVersion || 0,
+            ...jwtClaims('session'),
         },
         JWT_SECRET,
-        { expiresIn: SESSION_TTL_SEC }
+        { expiresIn: SESSION_TTL_SEC, ...jwtSignOptions('session') }
     );
 }
 
@@ -72,6 +80,7 @@ function setAuthCookies(res, user, sessionJwt, ttlSeconds = SESSION_TTL_SEC) {
  * q: redirect=<absolute URL to send user back to>
  */
 exports.startGoogleAuth = (req, res) => {
+    resolveSessionPolicy();
     const redirect = sanitizeFrontendRedirectUrl((req.query.redirect || FRONTEND_URL).toString(), frontendEnv(), '/');
     const state = Buffer.from(JSON.stringify({ redirect })).toString('base64');
 
@@ -91,6 +100,7 @@ exports.startGoogleAuth = (req, res) => {
  */
 exports.handleGoogleCallback = async (req, res) => {
     try {
+        const sessionPolicy = resolveSessionPolicy();
         const code = String(req.query.code || '');
         const rawState = String(req.query.state || '');
         const { redirect } = JSON.parse(Buffer.from(rawState, 'base64').toString());
@@ -140,11 +150,11 @@ exports.handleGoogleCallback = async (req, res) => {
 
         if (mustComplete) {
             const tmp = jwt.sign(
-                { sub: user._id.toString(), email: user.email, role: user.role },
+                { sub: user._id.toString(), email: user.email, role: user.role, ...jwtClaims('profile_completion') },
                 JWT_SECRET,
-                { expiresIn: TEMP_PROFILE_TTL_SEC }
+                { expiresIn: TEMP_PROFILE_TTL_SEC, ...jwtSignOptions('profile_completion') }
             );
-            setCookie(res, TEMP_COOKIE_NAME, tmp, {
+            setCookie(res, sessionPolicy.staging ? sessionPolicy.cookieNames.mbh_tmp : TEMP_COOKIE_NAME, tmp, {
                 httpOnly: true,
                 maxAge: TEMP_PROFILE_TTL_MS,
             });
@@ -169,14 +179,19 @@ exports.handleGoogleCallback = async (req, res) => {
  */
 exports.completeGoogleProfile = async (req, res) => {
     try {
-        const tmpToken = req.cookies?.[TEMP_COOKIE_NAME];
-        if (!tmpToken) {
-            return res.status(401).json({ success: false, message: 'Session expired. Please sign in again.' });
-        }
-
+        const sessionPolicy = resolveSessionPolicy();
+        const tempCookieName = sessionPolicy.staging ? sessionPolicy.cookieNames.mbh_tmp : TEMP_COOKIE_NAME;
         let decoded;
         try {
-            decoded = jwt.verify(tmpToken, JWT_SECRET);
+            const tmpToken = sessionPolicy.staging
+                ? readCredentialCookie(req, tempCookieName).value
+                : req.cookies?.[tempCookieName];
+            if (!tmpToken) {
+                return res.status(401).json({ success: false, message: 'Session expired. Please sign in again.' });
+            }
+            decoded = sessionPolicy.staging
+                ? verifyPolicyToken(tmpToken, JWT_SECRET, 'profile_completion')
+                : jwt.verify(tmpToken, JWT_SECRET);
         } catch {
             return res.status(401).json({ success: false, message: 'Session expired. Please sign in again.' });
         }
@@ -193,7 +208,7 @@ exports.completeGoogleProfile = async (req, res) => {
         if (minorityType && !user.minorityType) user.minorityType = minorityType;
         await user.save();
 
-        clearCookie(res, TEMP_COOKIE_NAME);
+        clearCookie(res, tempCookieName);
 
         const session = mintSessionJWT(user);
         setAuthCookies(res, user, session);
@@ -210,7 +225,9 @@ exports.completeGoogleProfile = async (req, res) => {
 
 /** Optional: logout - clears all three cookies + temp */
 exports.logout = async (_req, res) => {
+    const sessionPolicy = resolveSessionPolicy();
     clearAuthCookies(res);
-    clearCookie(res, TEMP_COOKIE_NAME);
+    clearCookie(res, sessionPolicy.staging ? sessionPolicy.cookieNames.mbh_tmp : TEMP_COOKIE_NAME);
+    if (sessionPolicy.staging) clearCookie(res, 'otpPending');
     res.json({ success: true });
 };
