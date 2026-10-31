@@ -6,7 +6,7 @@ const path = require('node:path');
 const supertest = require('supertest');
 
 const corsOriginsPath = path.resolve(__dirname, '../../utils/corsOrigins.js');
-const ENV_KEYS = ['NODE_ENV', 'CORS_ORIGINS', 'FRONTEND_URL'];
+const ENV_KEYS = ['NODE_ENV', 'CORS_ORIGINS', 'FRONTEND_URL', 'RELEASE_ENVIRONMENT', 'SENTRY_ENVIRONMENT'];
 
 function snapshotEnv() {
   const saved = {};
