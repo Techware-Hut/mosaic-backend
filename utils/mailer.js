@@ -237,7 +237,7 @@ function buildOtpText({ to, firstName, otp, context, role }) {
     '—',
     'Mosaic Biz Hub',
     'Connecting businesses, customers, and community.',
-    'support@mosaicbizhub.com | https://mosaicbizhub.com',
+    `support@mosaicbizhub.com | ${buildFrontendUrl('/')}`,
   ].join('\n');
 }
 
