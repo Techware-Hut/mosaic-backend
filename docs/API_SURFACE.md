@@ -381,16 +381,16 @@ Controllers: [`subscriptionPlanRoutes.js`](../routes/subscriptionPlanRoutes.js),
 
 | Method | Route | Middleware | Controller | Auth/Role | Purpose | Smoke Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| POST | `/api/bookings/service` | `authenticate`, `isCustomer` | `createServiceBooking` | customer | Book service | 🟡 |
-| POST | `/api/bookings/service/:serviceId` | same | `createServiceBooking` | customer | Book by service ID | 🟡 |
-| POST | `/api/bookings/food` | same | `createFoodBooking` | customer | Book food | 🟡 |
-| POST | `/api/bookings/food/:foodId` | same | `createFoodBooking` | customer | Book food by ID | 🟡 |
+| POST | `/api/bookings/service` | `authenticate`, `isCheckoutBuyer` | `createServiceBooking` | customer, business_owner (403 `SELF_BOOKING_FORBIDDEN` on own listing) | Book service | 🟡 |
+| POST | `/api/bookings/service/:serviceId` | same | `createServiceBooking` | customer, business_owner | Book by service ID | 🟡 |
+| POST | `/api/bookings/food` | same | `createFoodBooking` | customer, business_owner | Book food | 🟡 |
+| POST | `/api/bookings/food/:foodId` | same | `createFoodBooking` | customer, business_owner | Book food by ID | 🟡 |
 | GET | `/api/bookings/vendor` | `authenticate`, `isBusinessOwner` | `getVendorBookings` | business_owner | All vendor bookings | 🟡 |
 | GET | `/api/bookings/vendor/service` | same | `getVendorServiceBookings` | business_owner | Service bookings | 🟡 |
 | GET | `/api/bookings/vendor/food` | same | `getVendorFoodBookings` | business_owner | Food bookings | 🟡 |
-| GET | `/api/bookings/customer` | `authenticate`, `isCustomer` | `getCustomerBookings` | customer | Customer bookings | 🟡 |
-| GET | `/api/bookings/customer/service` | same | `getCustomerServiceBookings` | customer | Customer service bookings | 🟡 |
-| GET | `/api/bookings/customer/food` | same | `getCustomerFoodBookings` | customer | Customer food bookings | 🟡 |
+| GET | `/api/bookings/customer` | `authenticate`, `isCheckoutBuyer` | `getCustomerBookings` | customer, business_owner (own buyer bookings) | Customer bookings | 🟡 |
+| GET | `/api/bookings/customer/service` | same | `getCustomerServiceBookings` | customer, business_owner | Customer service bookings | 🟡 |
+| GET | `/api/bookings/customer/food` | same | `getCustomerFoodBookings` | customer, business_owner | Customer food bookings | 🟡 |
 | PUT | `/api/bookings/service/:id/request-payment` | `authenticate`, `isBusinessOwner` | `requestServiceBookingPayment` | business_owner | Request payment | 🔴 |
 | PUT | `/api/bookings/service/:id/approve` | same | `approveServiceBooking` | business_owner | Approve booking | 🟡 |
 | PUT | `/api/bookings/service/:id/reject` | same | `rejectServiceBooking` | business_owner | Reject booking | 🟡 |
