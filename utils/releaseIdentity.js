@@ -24,7 +24,7 @@ function extractCommitFromVersionLabel(label) {
   const normalized = normalizeOptionalString(label);
   if (!normalized) return undefined;
 
-  const mosaicMatch = normalized.match(/^mosaic-([a-f0-9]{7,40})$/i);
+  const mosaicMatch = normalized.match(/^mosaic-(?:staging-)?([a-f0-9]{7,40})$/i);
   if (mosaicMatch) {
     return sanitizeCommitSha(mosaicMatch[1]);
   }
