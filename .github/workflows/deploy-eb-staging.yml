@@ -149,17 +149,27 @@ jobs:
         env:
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          set -euo pipefail
-          body=$(curl -s "${STAGING_API_URL}/api/health")
-          echo "$body"
-          node -e '
-            const info = JSON.parse(process.argv[1]).release || {};
-            const sha = process.argv[2];
-            if (info.environment !== "staging" || info.commit !== sha.slice(0, 7)) {
-              console.error("Staging release identity mismatch", info);
-              process.exit(1);
-            }
-          ' "$body" "$RELEASE_SHA"
+          set -uo pipefail
+          for i in 1 2 3 4 5; do
+            if body=$(curl -sS --fail --max-time 10 "${STAGING_API_URL}/api/health"); then
+              echo "Attempt $i: $body"
+              if node -e '
+                const info = JSON.parse(process.argv[1]).release || {};
+                const sha = process.argv[2];
+                const ok = info.environment === "staging"
+                  && info.commit === sha.slice(0, 7)
+                  && info.deploymentVersion === `mosaic-staging-${sha}`;
+                process.exit(ok ? 0 : 1);
+              ' "$body" "$RELEASE_SHA"; then
+                exit 0
+              fi
+            else
+              echo "Attempt $i: health request failed"
+            fi
+            sleep 15
+          done
+          echo "Staging /api/health did not report release ${RELEASE_SHA} in environment staging" >&2
+          exit 1
 
       - name: Post-deploy auth probe
         run: |
