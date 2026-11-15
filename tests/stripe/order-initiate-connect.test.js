@@ -604,7 +604,7 @@ test('initiateOrder forbids a vendor buying from their own variant ownership', a
 
 test('initiateOrder forbids a vendor buying from a business they own', async () => {
   process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
-  const { initiateOrder, getPiCreateCalls } = loadInitiateOrder({
+  const { initiateOrder, getPiCreateCalls, getAccountRetrieveCalls, getReservationCalls } = loadInitiateOrder({
     business: buildBusiness({ owner: { toString: () => userId } }),
   });
   const res = mockResponse();
@@ -613,6 +613,8 @@ test('initiateOrder forbids a vendor buying from a business they own', async () 
 
   assert.equal(res.statusCode, 403);
   assert.equal(res.body.code, 'SELF_PURCHASE_FORBIDDEN');
+  assert.equal(getAccountRetrieveCalls().length, 0);
+  assert.equal(getReservationCalls().length, 0);
   assert.equal(getPiCreateCalls().length, 0);
 });
 
