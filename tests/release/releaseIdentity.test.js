@@ -158,3 +158,46 @@ test('isLikelySafePublicReleasePayload rejects secret-like fragments', () => {
     );
   });
 });
+
+test('getReleaseCommitSha derives commit from staging EB version label', () => {
+  withReleaseIdentity(
+    {
+      DEPLOYMENT_VERSION_LABEL: 'mosaic-staging-2c7ae8a69e56b65b802c23868a2c7f8e6a7f0149',
+      RELEASE_ENVIRONMENT: 'staging',
+      RELEASE_MANIFEST_PATH: path.join(os.tmpdir(), 'mosaic-missing-release-manifest.json'),
+    },
+    ({ getPublicReleaseInfo, isLikelySafePublicReleasePayload }) => {
+      const info = getPublicReleaseInfo();
+      assert.deepEqual(info, {
+        commit: '2c7ae8a',
+        environment: 'staging',
+        deploymentVersion: 'mosaic-staging-2c7ae8a69e56b65b802c23868a2c7f8e6a7f0149',
+      });
+      assert.equal(isLikelySafePublicReleasePayload(info), true);
+    }
+  );
+});
+
+test('runtime manifest written by the staging workflow is honoured', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-release-'));
+  const manifestPath = path.join(dir, 'release-manifest.json');
+  const sha = 'feedbee1234567890abcdef1234567890abcdef1';
+  fs.writeFileSync(manifestPath, JSON.stringify({
+    schemaVersion: 1,
+    commit: sha,
+    sourceTree: 'a'.repeat(40),
+    environment: 'staging',
+    deploymentVersion: `mosaic-staging-${sha}`,
+  }));
+  try {
+    withReleaseIdentity({ RELEASE_MANIFEST_PATH: manifestPath, NODE_ENV: 'production' }, ({ getPublicReleaseInfo }) => {
+      assert.deepEqual(getPublicReleaseInfo(), {
+        commit: 'feedbee',
+        environment: 'staging',
+        deploymentVersion: `mosaic-staging-${sha}`,
+      });
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

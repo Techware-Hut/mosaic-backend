@@ -3,7 +3,8 @@ const path = require('path');
 
 const SAFE_LABEL_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 const SAFE_SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
-const VERSION_LABEL_PATTERN = /^mosaic-[a-f0-9]{7,40}$/i;
+const VERSION_LABEL_PATTERN = /^mosaic-(?:staging-)?[a-f0-9]{7,40}$/i;
+const VERSION_LABEL_PATTERN_CAPTURE = /^mosaic-(?:staging-)?([a-f0-9]{7,40})$/i;
 const DEFAULT_RELEASE_MANIFEST_PATH = path.resolve(__dirname, '..', 'release-manifest.json');
 
 function normalizeOptionalString(value) {
@@ -24,7 +25,7 @@ function extractCommitFromVersionLabel(label) {
   const normalized = normalizeOptionalString(label);
   if (!normalized) return undefined;
 
-  const mosaicMatch = normalized.match(/^mosaic-([a-f0-9]{7,40})$/i);
+  const mosaicMatch = normalized.match(VERSION_LABEL_PATTERN_CAPTURE);
   if (mosaicMatch) {
     return sanitizeCommitSha(mosaicMatch[1]);
   }

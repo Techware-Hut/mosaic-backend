@@ -52,6 +52,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Write runtime release manifest
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -e release-manifest.json ]; then
+            echo "The reserved runtime release-manifest.json path must not be committed" >&2
+            exit 1
+          fi
+          SOURCE_TREE=$(git rev-parse "${RELEASE_SHA}^{tree}")
+          node - "$RELEASE_SHA" "$SOURCE_TREE" "mosaic-staging-${RELEASE_SHA}" > release-manifest.json <<'NODE'
+          const [commit, sourceTree, deploymentVersion] = process.argv.slice(2);
+          process.stdout.write(JSON.stringify({
+            schemaVersion: 1,
+            commit,
+            sourceTree,
+            environment: 'staging',
+            deploymentVersion,
+          }));
+          NODE
+          cat release-manifest.json
+
       - name: Create deployment package
         run: |
           shopt -s dotglob
@@ -119,6 +142,33 @@ jobs:
           done
 
           echo "Health probe failed after 5 attempts"
+          exit 1
+
+      - name: Post-deploy release identity probe
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          for i in 1 2 3 4 5; do
+            if body=$(curl -sS --fail --max-time 10 "${STAGING_API_URL}/api/health"); then
+              echo "Attempt $i: $body"
+              if node -e '
+                const info = JSON.parse(process.argv[1]).release || {};
+                const sha = process.argv[2];
+                const ok = info.environment === "staging"
+                  && info.commit === sha.slice(0, 7)
+                  && info.deploymentVersion === `mosaic-staging-${sha}`;
+                process.exit(ok ? 0 : 1);
+              ' "$body" "$RELEASE_SHA"; then
+                exit 0
+              fi
+            else
+              echo "Attempt $i: health request failed"
+            fi
+            sleep 15
+          done
+          echo "Staging /api/health did not report release ${RELEASE_SHA} in environment staging" >&2
           exit 1
 
       - name: Post-deploy auth probe
