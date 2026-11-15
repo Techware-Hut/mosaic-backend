@@ -43,6 +43,20 @@ const normalizeStringArray = (value) => {
 
 const getAuthenticatedUserId = (req) => req.user?.id || req.user?._id;
 
+// Vendor accounts may book other businesses, never their own listings.
+const rejectSelfBooking = (req, res, listingOwnerId) => {
+  const userId = getAuthenticatedUserId(req);
+  if (userId && listingOwnerId && String(listingOwnerId) === String(userId)) {
+    res.status(403).json({
+      success: false,
+      code: 'SELF_BOOKING_FORBIDDEN',
+      message: "You can't book your own business's listing.",
+    });
+    return true;
+  }
+  return false;
+};
+
 const formatBookingDate = (value) => {
   if (!value) return 'N/A';
 
@@ -109,6 +123,8 @@ exports.createServiceBooking = async (req, res) => {
     if (!service) {
       return res.status(404).json({ success: false, message: 'Service not found' });
     }
+
+    if (rejectSelfBooking(req, res, service.ownerId)) return;
 
     const [business, owner] = await Promise.all([
       Business.findById(service.businessId).select('businessName email slug'),
@@ -237,6 +253,8 @@ exports.createFoodBooking = async (req, res) => {
     if (!food) {
       return res.status(404).json({ success: false, message: 'Food listing not found' });
     }
+
+    if (rejectSelfBooking(req, res, food.ownerId)) return;
 
     const [business, owner] = await Promise.all([
       Business.findById(food.businessId).select('businessName email slug'),
