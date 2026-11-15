@@ -16,8 +16,8 @@ function readSource(filePath) {
 test('order routes register cancel, return, reject, and vendor fulfillment handlers', () => {
   const routes = readSource(orderRoutesPath);
 
-  assert.match(routes, /router\.post\("\/:orderId\/cancel", authenticate, isCustomer, cancelOrderByUser\)/);
-  assert.match(routes, /router\.put\('\/initiateReturn\/:orderId', authenticate, isCustomer, initiateReturn\)/);
+  assert.match(routes, /router\.post\("\/:orderId\/cancel", authenticate, isCheckoutBuyer, cancelOrderByUser\)/);
+  assert.match(routes, /router\.put\('\/initiateReturn\/:orderId', authenticate, isCheckoutBuyer, initiateReturn\)/);
   assert.match(routes, /router\.put\('\/return\/:orderId', authenticate, isBusinessOwner, acceptReturn\)/);
   assert.match(routes, /router\.put\('\/reject\/:orderId', authenticate, isBusinessOwner, rejectOrder\)/);
   assert.match(routes, /router\.put\('\/ship\/:orderId', authenticate, isBusinessOwner, shipOrder\)/);

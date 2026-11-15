@@ -5,7 +5,6 @@ const { retrieveIntent } = require('../controllers/stripePaymentController');
 const authenticate = require('../middlewares/authenticate');
 const isBusinessOwner = require('../middlewares/isBusinessOwner')
 const isAdmin = require('../middlewares/isAdmin');
-const isCustomer = require('../middlewares/isCustomer');
 const isCheckoutBuyer = require('../middlewares/isCheckoutBuyer');
 const { getInvoicePdf } = require('../controllers/invoiceController');
 
@@ -21,8 +20,8 @@ router.put('/reject/:orderId', authenticate, isBusinessOwner, rejectOrder);
 router.put('/ship/:orderId', authenticate, isBusinessOwner, shipOrder);
 router.put('/deliver/:orderId', authenticate, isBusinessOwner, deliverOrder);
 router.put('/return/:orderId', authenticate, isBusinessOwner, acceptReturn);
-router.put('/initiateReturn/:orderId', authenticate, isCustomer, initiateReturn);
-router.post("/:orderId/cancel", authenticate, isCustomer, cancelOrderByUser);
+router.put('/initiateReturn/:orderId', authenticate, isCheckoutBuyer, initiateReturn);
+router.post("/:orderId/cancel", authenticate, isCheckoutBuyer, cancelOrderByUser);
 router.get('/admin', authenticate, isAdmin, getAllOrdersAdmin);
 
 
