@@ -46,7 +46,11 @@ const getAuthenticatedUserId = (req) => req.user?.id || req.user?._id;
 // Vendor accounts may book other businesses, never their own listings.
 const rejectSelfBooking = (req, res, listingOwnerId) => {
   const userId = getAuthenticatedUserId(req);
-  if (userId && listingOwnerId && String(listingOwnerId) === String(userId)) {
+  if (!listingOwnerId) {
+    res.status(409).json({ success: false, message: 'This listing is not available for booking.' });
+    return true;
+  }
+  if (userId && String(listingOwnerId) === String(userId)) {
     res.status(403).json({
       success: false,
       code: 'SELF_BOOKING_FORBIDDEN',

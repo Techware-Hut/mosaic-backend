@@ -28,6 +28,7 @@ function mockResponse() {
 function loadController() {
   const created = [];
   const mails = [];
+  const smsCalls = [];
   const listing = {
     _id: '507f1f77bcf86cd799439010',
     title: 'Listing',
@@ -65,6 +66,16 @@ function loadController() {
         sendCustomerServiceBookingDecisionEmail: async () => {},
       };
     }
+    if (request.endsWith('utils/telnyxService')) {
+      const sms = (kind) => async (payload) => smsCalls.push({ kind, payload });
+      return {
+        sendServiceBookingCreatedCustomerSMS: sms('service-customer'),
+        sendServiceBookingAlertVendorSMS: sms('service-vendor'),
+        sendServiceBookingApprovedSMS: sms('service-approved'),
+        sendServiceBookingRejectedSMS: sms('service-rejected'),
+        sendFoodReservationCreatedSMS: sms('food-created'),
+      };
+    }
     if (request.endsWith('utils/notificationPreferenceGate')) {
       return { resolveVendorBookingNotificationRecipients: async () => ['vendor@example.com'] };
     }
@@ -73,7 +84,7 @@ function loadController() {
   delete require.cache[controllerPath];
   const controller = require(controllerPath);
   Module._load = originalLoad;
-  return { controller, created, mails };
+  return { controller, created, mails, smsCalls };
 }
 
 const serviceBody = {
@@ -91,13 +102,14 @@ for (const [kind, handler, params, body] of [
   ['food', 'createFoodBooking', { foodId: '507f1f77bcf86cd799439010' }, foodBody],
 ]) {
   test(`${handler} forbids a vendor booking their own ${kind} listing before any write or email`, async () => {
-    const { controller, created, mails } = loadController();
+    const { controller, created, mails, smsCalls } = loadController();
     const res = mockResponse();
     await controller[handler]({ user: { id: OWNER_ID, role: 'business_owner' }, params, body }, res);
     assert.equal(res.statusCode, 403);
     assert.equal(res.body.code, 'SELF_BOOKING_FORBIDDEN');
     assert.equal(created.length, 0);
     assert.equal(mails.length, 0);
+    assert.equal(smsCalls.length, 0);
   });
 
   test(`${handler} lets a vendor account book another business's ${kind} listing`, async () => {
