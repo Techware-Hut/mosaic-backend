@@ -2,11 +2,11 @@
 
 ## Purpose
 
-The `staging` branch is the **pre-production integration branch**. It is not a hosted environment.
+The `staging` branch is the **pre-production integration branch**. It is also deployed to the hosted staging backend (see [Hosted staging](#hosted-staging)).
 
 **MVP release strategy:** feature branch → PR → `staging` → PR → `main` → AWS Elastic Beanstalk production → [production soft-launch smoke](docs/production-smoke-checklist.md) with test accounts.
 
-Hosted staging backend is **deferred** — see [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md).
+Hosted staging backend: Elastic Beanstalk environment `mosaic-backend-staging` at `https://api-staging.mosaicbizhub.com`, deployed from the `staging` branch. Background: [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md).
 
 ---
 
@@ -15,7 +15,7 @@ Hosted staging backend is **deferred** — see [docs/hosted-staging-decision.md]
 | Layer | Role | Deploy target |
 | --- | --- | --- |
 | Feature work | Short-lived branch from `staging` | Local dev only |
-| Integration branch | `staging` | **None** (branch-level only) |
+| Integration branch | `staging` | AWS EB `mosaic-backend-staging` + `https://api-staging.mosaicbizhub.com` |
 | Production release | `main` | AWS EB + `https://api.mosaicbizhub.com` |
 
 Production EB hostname: `mosaic-backend.us-east-1.elasticbeanstalk.com` (use custom domain for HTTPS smoke).
@@ -33,7 +33,7 @@ Complete on the `staging` branch **before** opening a PR to `main`:
 5. Known P0 blockers tracked in [docs/launch-readiness-report.md](docs/launch-readiness-report.md) — deployment does not close them.
 6. `npm test` pass recorded (local) — see [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md).
 
-**Do not** require runtime webhook/auth smoke on `staging` itself — there is no staging host. Those checks run post-deploy on production per [DEPLOYMENT.md](DEPLOYMENT.md) and [docs/production-smoke-checklist.md](docs/production-smoke-checklist.md).
+Production webhook/auth smoke still runs post-deploy on production per [DEPLOYMENT.md](DEPLOYMENT.md) and [docs/production-smoke-checklist.md](docs/production-smoke-checklist.md).
 
 ---
 
@@ -50,9 +50,36 @@ Do not merge `staging` → `main` until:
 
 ---
 
-## Future hosted staging
+## Hosted staging
 
-If a separate staging EB environment is approved later, provision isolated MongoDB, S3, mail, and Stripe test mode per [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md), then update this file and [DEPLOYMENT.md](DEPLOYMENT.md).
+Hosted staging is the Elastic Beanstalk environment `mosaic-backend-staging` (`https://api-staging.mosaicbizhub.com`), deployed from the `staging` branch. It must use isolated MongoDB, S3, mail and Stripe test mode per [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md). The backend treats itself as staging when `RELEASE_ENVIRONMENT` or `SENTRY_ENVIRONMENT` is `staging`.
+
+### Isolation self-check
+
+At startup every environment logs one line: `[isolation] {...}`. On staging only, `GET /api/ready` also returns the same object as `isolation` (production `/api/ready`, `/api/health` and `/api/build-info` are unchanged). It contains booleans/enums and two resource names, never keys or URIs:
+
+| Field | Meaning |
+| --- | --- |
+| `stagingMarker`, `environment` | Staging marker detected; release environment name |
+| `database.name` | Connected MongoDB database name |
+| `stripe.mode` | `test` / `live` / `unset` / `unknown`, derived from the `STRIPE_SECRET_KEY` prefix |
+| `stripe.webhookSigningConfigured.*` | Whether each `STRIPE_*_WEBHOOK_SECRET` (order, subscription, businessDraft, orderPostPayment, vendorVerification) is set |
+| `jobs.*` | `ENABLE_ONBOARDING_REMINDERS` / `ENABLE_INVENTORY_RESERVATION_EXPIRY` effective state |
+| `mail` | SMTP credentials set; recipient allowlist active; number of valid allowlist entries |
+| `sms` | `TELNYX_API_KEY` set; recipient allowlist active |
+| `storage` | `AWS_S3_BUCKET` set, bucket name, `AWS_REGION` (default `us-east-1`) |
+| `adminEmailExplicit` | `ADMIN_EMAIL` set (otherwise code fallbacks apply) |
+
+Expected on staging: `stripe.mode` = `test`, a staging-only database and bucket, both jobs `false` unless deliberately enabled.
+
+### Recipient allowlist (opt-in, staging only)
+
+| Variable | Format |
+| --- | --- |
+| `MAIL_RECIPIENT_ALLOWLIST` | Comma-separated exact addresses and/or `@domain` suffixes |
+| `SMS_RECIPIENT_ALLOWLIST` | Comma-separated E.164 numbers (e.g. `+17575550100`) |
+
+Only when the staging marker is present **and** the variable is non-empty: mail `to`/`cc`/`bcc` and the SMS destination are filtered to allowlisted recipients. If none remain, the send is skipped, one redacted log line (counts only) is written, and the call resolves successfully so business flows continue. A set variable with zero valid entries suppresses **all** sends of that kind (fail closed). Outside staging, or with the variable unset, behaviour is unchanged.
 
 ---
 

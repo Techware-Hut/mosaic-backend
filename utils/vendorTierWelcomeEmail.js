@@ -10,13 +10,13 @@
 const nodemailer = require('nodemailer');
 const { buildFrontendUrl } = require('./frontendUrl');
 const {
-  buildSmtpTransportConfig,
+  createMosaicTransport,
   formatMosaicFromHeader,
 } = require('./smtpTransport');
 const { baseLayout, esc, SUPPORT_EMAIL } = require('./emailTemplates/baseLayout');
 const { deliverVendorOnboardingEmail } = require('./vendorOnboardingEmailDelivery');
 
-const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
+const transporter = createMosaicTransport(nodemailer);
 
 /**
  * Resolve tier details, exact copy, subject, and features based on plan name.

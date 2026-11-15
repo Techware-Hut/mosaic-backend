@@ -2,7 +2,7 @@
 const nodemailer = require("nodemailer");
 const { buildFrontendUrl } = require("./frontendUrl");
 const {
-  buildSmtpTransportConfig,
+  createMosaicTransport,
   formatMosaicFromHeader,
 } = require("./smtpTransport");
 const { renderInvoicePdfBufferForOrder } = require("../services/invoiceService");
@@ -15,7 +15,7 @@ const { baseLayout, esc } = require("./emailTemplates/baseLayout");
 
 const transporter =
   global.__MAILER__ ||
-  nodemailer.createTransport(buildSmtpTransportConfig());
+  createMosaicTransport(nodemailer);
 
 function buildCustomerOrderHtml({ order, businessName, invoiceAttached, customerOrdersUrl }) {
   const orderNo = order.groupOrderId || order._id?.toString();

@@ -2,7 +2,7 @@
 const nodemailer = require("nodemailer");
 const { buildFrontendUrl, getFrontendLogoUrl } = require("./frontendUrl");
 const {
-  buildSmtpTransportConfig,
+  createMosaicTransport,
   formatMosaicFromHeader,
 } = require("./smtpTransport");
 const { baseLayout, esc } = require("./emailTemplates/baseLayout");
@@ -20,7 +20,7 @@ const escapeHtml = (value = "") =>
     .replace(/'/g, "&#039;");
 
 // Configure transporter (swap service/config as needed)
-const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
+const transporter = createMosaicTransport(nodemailer);
 
 /**
  * HTML wrapper with logo header and CTA button

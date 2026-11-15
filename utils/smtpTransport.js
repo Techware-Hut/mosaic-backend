@@ -56,8 +56,65 @@ function formatMosaicFromHeader(env = process.env) {
   return fromAddress ? `"Mosaic Biz Hub" <${fromAddress}>` : '"Mosaic Biz Hub"';
 }
 
+/**
+ * Wraps a transporter's sendMail with the opt-in staging recipient allowlist
+ * (MAIL_RECIPIENT_ALLOWLIST). Outside hosted staging, or when the allowlist
+ * env var is unset/blank, the original sendMail is called with the original
+ * arguments unchanged.
+ */
+function applyMailRecipientAllowlist(transporter) {
+  if (!transporter || typeof transporter.sendMail !== 'function') {
+    return transporter;
+  }
+  const originalSendMail = transporter.sendMail;
+
+  transporter.sendMail = function sendMailWithAllowlist(...args) {
+    const { getMailAllowlist, filterMailOptions } = require('./recipientAllowlist');
+    const allowlist = getMailAllowlist();
+    if (!allowlist.active) {
+      return originalSendMail.apply(this, args);
+    }
+
+    const [mailOptions, ...rest] = args;
+    const callback = typeof rest[rest.length - 1] === 'function' ? rest[rest.length - 1] : null;
+    const result = filterMailOptions(mailOptions, allowlist);
+
+    if (result.suppress) {
+      console.warn(
+        `[isolation] mail suppressed by staging recipient allowlist (recipients=${result.total}, allowed=0, allowlistSize=${allowlist.size})`
+      );
+      const info = { suppressed: true, accepted: [], rejected: [], envelope: {}, response: 'suppressed' };
+      if (callback) {
+        callback(null, info);
+        return undefined;
+      }
+      return Promise.resolve(info);
+    }
+
+    if (result.allowed < result.total) {
+      console.warn(
+        `[isolation] mail recipients filtered by staging allowlist (recipients=${result.total}, allowed=${result.allowed})`
+      );
+    }
+    return originalSendMail.call(this, result.mailOptions, ...rest);
+  };
+
+  return transporter;
+}
+
+/**
+ * Single construction point for SMTP transporters (shared SMTP config plus
+ * the staging-only recipient allowlist guard). Call sites pass the nodemailer
+ * module they already required so module-load-time binding is unchanged.
+ */
+function createMosaicTransport(nodemailerImpl = require('nodemailer')) {
+  return applyMailRecipientAllowlist(nodemailerImpl.createTransport(buildSmtpTransportConfig()));
+}
+
 module.exports = {
+  applyMailRecipientAllowlist,
   buildSmtpTransportConfig,
+  createMosaicTransport,
   formatMosaicFromHeader,
   getMailFromAddress,
   parseMailPort,

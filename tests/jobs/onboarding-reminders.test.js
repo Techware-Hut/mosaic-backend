@@ -147,6 +147,7 @@ test('sendPaymentReminderEmail renders onboarding alert CTA', async () => {
 
   const smtpTransportMock = {
     buildSmtpTransportConfig: () => ({}),
+    createMosaicTransport: (impl) => impl.createTransport({}),
     formatMosaicFromHeader: () => 'Mosaic Biz Hub <mail@example.com>',
   };
 
