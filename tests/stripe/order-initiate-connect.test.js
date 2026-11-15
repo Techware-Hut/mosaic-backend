@@ -585,3 +585,48 @@ test('initiateOrder blocks checkout when product variant is missing', async () =
   assert.match(res.body.message, /not found/i);
   assert.equal(getPiCreateCalls().length, 0);
 });
+
+test('initiateOrder forbids a vendor buying from their own variant ownership', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const { initiateOrder, getPiCreateCalls, getAccountRetrieveCalls, getReservationCalls } = loadInitiateOrder({
+    variants: [buildVariant({ ownerId: userId })],
+  });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'SELF_PURCHASE_FORBIDDEN');
+  assert.equal(getAccountRetrieveCalls().length, 0);
+  assert.equal(getReservationCalls().length, 0);
+  assert.equal(getPiCreateCalls().length, 0);
+});
+
+test('initiateOrder forbids a vendor buying from a business they own', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const { initiateOrder, getPiCreateCalls, getAccountRetrieveCalls, getReservationCalls } = loadInitiateOrder({
+    business: buildBusiness({ owner: { toString: () => userId } }),
+  });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'SELF_PURCHASE_FORBIDDEN');
+  assert.equal(getAccountRetrieveCalls().length, 0);
+  assert.equal(getReservationCalls().length, 0);
+  assert.equal(getPiCreateCalls().length, 0);
+});
+
+test('initiateOrder still lets a vendor account buy from a different vendor', async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+  const { initiateOrder, getPiCreateCalls } = loadInitiateOrder({
+    business: buildBusiness({ owner: { toString: () => vendorId } }),
+  });
+  const res = mockResponse();
+
+  await initiateOrder(baseRequest(), res);
+
+  assert.notEqual(res.statusCode, 403);
+  assert.equal(getPiCreateCalls().length, 1);
+});

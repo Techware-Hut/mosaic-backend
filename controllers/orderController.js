@@ -747,6 +747,21 @@ exports.initiateOrder = async (req, res) => {
     const business = await Business.findById(businessId);
     const user = await User.findById(userId).select("email");
 
+    // Vendor accounts may buy from other vendors, never from themselves:
+    // a self-purchase would route a Connect charge back to the buyer and
+    // could fabricate sales or reviews.
+    const buyerId = String(userId);
+    if (
+      vendorId === buyerId ||
+      (business?.owner && String(business.owner) === buyerId)
+    ) {
+      return res.status(403).json({
+        success: false,
+        code: "SELF_PURCHASE_FORBIDDEN",
+        message: "You can't purchase products from your own business.",
+      });
+    }
+
     const checkoutBlock = getBusinessCheckoutBlock(business);
     if (checkoutBlock) {
       return res.status(checkoutBlock.status).json({
