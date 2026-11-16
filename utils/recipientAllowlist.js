@@ -50,7 +50,7 @@ function policyFor(active, set, size) {
  * @returns {{ active: boolean, policy: string, addresses: Set<string>, domains: string[], size: number }}
  */
 function getMailAllowlist(env = process.env) {
-  const active = isStagingEnv(env) && isAllowlistSet(env, MAIL_ALLOWLIST_ENV);
+  const active = isStagingEnv(env);
   const set = isAllowlistSet(env, MAIL_ALLOWLIST_ENV);
   const addresses = new Set();
   const domains = [];
@@ -72,7 +72,7 @@ function getMailAllowlist(env = process.env) {
  * @returns {{ active: boolean, policy: string, numbers: Set<string>, size: number }}
  */
 function getSmsAllowlist(env = process.env) {
-  const active = isStagingEnv(env) && isAllowlistSet(env, SMS_ALLOWLIST_ENV);
+  const active = isStagingEnv(env);
   const set = isAllowlistSet(env, SMS_ALLOWLIST_ENV);
   const numbers = new Set();
   if (active && set) {
@@ -152,7 +152,10 @@ function filterMailOptions(mailOptions, allowlist) {
     const kept = parsed.filter((entry) => isMailAddressAllowed(entry.address, allowlist));
     total += parsed.length;
     allowed += kept.length;
-    if (kept.length > 0) {
+    if (typeof next[field] === 'string' && kept.length === parsed.length && kept.length > 0) {
+      // Every recipient in a plain string is allowed: leave the caller's value
+      // untouched (nodemailer parses strings with the same addressparser).
+    } else if (kept.length > 0) {
       next[field] = kept;
     } else {
       delete next[field];

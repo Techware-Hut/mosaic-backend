@@ -57,10 +57,10 @@ function formatMosaicFromHeader(env = process.env) {
 }
 
 /**
- * Wraps a transporter's sendMail with the opt-in staging recipient allowlist
- * (MAIL_RECIPIENT_ALLOWLIST). Outside hosted staging, or when the allowlist
- * env var is unset/blank, the original sendMail is called with the original
- * arguments unchanged.
+ * Wraps a transporter's sendMail with the staging recipient allowlist
+ * (MAIL_RECIPIENT_ALLOWLIST). Outside hosted staging the original sendMail is
+ * called with the original arguments unchanged. In hosted staging the guard
+ * fails closed: an unset/blank/invalid allowlist suppresses every send.
  */
 function applyMailRecipientAllowlist(transporter) {
   if (!transporter || typeof transporter.sendMail !== 'function') {

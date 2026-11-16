@@ -231,16 +231,44 @@ test('mail: non-staging passes the original options through untouched', () =>
     assert.equal(sent[0], message);
   }));
 
-test('mail: staging with allowlist unset or blank passes through untouched', () =>
+test('mail: staging with allowlist unset or blank fails closed (suppresses every send)', () =>
   withEnv({ RELEASE_ENVIRONMENT: 'staging' }, async () => {
     const { transporter, sent } = fakeTransporter();
-    const message = { to: 'customer@gmail.com' };
-    await transporter.sendMail(message);
-    process.env.MAIL_RECIPIENT_ALLOWLIST = '   ';
-    await transporter.sendMail(message);
-    assert.equal(sent.length, 2);
+    const warn = captureWarnings();
+    const infos = [];
+    try {
+      infos.push(await transporter.sendMail({ to: 'customer@gmail.com' }));
+      process.env.MAIL_RECIPIENT_ALLOWLIST = '   ';
+      infos.push(await transporter.sendMail({ to: 'customer@gmail.com', cc: 'qa@example.com' }));
+    } finally {
+      warn.restore();
+    }
+    assert.equal(sent.length, 0);
+    assert.ok(infos.every((info) => info.suppressed === true));
+    assert.equal(warn.lines.length, 2);
+    assert.ok(warn.lines.every((line) => /policy=suppress_all_unset/.test(line) && !line.includes('@')));
+  }));
+
+test('mail: SENTRY_ENVIRONMENT=staging alone also activates the fail-closed guard', () =>
+  withEnv({ SENTRY_ENVIRONMENT: 'Staging ' }, async () => {
+    const { transporter, sent } = fakeTransporter();
+    const warn = captureWarnings();
+    try {
+      await transporter.sendMail({ to: 'customer@gmail.com' });
+    } finally {
+      warn.restore();
+    }
+    assert.equal(sent.length, 0);
+  }));
+
+test('mail: no environment marker is a pure pass-through even with the allowlist unset', () =>
+  withEnv({}, async () => {
+    const { transporter, sent } = fakeTransporter();
+    const message = { to: 'customer@gmail.com', headers: { To: 'x@y.com' }, raw: 'raw' };
+    const info = await transporter.sendMail(message);
+    assert.equal(info.messageId, 'm-1');
+    assert.equal(sent.length, 1);
     assert.equal(sent[0], message);
-    assert.equal(sent[1], message);
   }));
 
 test('createMosaicTransport builds from shared SMTP config and installs the guard', () =>
@@ -330,8 +358,32 @@ test('sms: non-staging ignores the allowlist', () =>
     assert.equal(result.error, 'TELNYX_API_KEY not configured');
   }));
 
-test('sms: staging with allowlist unset passes through', () =>
+test('sms: staging with allowlist unset or blank fails closed', () =>
   withEnv({ RELEASE_ENVIRONMENT: 'staging' }, async () => {
+    const warn = captureWarnings();
+    const results = [];
+    try {
+      results.push(await sendSMS({ to: '757-260-7200', text: 'hello' }));
+      process.env.SMS_RECIPIENT_ALLOWLIST = ' ';
+      results.push(await sendSMS({ to: '+17575550100', text: 'hello' }));
+    } finally {
+      warn.restore();
+    }
+    assert.ok(results.every((r) => r.suppressed === true && r.success === true));
+    assert.ok(warn.lines.every((line) => !/7200|0100/.test(line)));
+  }));
+
+test('sms: no environment marker is a pure pass-through', () =>
+  withEnv({}, async () => {
     const result = await sendSMS({ to: '757-260-7200', text: 'hello' });
     assert.equal(result.error, 'TELNYX_API_KEY not configured');
+  }));
+
+test('mail: a fully allowed string recipient field is passed through verbatim', () =>
+  withEnv({ RELEASE_ENVIRONMENT: 'staging', MAIL_RECIPIENT_ALLOWLIST: '@example.com' }, async () => {
+    const { transporter, sent } = fakeTransporter();
+    await transporter.sendMail({ to: '"QA" <qa@example.com>, ops@example.com', cc: ['qa@example.com'] });
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].to, '"QA" <qa@example.com>, ops@example.com');
+    assert.deepEqual(addresses(sent[0].cc), ['qa@example.com']);
   }));

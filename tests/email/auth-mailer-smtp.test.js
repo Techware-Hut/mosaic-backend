@@ -20,6 +20,7 @@ const ENV_KEYS = [
   'NEXT_PUBLIC_APP_URL',
   'FRONTEND_URL',
   'APP_URL',
+  'MAIL_RECIPIENT_ALLOWLIST',
 ];
 
 function snapshotEnv() {
@@ -191,6 +192,8 @@ for (const [label, urlEnv, expectedHome] of homepageCases) {
     Object.assign(process.env, urlEnv, {
       MAIL_HOST: 'smtp.example.test', MAIL_PORT: '465', MAIL_SECURE: 'true',
       MAIL_USER: 'synthetic-user', MAIL_PASSWORD: 'synthetic-password', MAIL_FROM: sender,
+      // Hosted staging fails closed without an allowlist; allow the synthetic fixture domain.
+      MAIL_RECIPIENT_ALLOWLIST: '@example.test',
     });
 
     try {

@@ -59,8 +59,9 @@ function normalizePhoneNumber(phone, defaultCountry = 'US') {
  * @returns {Promise<{ success: boolean, messageId?: string, status?: string, error?: string, details?: any }>}
  */
 async function sendSMS(options) {
-  // Opt-in, staging-only recipient allowlist (SMS_RECIPIENT_ALLOWLIST).
-  // Outside hosted staging or when unset, this is a pure pass-through.
+  // Staging-only recipient allowlist (SMS_RECIPIENT_ALLOWLIST). Outside hosted
+  // staging this is a pure pass-through; in staging it fails closed (an
+  // unset/blank/invalid allowlist suppresses every SMS).
   const { getSmsAllowlist, isSmsNumberAllowed } = require('./recipientAllowlist');
   const allowlist = getSmsAllowlist();
   if (allowlist.active) {

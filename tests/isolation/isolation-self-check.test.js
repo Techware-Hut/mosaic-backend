@@ -146,3 +146,24 @@ test('self-check reuses the job modules enabled logic by default', () => {
     }
   }
 });
+
+test('self-check reports the fail-closed staging policy when allowlists are unset or invalid', () => {
+  const unset = getIsolationSelfCheck({
+    env: stagingEnv({ MAIL_RECIPIENT_ALLOWLIST: undefined, SMS_RECIPIENT_ALLOWLIST: '  ' }),
+    connection: { name: 'mosaic_staging' },
+    getJobs: jobsOff,
+  });
+  assert.equal(unset.mail.recipientAllowlistEnabled, true);
+  assert.equal(unset.mail.recipientPolicy, 'suppress_all_unset');
+  assert.equal(unset.mail.allowlistSize, 0);
+  assert.equal(unset.sms.recipientPolicy, 'suppress_all_unset');
+
+  const invalid = getIsolationSelfCheck({
+    env: stagingEnv({ MAIL_RECIPIENT_ALLOWLIST: 'nope', SMS_RECIPIENT_ALLOWLIST: '7575550100' }),
+    connection: { name: 'mosaic_staging' },
+    getJobs: jobsOff,
+  });
+  assert.equal(invalid.mail.recipientPolicy, 'suppress_all_invalid');
+  assert.equal(invalid.sms.recipientPolicy, 'suppress_all_invalid');
+  assert.equal(isLikelySafePublicReleasePayload(invalid), true);
+});

@@ -72,16 +72,16 @@ At startup every environment logs one line: `[isolation] {...}`. On staging only
 
 Expected on staging: `stripe.mode` = `test`, a staging-only database (and, checked in EB configuration, a staging-only bucket), both jobs `false` unless deliberately enabled.
 
-### Recipient allowlist (opt-in, staging only)
+### Recipient allowlist (staging only, fail closed)
 
 | Variable | Format |
 | --- | --- |
 | `MAIL_RECIPIENT_ALLOWLIST` | Comma-separated exact addresses and/or `@domain` suffixes |
 | `SMS_RECIPIENT_ALLOWLIST` | Comma-separated E.164 numbers (e.g. `+17575550100`) |
 
-Only when the staging marker is present **and** the variable is non-empty: mail `to`/`cc`/`bcc` and the SMS destination are filtered to allowlisted recipients. If none remain, the send is skipped, one redacted log line (counts and reason enums only) is written, and the call resolves successfully so business flows continue. A set variable with zero valid entries suppresses **all** sends of that kind (fail closed). While active, mail that sets `To`/`Cc`/`Bcc` through custom `headers`, uses a `raw` message, or has an explicit `envelope` with no allowlisted recipient is suppressed. Outside staging, or with the variable unset, behaviour is unchanged.
+Whenever the staging marker is present, mail `to`/`cc`/`bcc` and the SMS destination are filtered to allowlisted recipients. Staging data may be cloned from production, so the default is to reach nobody: with the variable **unset or blank**, every send of that kind is suppressed. If none remain, the send is skipped, one redacted log line (counts and reason enums only) is written, and the call resolves successfully so business flows continue. A set variable with zero valid entries suppresses **all** sends of that kind (fail closed). While active, mail that sets `To`/`Cc`/`Bcc` through custom `headers`, uses a `raw` message, or has an explicit `envelope` with no allowlisted recipient is suppressed. Outside staging (no marker) behaviour is unchanged: a pure pass-through, whatever the variables contain.
 
-`recipientPolicy` values: `off` (pass-through), `enforced` (filtering), `suppress_all_invalid` (set but no valid entry).
+`recipientPolicy` values: `off` (not staging, pass-through), `enforced` (filtering), `suppress_all_unset` (staging, variable unset/blank), `suppress_all_invalid` (staging, set but no valid entry). To let QA receive mail or SMS on staging, list their addresses/domains/numbers explicitly.
 
 ---
 
