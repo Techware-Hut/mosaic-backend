@@ -1,7 +1,7 @@
 'use strict';
 
 // Hosted-staging isolation self-check. Returns booleans/enums plus the
-// database and storage bucket names only — never keys, URIs or secrets.
+// database name only — never keys, URIs, bucket names, recipients or secrets.
 // The full object is exposed publicly only on staging /api/ready; production
 // sees it solely in the startup log.
 
@@ -63,8 +63,6 @@ function getIsolationSelfCheck(options = {}) {
     webhookSigningConfigured[key] = isSet(env, name);
   }
 
-  const bucket = trimmed(env.AWS_S3_BUCKET) || null;
-
   return {
     stagingMarker: isStagingEnv(env),
     environment: getReleaseEnvironment(),
@@ -82,15 +80,17 @@ function getIsolationSelfCheck(options = {}) {
     mail: {
       configured: isSet(env, 'MAIL_USER') && isSet(env, 'MAIL_PASSWORD'),
       recipientAllowlistEnabled: mailAllowlist.active,
+      recipientPolicy: mailAllowlist.policy,
       allowlistSize: mailAllowlist.size,
     },
     sms: {
       configured: isSet(env, 'TELNYX_API_KEY'),
       recipientAllowlistEnabled: smsAllowlist.active,
+      recipientPolicy: smsAllowlist.policy,
+      allowlistSize: smsAllowlist.size,
     },
     storage: {
-      bucketConfigured: bucket !== null,
-      bucket,
+      bucketConfigured: isSet(env, 'AWS_S3_BUCKET'),
       region: trimmed(env.AWS_REGION) || DEFAULT_AWS_REGION,
     },
     adminEmailExplicit: isSet(env, 'ADMIN_EMAIL'),

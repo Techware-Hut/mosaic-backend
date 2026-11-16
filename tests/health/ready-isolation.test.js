@@ -82,7 +82,8 @@ test('staging /ready adds the isolation self-check; /health and /build-info unch
     assert.deepEqual(Object.keys(ready.body), ['status', 'database', 'authEmail', 'timestamp', 'release', 'isolation']);
     assert.equal(ready.body.isolation.stagingMarker, true);
     assert.equal(ready.body.isolation.database.name, 'mosaic_staging');
-    assert.equal(ready.body.isolation.storage.bucket, 'mosaic-staging-uploads');
+    assert.equal(ready.body.isolation.storage.bucketConfigured, true);
+    assert.ok(!JSON.stringify(ready.body).includes('mosaic-staging-uploads'));
     assert.equal(typeof ready.body.isolation.jobs.onboardingReminders, 'boolean');
     assert.equal('isolation' in call(router, '/health').body, false);
     assert.equal('isolation' in call(router, '/build-info').body, false);

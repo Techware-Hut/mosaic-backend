@@ -61,13 +61,19 @@ test('getIsolationSelfCheck returns the documented shape with booleans/enums onl
     },
   });
   assert.deepEqual(check.jobs, { onboardingReminders: true, inventoryReservationExpiry: false });
-  assert.deepEqual(check.mail, { configured: true, recipientAllowlistEnabled: true, allowlistSize: 2 });
-  assert.deepEqual(check.sms, { configured: true, recipientAllowlistEnabled: true });
-  assert.deepEqual(check.storage, {
-    bucketConfigured: true,
-    bucket: 'mosaic-staging-uploads',
-    region: 'us-east-1',
+  assert.deepEqual(check.mail, {
+    configured: true,
+    recipientAllowlistEnabled: true,
+    recipientPolicy: 'enforced',
+    allowlistSize: 2,
   });
+  assert.deepEqual(check.sms, {
+    configured: true,
+    recipientAllowlistEnabled: true,
+    recipientPolicy: 'enforced',
+    allowlistSize: 1,
+  });
+  assert.deepEqual(check.storage, { bucketConfigured: true, region: 'us-east-1' });
   assert.equal(check.adminEmailExplicit, true);
 });
 
@@ -89,6 +95,10 @@ test('self-check never contains key material and passes the public payload guard
   assert.ok(!serialized.includes('whsec_'));
   assert.ok(!serialized.includes('qa@example.com'));
   assert.ok(!serialized.includes('+17575550100'));
+  assert.ok(!serialized.includes('mosaic-staging-uploads'));
+  assert.ok(!serialized.includes('admin@example.com'));
+  assert.ok(!serialized.includes('mailer@example.com'));
+  assert.ok(!serialized.includes('KEYfake'));
   assert.equal(isLikelySafePublicReleasePayload(check), true);
 });
 
@@ -102,9 +112,19 @@ test('self-check reports unset/disabled values outside staging', () => {
   assert.equal(check.stagingMarker, false);
   assert.equal(check.database.name, null);
   assert.equal(check.stripe.mode, 'unset');
-  assert.deepEqual(check.mail, { configured: false, recipientAllowlistEnabled: false, allowlistSize: 0 });
-  assert.deepEqual(check.sms, { configured: false, recipientAllowlistEnabled: false });
-  assert.deepEqual(check.storage, { bucketConfigured: false, bucket: null, region: 'us-east-1' });
+  assert.deepEqual(check.mail, {
+    configured: false,
+    recipientAllowlistEnabled: false,
+    recipientPolicy: 'off',
+    allowlistSize: 0,
+  });
+  assert.deepEqual(check.sms, {
+    configured: false,
+    recipientAllowlistEnabled: false,
+    recipientPolicy: 'off',
+    allowlistSize: 0,
+  });
+  assert.deepEqual(check.storage, { bucketConfigured: false, region: 'us-east-1' });
   assert.equal(check.adminEmailExplicit, false);
   assert.equal(isLikelySafePublicReleasePayload(check), true);
 });

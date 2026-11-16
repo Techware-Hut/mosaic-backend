@@ -81,7 +81,7 @@ function applyMailRecipientAllowlist(transporter) {
 
     if (result.suppress) {
       console.warn(
-        `[isolation] mail suppressed by staging recipient allowlist (recipients=${result.total}, allowed=0, allowlistSize=${allowlist.size})`
+        `[isolation] mail suppressed by staging recipient allowlist (reason=${result.reason}, policy=${allowlist.policy}, recipients=${result.total}, allowed=${result.allowed}, allowlistSize=${allowlist.size})`
       );
       const info = { suppressed: true, accepted: [], rejected: [], envelope: {}, response: 'suppressed' };
       if (callback) {

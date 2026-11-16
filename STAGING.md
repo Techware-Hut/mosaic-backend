@@ -56,7 +56,7 @@ Hosted staging is the Elastic Beanstalk environment `mosaic-backend-staging` (`h
 
 ### Isolation self-check
 
-At startup every environment logs one line: `[isolation] {...}`. On staging only, `GET /api/ready` also returns the same object as `isolation` (production `/api/ready`, `/api/health` and `/api/build-info` are unchanged). It contains booleans/enums and two resource names, never keys or URIs:
+At startup every environment logs one line: `[isolation] {...}`. On staging only, `GET /api/ready` also returns the same object as `isolation` (production `/api/ready`, `/api/health` and `/api/build-info` are unchanged). It contains booleans/enums and the database name only, never keys, URIs, bucket names or recipient addresses:
 
 | Field | Meaning |
 | --- | --- |
@@ -65,12 +65,12 @@ At startup every environment logs one line: `[isolation] {...}`. On staging only
 | `stripe.mode` | `test` / `live` / `unset` / `unknown`, derived from the `STRIPE_SECRET_KEY` prefix |
 | `stripe.webhookSigningConfigured.*` | Whether each `STRIPE_*_WEBHOOK_SECRET` (order, subscription, businessDraft, orderPostPayment, vendorVerification) is set |
 | `jobs.*` | `ENABLE_ONBOARDING_REMINDERS` / `ENABLE_INVENTORY_RESERVATION_EXPIRY` effective state |
-| `mail` | SMTP credentials set; recipient allowlist active; number of valid allowlist entries |
-| `sms` | `TELNYX_API_KEY` set; recipient allowlist active |
-| `storage` | `AWS_S3_BUCKET` set, bucket name, `AWS_REGION` (default `us-east-1`) |
+| `mail` | SMTP credentials set; recipient allowlist active; `recipientPolicy` (see below); number of valid allowlist entries |
+| `sms` | `TELNYX_API_KEY` set; recipient allowlist active; `recipientPolicy`; number of valid allowlist entries |
+| `storage` | `AWS_S3_BUCKET` set; `AWS_REGION` (default `us-east-1`). The bucket name is deliberately not reported; confirm it in the EB environment configuration |
 | `adminEmailExplicit` | `ADMIN_EMAIL` set (otherwise code fallbacks apply) |
 
-Expected on staging: `stripe.mode` = `test`, a staging-only database and bucket, both jobs `false` unless deliberately enabled.
+Expected on staging: `stripe.mode` = `test`, a staging-only database (and, checked in EB configuration, a staging-only bucket), both jobs `false` unless deliberately enabled.
 
 ### Recipient allowlist (opt-in, staging only)
 
@@ -79,7 +79,9 @@ Expected on staging: `stripe.mode` = `test`, a staging-only database and bucket,
 | `MAIL_RECIPIENT_ALLOWLIST` | Comma-separated exact addresses and/or `@domain` suffixes |
 | `SMS_RECIPIENT_ALLOWLIST` | Comma-separated E.164 numbers (e.g. `+17575550100`) |
 
-Only when the staging marker is present **and** the variable is non-empty: mail `to`/`cc`/`bcc` and the SMS destination are filtered to allowlisted recipients. If none remain, the send is skipped, one redacted log line (counts only) is written, and the call resolves successfully so business flows continue. A set variable with zero valid entries suppresses **all** sends of that kind (fail closed). Outside staging, or with the variable unset, behaviour is unchanged.
+Only when the staging marker is present **and** the variable is non-empty: mail `to`/`cc`/`bcc` and the SMS destination are filtered to allowlisted recipients. If none remain, the send is skipped, one redacted log line (counts and reason enums only) is written, and the call resolves successfully so business flows continue. A set variable with zero valid entries suppresses **all** sends of that kind (fail closed). While active, mail that sets `To`/`Cc`/`Bcc` through custom `headers`, uses a `raw` message, or has an explicit `envelope` with no allowlisted recipient is suppressed. Outside staging, or with the variable unset, behaviour is unchanged.
+
+`recipientPolicy` values: `off` (pass-through), `enforced` (filtering), `suppress_all_invalid` (set but no valid entry).
 
 ---
 

@@ -119,6 +119,95 @@ test('mail: suppression honours callback-style sendMail', () =>
     assert.equal(sent.length, 0);
   }));
 
+test('mail: custom To/Cc/Bcc headers cannot smuggle recipients past the allowlist', () =>
+  withEnv({ RELEASE_ENVIRONMENT: 'staging', MAIL_RECIPIENT_ALLOWLIST: 'qa@example.com' }, async () => {
+    const warn = captureWarnings();
+    try {
+      for (const headers of [
+        { To: 'customer@gmail.com' },
+        { ' bcc ': 'customer@gmail.com' },
+        [{ key: 'Cc', value: 'customer@gmail.com' }],
+      ]) {
+        const { transporter, sent } = fakeTransporter();
+        const info = await transporter.sendMail({ to: 'qa@example.com', headers });
+        assert.equal(sent.length, 0);
+        assert.equal(info.suppressed, true);
+      }
+    } finally {
+      warn.restore();
+    }
+    assert.ok(warn.lines.every((line) => /reason=header_recipients/.test(line) && !line.includes('@')));
+  }));
+
+test('mail: non-recipient custom headers are preserved', () =>
+  withEnv({ RELEASE_ENVIRONMENT: 'staging', MAIL_RECIPIENT_ALLOWLIST: 'qa@example.com' }, async () => {
+    const { transporter, sent } = fakeTransporter();
+    await transporter.sendMail({ to: 'qa@example.com', headers: { 'X-Entity-Ref-ID': 'abc' } });
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0].headers, { 'X-Entity-Ref-ID': 'abc' });
+  }));
+
+test('mail: raw messages are suppressed while the allowlist is active', () =>
+  withEnv({ RELEASE_ENVIRONMENT: 'staging', MAIL_RECIPIENT_ALLOWLIST: 'qa@example.com' }, async () => {
+    const { transporter, sent } = fakeTransporter();
+    const warn = captureWarnings();
+    let info;
+    try {
+      info = await transporter.sendMail({
+        envelope: { from: 'a@example.com', to: ['qa@example.com'] },
+        raw: ['To: customer@gmail.com', 'Subject: x', '', 'body'].join('\r\n'),
+      });
+    } finally {
+      warn.restore();
+    }
+    assert.equal(sent.length, 0);
+    assert.equal(info.suppressed, true);
+    assert.match(warn.lines[0], /reason=raw_message/);
+  }));
+
+test('mail: explicit envelope is filtered and suppressed when no allowed envelope recipient remains', () =>
+  withEnv({ RELEASE_ENVIRONMENT: 'staging', MAIL_RECIPIENT_ALLOWLIST: 'qa@example.com' }, async () => {
+    const warn = captureWarnings();
+    try {
+      const a = fakeTransporter();
+      const info = await a.transporter.sendMail({
+        to: 'qa@example.com',
+        envelope: { from: 'bounce@example.com', to: 'customer@gmail.com' },
+      });
+      assert.equal(a.sent.length, 0);
+      assert.equal(info.suppressed, true);
+
+      const b = fakeTransporter();
+      await b.transporter.sendMail({
+        to: 'qa@example.com',
+        envelope: { from: 'bounce@example.com', to: ['QA@Example.com', 'customer@gmail.com'], bcc: 'x@gmail.com' },
+      });
+      assert.equal(b.sent.length, 1);
+      assert.deepEqual(b.sent[0].envelope, { from: 'bounce@example.com', to: ['QA@Example.com'] });
+    } finally {
+      warn.restore();
+    }
+  }));
+
+test('mail: display names, groups, case and whitespace are parsed before matching', () =>
+  withEnv({ RELEASE_ENVIRONMENT: 'staging', MAIL_RECIPIENT_ALLOWLIST: ' QA@Example.com ,@Test.Mosaic.dev' }, async () => {
+    const { transporter, sent } = fakeTransporter();
+    const warn = captureWarnings();
+    try {
+      await transporter.sendMail({
+        to: '"Doe, Jane" <jane@gmail.com>,  "QA Team" < qa@example.com >',
+        cc: 'Team: ops@test.mosaic.dev, boss@gmail.com;',
+        bcc: ['  ', null, { name: 'x', address: 'qa@example.com.evil.io' }],
+      });
+    } finally {
+      warn.restore();
+    }
+    assert.equal(sent.length, 1);
+    assert.deepEqual(addresses(sent[0].to), ['qa@example.com']);
+    assert.deepEqual(addresses(sent[0].cc), ['ops@test.mosaic.dev']);
+    assert.equal('bcc' in sent[0], false);
+  }));
+
 test('mail: allowlist set but with zero valid entries fails closed', () =>
   withEnv({ RELEASE_ENVIRONMENT: 'staging', MAIL_RECIPIENT_ALLOWLIST: 'not-an-email, ,@' }, async () => {
     const { transporter, sent } = fakeTransporter();
