@@ -73,6 +73,16 @@ async function deliverVendorOnboardingEmail({ label, send }) {
 
   try {
     const info = await send();
+    // Lazy require keeps this module free of SMTP dependencies at load time.
+    const { isSuppressedMailResult, STAGING_SUPPRESSED_REASON } = require('./smtpTransport');
+    if (isSuppressedMailResult(info)) {
+      return {
+        sent: false,
+        skipped: true,
+        reason: STAGING_SUPPRESSED_REASON,
+        provider: configStatus.provider,
+      };
+    }
     return {
       sent: true,
       skipped: false,

@@ -338,6 +338,7 @@ test('sms: non-allowlisted number is suppressed, resolves successfully, logs no 
     assert.deepEqual(result, { success: true, suppressed: true, status: 'suppressed' });
     assert.equal(warn.lines.length, 1);
     assert.ok(!warn.lines[0].includes('7200'));
+    assert.match(warn.lines[0], /reason=not_allowlisted, policy=enforced, recipients=1, allowed=0, allowlistSize=1/);
   }));
 
 test('sms: allowlist with zero valid entries fails closed', () =>

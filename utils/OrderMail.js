@@ -2,8 +2,10 @@
 const nodemailer = require("nodemailer");
 const { buildFrontendUrl } = require("./frontendUrl");
 const {
+  STAGING_SUPPRESSED_REASON,
   createMosaicTransport,
   formatMosaicFromHeader,
+  isSuppressedMailResult,
 } = require("./smtpTransport");
 const { renderInvoicePdfBufferForOrder } = require("../services/invoiceService");
 const {
@@ -192,6 +194,20 @@ function normalizeProviderResult(info, recipientCount) {
   const accepted = hasAcceptedEvidence ? info.accepted.length : null;
   const rejected = Array.isArray(info?.rejected) ? info.rejected.length : 0;
   const messageId = truncateDeliveryValue(info?.messageId);
+
+  // Hosted staging only: the recipient allowlist withheld this message. It was
+  // not delivered (never "sent") and it is not a provider failure.
+  if (isSuppressedMailResult(info)) {
+    return {
+      status: "skipped",
+      provider: "smtp",
+      recipientCount,
+      acceptedCount: 0,
+      rejectedCount: 0,
+      messageId: null,
+      reason: STAGING_SUPPRESSED_REASON,
+    };
+  }
 
   if (hasAcceptedEvidence && accepted === 0 && recipientCount > 0) {
     return {

@@ -6,7 +6,7 @@ The `staging` branch is the **pre-production integration branch**. It is also de
 
 **MVP release strategy:** feature branch → PR → `staging` → PR → `main` → AWS Elastic Beanstalk production → [production soft-launch smoke](docs/production-smoke-checklist.md) with test accounts.
 
-Hosted staging backend: Elastic Beanstalk environment `mosaic-backend-staging` at `https://api-staging.mosaicbizhub.com`, deployed from the `staging` branch. Background: [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md).
+Hosted staging backend: a dedicated Elastic Beanstalk environment at `https://api-staging.mosaicbizhub.com`, deployed from the `staging` branch. Background: [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md).
 
 ---
 
@@ -15,7 +15,7 @@ Hosted staging backend: Elastic Beanstalk environment `mosaic-backend-staging` a
 | Layer | Role | Deploy target |
 | --- | --- | --- |
 | Feature work | Short-lived branch from `staging` | Local dev only |
-| Integration branch | `staging` | AWS EB `mosaic-backend-staging` + `https://api-staging.mosaicbizhub.com` |
+| Integration branch | `staging` | Dedicated AWS EB staging environment + `https://api-staging.mosaicbizhub.com` |
 | Production release | `main` | AWS EB + `https://api.mosaicbizhub.com` |
 
 Production EB hostname: `mosaic-backend.us-east-1.elasticbeanstalk.com` (use custom domain for HTTPS smoke).
@@ -52,7 +52,7 @@ Do not merge `staging` → `main` until:
 
 ## Hosted staging
 
-Hosted staging is the Elastic Beanstalk environment `mosaic-backend-staging` (`https://api-staging.mosaicbizhub.com`), deployed from the `staging` branch. It must use isolated MongoDB, S3, mail and Stripe test mode per [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md). The backend treats itself as staging when `RELEASE_ENVIRONMENT` or `SENTRY_ENVIRONMENT` is `staging`.
+Hosted staging is a dedicated Elastic Beanstalk environment (`https://api-staging.mosaicbizhub.com`), deployed from the `staging` branch. It must use isolated MongoDB, S3, mail and Stripe test mode per [docs/hosted-staging-decision.md](docs/hosted-staging-decision.md). The backend treats itself as staging when `RELEASE_ENVIRONMENT` or `SENTRY_ENVIRONMENT` is `staging`.
 
 ### Isolation self-check
 
@@ -79,7 +79,11 @@ Expected on staging: `stripe.mode` = `test`, a staging-only database (and, check
 | `MAIL_RECIPIENT_ALLOWLIST` | Comma-separated exact addresses and/or `@domain` suffixes |
 | `SMS_RECIPIENT_ALLOWLIST` | Comma-separated E.164 numbers (e.g. `+17575550100`) |
 
-Whenever the staging marker is present, mail `to`/`cc`/`bcc` and the SMS destination are filtered to allowlisted recipients. Staging data may be cloned from production, so the default is to reach nobody: with the variable **unset or blank**, every send of that kind is suppressed. If none remain, the send is skipped, one redacted log line (counts and reason enums only) is written, and the call resolves successfully so business flows continue. A set variable with zero valid entries suppresses **all** sends of that kind (fail closed). While active, mail that sets `To`/`Cc`/`Bcc` through custom `headers`, uses a `raw` message, or has an explicit `envelope` with no allowlisted recipient is suppressed. Outside staging (no marker) behaviour is unchanged: a pure pass-through, whatever the variables contain.
+Whenever the staging marker is present, mail `to`/`cc`/`bcc` and the SMS destination are filtered to allowlisted recipients. Staging data may be cloned from production, so the default is to reach nobody: with the variable **unset or blank**, every send of that kind is suppressed. If none remain, nothing is handed to the provider and one redacted log line (counts plus `reason`/`policy` enums, never addresses or numbers) is written. The call does not throw, so business flows continue, and the outcome is recorded as a deliberate skip rather than a delivery or a provider failure:
+
+- Mail: `sendMail` resolves (or calls its callback asynchronously) with a guard-only result. Paid-order email evidence records that role as `skipped` with reason `staging_recipient_allowlist_suppressed`: never `sent` (no `sentAt`, the customer is not counted as notified) and never `failed`, and the role is not re-claimed or resent. Vendor onboarding / tier-welcome / reminder deliveries report `sent: false, skipped: true` with the same reason. The marker cannot be produced by a provider response or outside staging.
+- SMS: `sendSMS` returns `{ success: true, suppressed: true, status: 'suppressed' }`.
+ A set variable with zero valid entries suppresses **all** sends of that kind (fail closed). While active, mail that sets `To`/`Cc`/`Bcc` through custom `headers`, uses a `raw` message, or has an explicit `envelope` with no allowlisted recipient is suppressed. Outside staging (no marker) behaviour is unchanged: a pure pass-through, whatever the variables contain.
 
 `recipientPolicy` values: `off` (not staging, pass-through), `enforced` (filtering), `suppress_all_unset` (staging, variable unset/blank), `suppress_all_invalid` (staging, set but no valid entry). To let QA receive mail or SMS on staging, list their addresses/domains/numbers explicitly.
 

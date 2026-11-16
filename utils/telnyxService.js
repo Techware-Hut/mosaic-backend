@@ -68,7 +68,7 @@ async function sendSMS(options) {
     const normalizedTo = normalizePhoneNumber(options?.to);
     if (normalizedTo && !isSmsNumberAllowed(normalizedTo, allowlist)) {
       console.warn(
-        `[isolation] sms suppressed by staging recipient allowlist (recipients=1, allowed=0, allowlistSize=${allowlist.size})`
+        `[isolation] sms suppressed by staging recipient allowlist (reason=not_allowlisted, policy=${allowlist.policy}, recipients=1, allowed=0, allowlistSize=${allowlist.size})`
       );
       return { success: true, suppressed: true, status: 'suppressed' };
     }
