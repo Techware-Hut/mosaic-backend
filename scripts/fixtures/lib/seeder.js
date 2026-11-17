@@ -85,6 +85,21 @@ const RELATED_COLLECTIONS = [
 // cleanup refuses rather than scanning or deleting an unbounded set.
 const MAX_RELATED_PER_COLLECTION = 5000;
 
+// Dependents are deleted before what they point at, so an interrupted run
+// never strands a dependent (refund, cart) whose parent is already gone.
+const RELATED_DELETE_ORDER = ['refunds', 'orders', 'carts', 'cartitems', 'reviews', 'bookings'];
+
+/**
+ * Error whose message is safe to print as-is (no URIs or field values).
+ */
+class FixtureSafeError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'FixtureSafeError';
+    this.isFixtureSafe = true;
+  }
+}
+
 const MODEL_FILES = {
   User: 'User',
   VendorOnboardingStage1: 'VendorOnboardingStage1',
@@ -348,8 +363,8 @@ async function classifyRelatedDocuments() {
       .limit(MAX_RELATED_PER_COLLECTION + 1)
       .toArray();
     if (docs.length > MAX_RELATED_PER_COLLECTION) {
-      throw new Error(
-        `more than ${MAX_RELATED_PER_COLLECTION} ${rule.collection} documents reference fixtures; refusing`
+      throw new FixtureSafeError(
+        `more than ${MAX_RELATED_PER_COLLECTION} ${rule.collection} documents reference fixtures; refusing (nothing was deleted)`
       );
     }
 
@@ -379,25 +394,51 @@ async function classifyRelatedDocuments() {
   return result;
 }
 
+// Aggregation expression: every value at `path` (scalar, array, or path into
+// an array of subdocuments) is in `allowed`; missing, null or '' count as empty.
+function allValuesInExpr(path, allowed) {
+  return {
+    $setIsSubset: [
+      {
+        $let: {
+          vars: { v: { $ifNull: [`$${path}`, []] } },
+          in: { $cond: [{ $isArray: '$$v' }, '$$v', ['$$v']] },
+        },
+      },
+      [...allowed, null, ''],
+    ],
+  };
+}
+
 /**
  * Delete only the deletable related documents from a classification, by id,
- * re-checking the owner field so a document reassigned since classification
- * is not removed.
+ * re-checking the same predicate at delete time (owner, every reference,
+ * cart items, refund order) so a document changed since classification is
+ * not removed. Dependents are deleted before their parents.
  */
 async function deleteRelatedDocuments(classification) {
   const { db } = mongoose.connection;
   const fixtureIds = allFixtureIds();
+  const rules = new Map(RELATED_COLLECTIONS.map((rule) => [rule.collection, rule]));
   const deleted = {};
-  for (const rule of RELATED_COLLECTIONS) {
-    const ids = classification[rule.collection].deletable;
+  for (const collection of RELATED_DELETE_ORDER) {
+    const rule = rules.get(collection);
+    const ids = classification[collection].deletable;
     if (ids.length === 0) {
-      deleted[rule.collection] = 0;
+      deleted[collection] = 0;
       continue;
     }
-    const filter = { _id: { $in: ids } };
+    const exprs = rule.refs.map((ref) => allValuesInExpr(ref, fixtureIds));
+    if (rule.childRefs) {
+      exprs.push(allValuesInExpr(rule.childRefs.path, classification[rule.childRefs.collection].deletable));
+    }
+    const filter = { _id: { $in: ids }, $expr: { $and: exprs } };
     if (rule.owner) filter[rule.owner] = { $in: fixtureIds };
-    const res = await db.collection(rule.collection).deleteMany(filter);
-    deleted[rule.collection] = res.deletedCount;
+    if (rule.parentRef) {
+      filter[rule.parentRef.path] = { $in: classification[rule.parentRef.collection].deletable };
+    }
+    const res = await db.collection(collection).deleteMany(filter);
+    deleted[collection] = res.deletedCount;
   }
   return deleted;
 }
@@ -420,7 +461,9 @@ async function cleanupFixtures({ dryRun = false } = {}) {
 module.exports = {
   FIXTURE_TAG,
   RELATED_COLLECTIONS,
+  RELATED_DELETE_ORDER,
   MAX_RELATED_PER_COLLECTION,
+  FixtureSafeError,
   fixtureObjectId,
   classifyRelatedDocuments,
   deleteRelatedDocuments,

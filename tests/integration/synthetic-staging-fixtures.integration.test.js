@@ -8,6 +8,7 @@ const {
   FIXTURE_TAG,
   FIXTURE_MODEL_NAMES,
   fixtureObjectId,
+  MAX_RELATED_PER_COLLECTION,
 } = require('../../scripts/fixtures/lib/seeder');
 
 const DB_NAME = 'mbh_fixture_it';
@@ -371,6 +372,30 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
         listingType: 'product',
         rating: 4,
       })).insertedId;
+      related.foreignRefund = (await db.collection('refunds').insertOne({
+        orderId: related.foreignOrder,
+        refundedItems: [{ productVariantId: fid('product.widget.variant'), quantity: 1, refundAmount: 10 }],
+        totalRefundAmount: 10,
+        reason: 'qa',
+      })).insertedId;
+      related.mixedItemOrder = (await db.collection('orders').insertOne({
+        groupOrderId: 'qa-group-3',
+        userId: fid('user.buyer'),
+        vendorId: fid('user.vendorA'),
+        businessId: fid('business.vendorA.product'),
+        items: [
+          { productId: fid('product.widget'), variantId: fid('product.widget.variant'), quantity: 1 },
+          { productId: new mongoose.Types.ObjectId(), variantId: new mongoose.Types.ObjectId(), quantity: 1 },
+        ],
+        totalAmount: 20,
+      })).insertedId;
+      related.foreignVendorBooking = (await db.collection('bookings').insertOne({
+        bookingType: 'service',
+        customerId: fid('user.vendorB'),
+        ownerId: foreignUser,
+        businessId: fid('business.vendorA.service'),
+        serviceId: fid('service.consult'),
+      })).insertedId;
       related.fixtureBooking = (await db.collection('bookings').insertOne({
         bookingType: 'service',
         customerId: fid('user.vendorB'),
@@ -385,8 +410,11 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
     const { code, output } = await run(['--cleanup']);
     assert.equal(code, 1, output);
     assert.match(output, /mode: cleanup-preview/);
-    assert.match(output, /3 document\(s\) need manual review/);
-    assert.match(output, new RegExp(`orders ids: ${related.foreignOrder}`));
+    assert.match(output, /6 document\(s\) need manual review/);
+    assert.match(output, new RegExp(`orders ids: .*${related.foreignOrder}`));
+    assert.match(output, new RegExp(`orders ids: .*${related.mixedItemOrder}`));
+    assert.match(output, new RegExp(`refunds ids: ${related.foreignRefund}`));
+    assert.match(output, new RegExp(`bookings ids: ${related.foreignVendorBooking}`));
     assert.match(output, new RegExp(`carts ids: ${related.mixedCart}`));
     assert.match(output, new RegExp(`reviews ids: ${related.foreignReview}`));
     assert.match(output, /Stripe was not called/);
@@ -425,6 +453,12 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
       assert.ok(await db.collection('orders').findOne({ _id: related.foreignOrder }));
       assert.ok(await db.collection('carts').findOne({ _id: related.mixedCart }));
       assert.ok(await db.collection('reviews').findOne({ _id: related.foreignReview }));
+      assert.ok(await db.collection('refunds').findOne({ _id: related.foreignRefund }), 'refund on foreign order kept');
+      assert.ok(await db.collection('orders').findOne({ _id: related.mixedItemOrder }), 'order with non-fixture item kept');
+      assert.ok(
+        await db.collection('bookings').findOne({ _id: related.foreignVendorBooking }),
+        'booking with non-fixture vendor kept'
+      );
 
       const business = await db.collection('businesses').findOne({ _id: unmarked.business._id });
       assert.ok(business, 'unmarked business must survive cleanup');
@@ -434,6 +468,33 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
       assert.ok(await db.collection('subscriptionplans').findOne({ _id: unmarked.plan._id }));
       assert.equal(await db.collection('businesses').countDocuments({}), 1);
     });
+  });
+
+  it('cleanup refuses above the per-collection cap before deleting anything', async () => {
+    const applied = await run(['--apply']);
+    assert.equal(applied.code, 0, applied.output);
+    const docs = Array.from({ length: MAX_RELATED_PER_COLLECTION + 1 }, () => ({
+      userId: fid('user.buyer'),
+      listingId: fid('product.widget'),
+      listingType: 'product',
+      rating: 5,
+      capTest: true,
+    }));
+    await withDb((db) => db.collection('reviews').insertMany(docs));
+    try {
+      const before = await totalDocuments();
+      const { code, output } = await run(['--cleanup', '--apply', '--allow-orphans-report']);
+      assert.equal(code, 1, output);
+      assert.match(output, new RegExp(`more than ${MAX_RELATED_PER_COLLECTION} reviews documents reference fixtures`));
+      assert.match(output, /nothing was deleted/);
+      assert.equal(await totalDocuments(), before);
+      const marked = await collectionCounts({ fixtureTag: FIXTURE_TAG });
+      assert.deepEqual(marked, EXPECTED_COUNTS);
+    } finally {
+      await withDb((db) => db.collection('reviews').deleteMany({ capTest: true }));
+    }
+    const cleaned = await run(['--cleanup', '--apply', '--allow-orphans-report']);
+    assert.equal(cleaned.code, 0, cleaned.output);
   });
 
   for (const [label, collection, doc] of [

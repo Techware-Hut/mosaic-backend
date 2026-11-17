@@ -10,6 +10,17 @@ const {
 } = require('../../scripts/fixtures/lib/guards');
 const { main, parseArgs } = require('../../scripts/fixtures/seed-synthetic-staging');
 const { resolveDriverConnectionStringParser } = require('../../scripts/fixtures/lib/guards');
+const { RELATED_DELETE_ORDER, RELATED_COLLECTIONS } = require('../../scripts/fixtures/lib/seeder');
+
+test('related documents are deleted dependents-first and every related collection is covered', () => {
+  const pos = (c) => RELATED_DELETE_ORDER.indexOf(c);
+  assert.ok(pos('refunds') < pos('orders'));
+  assert.ok(pos('carts') < pos('cartitems'));
+  assert.deepEqual(
+    [...RELATED_DELETE_ORDER].sort(),
+    RELATED_COLLECTIONS.map((r) => r.collection).sort()
+  );
+});
 const fs = require('node:fs');
 const path = require('node:path');
 

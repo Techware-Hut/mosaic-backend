@@ -262,7 +262,15 @@ async function main({ argv = process.argv.slice(2), env = process.env, log = con
     }
 
     if (opts.cleanup) {
-      return await runCleanup({ opts, log, error });
+      try {
+        return await runCleanup({ opts, log, error });
+      } catch (err) {
+        if (err && err.isFixtureSafe) {
+          error(`Refusing: ${err.message}`);
+          return 1;
+        }
+        throw err;
+      }
     }
 
     const passwordHash =
@@ -311,8 +319,10 @@ if (require.main === module) {
       process.exitCode = code;
     })
     .catch((err) => {
-      // Do not echo error objects that might carry connection details.
-      console.error(`Seeder failed: ${err && err.name ? err.name : 'Error'}`);
+      // Only our own guard/cap errors carry messages known to be safe to
+      // print; anything else may carry connection details, so print its name.
+      const safe = err && (err.isFixtureSafe || err.name === 'GuardError');
+      console.error(`Seeder failed: ${safe ? err.message : err && err.name ? err.name : 'Error'}`);
       process.exitCode = 1;
     });
 }
