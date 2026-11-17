@@ -9,6 +9,9 @@ const {
   isAllowlisted,
 } = require('../../scripts/fixtures/lib/guards');
 const { main, parseArgs } = require('../../scripts/fixtures/seed-synthetic-staging');
+const { resolveDriverConnectionStringParser } = require('../../scripts/fixtures/lib/guards');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const SECRET = 'n0t-a-real-pass';
 const NL = String.fromCharCode(10);
@@ -253,4 +256,30 @@ test('main refuses --apply without a fixture password', async () => {
   const code = await main({ argv: ['--apply'], env: goodEnv(), log: capture, error: capture });
   assert.equal(code, 2);
   assert.match(out.join('\n'), /FIXTURE_PASSWORD/);
+});
+
+test('URI parser is the copy the mongoose-resolved mongodb driver loads, with a matching major version', () => {
+  const mongooseDir = path.dirname(require.resolve('mongoose/package.json'));
+  const mongodbDir = path.dirname(require.resolve('mongodb/package.json', { paths: [mongooseDir] }));
+  const driverEntry = require.resolve('mongodb-connection-string-url', { paths: [mongodbDir] });
+
+  const parser = resolveDriverConnectionStringParser();
+  assert.equal(parser.mongodbDir, mongodbDir);
+  assert.equal(parser.entryPath, driverEntry);
+  assert.ok(parser.entryPath.startsWith(parser.packageDir + path.sep));
+
+  // Node resolution from mongodbDir only reaches node_modules dirs on its ancestor chain.
+  const parserNodeModules = path.dirname(parser.packageDir);
+  assert.equal(path.basename(parserNodeModules), 'node_modules');
+  assert.ok(
+    (mongodbDir + path.sep).startsWith(path.dirname(parserNodeModules) + path.sep),
+    'parser must sit in a node_modules on the mongodb package ancestor chain'
+  );
+
+  const parserPkg = JSON.parse(fs.readFileSync(path.join(parser.packageDir, 'package.json'), 'utf8'));
+  const mongodbPkg = JSON.parse(fs.readFileSync(path.join(mongodbDir, 'package.json'), 'utf8'));
+  assert.equal(parserPkg.name, 'mongodb-connection-string-url');
+  const declared = mongodbPkg.dependencies['mongodb-connection-string-url'];
+  const declaredMajor = Number(/(\d+)/.exec(declared)[1]);
+  assert.equal(Number(parserPkg.version.split('.')[0]), declaredMajor);
 });

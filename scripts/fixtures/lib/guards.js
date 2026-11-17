@@ -15,8 +15,54 @@
 const REQUIRED_RELEASE_ENVIRONMENT = 'staging';
 const REQUIRED_CONFIRM_VALUE = 'synthetic-staging';
 
-// Transitive dependency of the mongodb driver (via mongoose).
-const { default: ConnectionString } = require('mongodb-connection-string-url');
+const fs = require('fs');
+const path = require('path');
+
+const PARSER_PACKAGE = 'mongodb-connection-string-url';
+
+/**
+ * Load the connection-string parser that the connecting driver itself uses:
+ * resolve mongodb from mongoose's location, then the parser from mongodb's
+ * location. A different (e.g. dev-only, hoisted) copy is never used.
+ * Throws if any step fails, so callers fail closed.
+ */
+function resolveDriverConnectionStringParser() {
+  const mongooseDir = path.dirname(require.resolve('mongoose/package.json'));
+  const mongodbDir = path.dirname(
+    require.resolve('mongodb/package.json', { paths: [mongooseDir] })
+  );
+  const entryPath = require.resolve(PARSER_PACKAGE, { paths: [mongodbDir] });
+
+  // The parser's package.json is not exported; walk up from its entry file.
+  let packageDir = path.dirname(entryPath);
+  for (;;) {
+    const candidate = path.join(packageDir, 'package.json');
+    if (fs.existsSync(candidate)) {
+      const pkg = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+      if (pkg.name === PARSER_PACKAGE) break;
+    }
+    const parent = path.dirname(packageDir);
+    if (parent === packageDir) throw new Error(`${PARSER_PACKAGE} package root not found`);
+    packageDir = parent;
+  }
+
+  // eslint-disable-next-line global-require, import/no-dynamic-require
+  const mod = require(entryPath);
+  const ConnectionString = mod.ConnectionString || mod.default;
+  if (typeof ConnectionString !== 'function') {
+    throw new Error(`${PARSER_PACKAGE} does not export ConnectionString`);
+  }
+
+  return { ConnectionString, entryPath, packageDir, mongodbDir };
+}
+
+let driverParser = null;
+let driverParserError = null;
+try {
+  driverParser = resolveDriverConnectionStringParser();
+} catch (err) {
+  driverParserError = err;
+}
 
 // Mongo falls back to the "test" database when the URI has no path.
 const REFUSED_DB_NAMES = new Set(['', 'test', 'admin', 'local', 'config']);
@@ -56,9 +102,15 @@ function parseMongoTarget(uri) {
     throw new Error('MONGODB_URI is not set');
   }
 
+  if (!driverParser) {
+    throw new Error(
+      `cannot load the mongodb driver's ${PARSER_PACKAGE} (${driverParserError ? driverParserError.message : 'unknown error'}); refusing`
+    );
+  }
+
   let parsed;
   try {
-    parsed = new ConnectionString(uri.trim());
+    parsed = new driverParser.ConnectionString(uri.trim());
   } catch (_err) {
     throw new Error('MONGODB_URI is not a valid mongodb:// or mongodb+srv:// URI');
   }
@@ -214,6 +266,7 @@ function assertPreconditions({ env, emails }) {
 }
 
 module.exports = {
+  resolveDriverConnectionStringParser,
   REQUIRED_RELEASE_ENVIRONMENT,
   REQUIRED_CONFIRM_VALUE,
   GuardError,
