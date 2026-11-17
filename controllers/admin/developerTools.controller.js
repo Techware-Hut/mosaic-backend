@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const Business = require('../../models/Business');
 const Product = require('../../models/Product');
 const Service = require('../../models/Service');
@@ -54,22 +55,73 @@ function validateCleanupPatterns(input) {
   const patterns = [...new Set(normalizePatterns(input))];
   if (!patterns.length) {
     return {
+      code: 'PATTERNS_REQUIRED',
       error:
         'At least one cleanup pattern is required. Default patterns are no longer applied.',
     };
   }
   if (patterns.length > MAX_CLEANUP_PATTERNS) {
     return {
+      code: 'INVALID_PATTERNS',
       error: `A maximum of ${MAX_CLEANUP_PATTERNS} cleanup patterns is allowed.`,
     };
   }
   const tooShort = patterns.filter((p) => p.length < MIN_CLEANUP_PATTERN_LENGTH);
   if (tooShort.length) {
     return {
+      code: 'INVALID_PATTERNS',
       error: `Each cleanup pattern must be at least ${MIN_CLEANUP_PATTERN_LENGTH} characters (got: ${tooShort.join(', ')}).`,
     };
   }
+  const emailLike = patterns.filter(isEmailOrDomainFragment);
+  if (emailLike.length) {
+    return {
+      code: 'PATTERN_EMAIL_LIKE',
+      error: `Cleanup patterns must not be email/domain fragments that match many addresses (got: ${emailLike.join(', ')}).`,
+    };
+  }
   return { patterns };
+}
+
+// Fragments shared by large numbers of email addresses / domains.
+const EMAIL_PROVIDER_TOKENS = [
+  'gmail',
+  'googlemail',
+  'yahoo',
+  'outlook',
+  'hotmail',
+  'icloud',
+  'protonmail',
+  'proton.me',
+  'live.com',
+  'msn.com',
+  'aol.com',
+];
+const EMAIL_GENERIC_TOKENS = new Set(['mail', 'email', 'e-mail', 'www.']);
+const TLD_FRAGMENT = /\.(com|net|org|edu|gov|info|biz|io|co|us|uk|ca|me|app|dev)\b/i;
+
+function isEmailOrDomainFragment(pattern) {
+  const p = String(pattern).toLowerCase();
+  if (p.includes('@')) return true;
+  if (EMAIL_GENERIC_TOKENS.has(p)) return true;
+  if (TLD_FRAGMENT.test(p)) return true;
+  return EMAIL_PROVIDER_TOKENS.some((token) => p.includes(token));
+}
+
+// Refuse cleanups whose patterns match more than this share of all businesses.
+const MAX_CLEANUP_MATCH_SHARE = 0.25;
+
+function isPatternTooBroad(matchedCount, totalBusinesses) {
+  return totalBusinesses > 0 && matchedCount > totalBusinesses * MAX_CLEANUP_MATCH_SHARE;
+}
+
+function sortedIdStrings(docs) {
+  return docs.map((d) => String(d._id)).sort();
+}
+
+/** sha256 over the sorted matched ids; binds a delete to the exact dry-run set. */
+function computeMatchToken(sortedIds) {
+  return crypto.createHash('sha256').update(sortedIds.join(',')).digest('hex');
 }
 
 function parseExpectedCount(value) {
@@ -149,9 +201,9 @@ exports.listDeveloperBusinesses = async (req, res) => {
     if (req.query.cleanupMatch === 'true' || req.query.cleanupMatch === '1') {
       // cleanupMatch requires explicit patterns (same rules as /cleanup) so the
       // preview list always reflects exactly what a cleanup would target.
-      const { patterns, error } = validateCleanupPatterns(req.query.patterns);
+      const { patterns, error, code } = validateCleanupPatterns(req.query.patterns);
       if (error) {
-        return res.status(400).json({ success: false, message: error });
+        return res.status(400).json({ success: false, code, message: error });
       }
       const patternFilter = buildNameEmailPatternFilter(patterns);
       if (filter.$or) {
@@ -310,17 +362,32 @@ exports.deleteDeveloperBusiness = async (req, res) => {
 
 exports.cleanupDeveloperBusinesses = async (req, res) => {
   try {
-    const { patterns, error: patternError } = validateCleanupPatterns(
+    const { patterns, error: patternError, code: patternCode } = validateCleanupPatterns(
       req.body?.patterns ?? req.query?.patterns
     );
     if (patternError) {
-      return res.status(400).json({ success: false, message: patternError });
+      return res.status(400).json({ success: false, code: patternCode, message: patternError });
     }
     const dryRun = parseBoolean(req.body?.dryRun ?? req.query?.dryRun) !== false;
     const force = parseBoolean(req.body?.force ?? req.query?.force) === true;
 
     const filter = buildNameEmailPatternFilter(patterns);
-    const matchedCount = await Business.countDocuments(filter);
+    const [matchedCount, totalBusinesses] = await Promise.all([
+      Business.countDocuments(filter),
+      Business.countDocuments({}),
+    ]);
+
+    if (isPatternTooBroad(matchedCount, totalBusinesses)) {
+      return res.status(400).json({
+        success: false,
+        code: 'PATTERN_TOO_BROAD',
+        message: `Patterns match ${matchedCount} of ${totalBusinesses} businesses (more than ${Math.round(
+          MAX_CLEANUP_MATCH_SHARE * 100
+        )}%). Use more specific patterns.`,
+        matchedCount,
+        totalBusinesses,
+      });
+    }
 
     if (dryRun) {
       const matches = await Business.find(filter)
@@ -328,31 +395,49 @@ exports.cleanupDeveloperBusinesses = async (req, res) => {
         .sort({ createdAt: -1 })
         .limit(MAX_CLEANUP_BATCH);
       const data = await attachListingCounts(matches);
+      const exceedsBatchLimit = matchedCount > MAX_CLEANUP_BATCH;
+      const matchedIds = exceedsBatchLimit ? [] : sortedIdStrings(matches);
       return res.status(200).json({
         success: true,
         dryRun: true,
         patterns,
         matched: matchedCount,
         matchedCount,
+        maxBatch: MAX_CLEANUP_BATCH,
+        exceedsBatchLimit,
+        matchedIds,
+        matchToken: exceedsBatchLimit ? null : computeMatchToken(matchedIds),
         data,
-        message:
-          'Dry run only — no records deleted. To delete, resend with dryRun=false and expectedCount set to matchedCount.',
+        message: exceedsBatchLimit
+          ? `Dry run only — no records deleted. ${matchedCount} matches exceed the ${MAX_CLEANUP_BATCH}-business cleanup limit; narrow the patterns.`
+          : 'Dry run only — no records deleted. To delete, resend with dryRun=false and the matchToken (and expectedCount) from this dry run.',
       });
     }
 
-    const expectedCount = parseExpectedCount(
-      req.body?.expectedCount ?? req.query?.expectedCount
-    );
-    if (expectedCount === null || Number.isNaN(expectedCount)) {
+    const matchToken =
+      typeof (req.body?.matchToken ?? req.query?.matchToken) === 'string'
+        ? String(req.body?.matchToken ?? req.query?.matchToken).trim()
+        : '';
+    if (!matchToken) {
       return res.status(400).json({
         success: false,
-        code: 'EXPECTED_COUNT_REQUIRED',
-        message:
-          'expectedCount (a non-negative integer from a dry run) is required when dryRun=false.',
+        code: 'MATCH_TOKEN_REQUIRED',
+        message: 'matchToken from a dry run is required when dryRun=false.',
         matchedCount,
       });
     }
-    if (expectedCount !== matchedCount) {
+
+    const rawExpected = req.body?.expectedCount ?? req.query?.expectedCount;
+    const expectedCount = parseExpectedCount(rawExpected);
+    if (Number.isNaN(expectedCount)) {
+      return res.status(400).json({
+        success: false,
+        code: 'EXPECTED_COUNT_INVALID',
+        message: 'expectedCount, when provided, must be a non-negative integer.',
+        matchedCount,
+      });
+    }
+    if (expectedCount !== null && expectedCount !== matchedCount) {
       return res.status(409).json({
         success: false,
         code: 'EXPECTED_COUNT_MISMATCH',
@@ -370,26 +455,42 @@ exports.cleanupDeveloperBusinesses = async (req, res) => {
       });
     }
 
-    const matches = await Business.find(filter)
-      .select('businessName email')
-      .sort({ createdAt: -1 })
-      .limit(MAX_CLEANUP_BATCH);
-    if (matches.length !== expectedCount) {
+    // Re-query the exact id set and require it to be the one the dry run saw.
+    const current = await Business.find(filter)
+      .select('_id')
+      .limit(MAX_CLEANUP_BATCH + 1)
+      .lean();
+    const currentIds = sortedIdStrings(current);
+    if (
+      currentIds.length > MAX_CLEANUP_BATCH ||
+      computeMatchToken(currentIds) !== matchToken
+    ) {
       return res.status(409).json({
         success: false,
-        code: 'EXPECTED_COUNT_MISMATCH',
-        message: `Matched ${matches.length} business(es) but expectedCount was ${expectedCount}. Nothing was deleted — run a new dry run and confirm again.`,
-        matchedCount: matches.length,
-        expectedCount,
+        code: 'MATCH_SET_CHANGED',
+        message:
+          'The set of matching businesses changed since the dry run. Nothing was deleted — run a new dry run and confirm again.',
+        matchedCount: currentIds.length,
       });
     }
 
     const deleted = [];
     const skipped = [];
 
-    for (const biz of matches) {
+    for (const id of currentIds) {
       try {
-        const result = await hardDeleteBusinessCascade(biz._id, { force });
+        // Re-check each business still matches the patterns right before deleting it.
+        const stillMatches = await Business.exists({ _id: id, ...filter });
+        if (!stillMatches) {
+          skipped.push({
+            _id: id,
+            code: 'NO_LONGER_MATCHES',
+            message: 'Business no longer matches the cleanup patterns; not deleted.',
+          });
+          continue;
+        }
+
+        const result = await hardDeleteBusinessCascade(id, { force });
         deleted.push({
           _id: result.business._id,
           businessName: result.business.businessName,
@@ -407,9 +508,7 @@ exports.cleanupDeveloperBusinesses = async (req, res) => {
         });
       } catch (err) {
         skipped.push({
-          _id: biz._id,
-          businessName: biz.businessName,
-          email: biz.email,
+          _id: id,
           code: err.code || 'ERROR',
           message: err.message,
           orderCount: err.orderCount,
@@ -421,7 +520,7 @@ exports.cleanupDeveloperBusinesses = async (req, res) => {
       success: true,
       dryRun: false,
       patterns,
-      matchedCount: matches.length,
+      matchedCount: currentIds.length,
       deletedCount: deleted.length,
       skippedCount: skipped.length,
       deleted,
@@ -441,6 +540,7 @@ exports.DEFAULT_CLEANUP_PATTERNS = DEFAULT_CLEANUP_PATTERNS;
 exports.MIN_CLEANUP_PATTERN_LENGTH = MIN_CLEANUP_PATTERN_LENGTH;
 exports.MAX_CLEANUP_PATTERNS = MAX_CLEANUP_PATTERNS;
 exports.validateCleanupPatterns = validateCleanupPatterns;
+exports.computeMatchToken = computeMatchToken;
 
 function normalizeBusinessIds(raw) {
   if (!Array.isArray(raw)) return [];
