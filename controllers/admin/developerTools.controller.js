@@ -17,7 +17,13 @@ const {
   isPublicMarketplaceBusiness,
 } = require('../../lib/marketplace/businessEligibility');
 
-const DEFAULT_CLEANUP_PATTERNS = ['test', 'satish'];
+// Kept for API compatibility (`defaultCleanupPatterns` in the list response).
+// Intentionally empty: cleanup never falls back to implicit patterns, so an
+// empty request can't match a broad set of businesses by accident.
+const DEFAULT_CLEANUP_PATTERNS = [];
+const MIN_CLEANUP_PATTERN_LENGTH = 4;
+const MAX_CLEANUP_PATTERNS = 10;
+const MAX_CLEANUP_BATCH = 200;
 
 const parseBoolean = (value) => {
   if (value === true || value === 'true' || value === 1 || value === '1') return true;
@@ -35,10 +41,42 @@ function normalizePatterns(input) {
     : typeof input === 'string'
       ? input.split(',')
       : [];
-  const patterns = raw
+  return raw
     .map((p) => String(p ?? '').trim())
     .filter((p) => p.length > 0);
-  return patterns.length ? patterns : [...DEFAULT_CLEANUP_PATTERNS];
+}
+
+/**
+ * Validate cleanup patterns. Returns { patterns } or { error } (400 message).
+ * No implicit defaults: callers must name the patterns explicitly.
+ */
+function validateCleanupPatterns(input) {
+  const patterns = [...new Set(normalizePatterns(input))];
+  if (!patterns.length) {
+    return {
+      error:
+        'At least one cleanup pattern is required. Default patterns are no longer applied.',
+    };
+  }
+  if (patterns.length > MAX_CLEANUP_PATTERNS) {
+    return {
+      error: `A maximum of ${MAX_CLEANUP_PATTERNS} cleanup patterns is allowed.`,
+    };
+  }
+  const tooShort = patterns.filter((p) => p.length < MIN_CLEANUP_PATTERN_LENGTH);
+  if (tooShort.length) {
+    return {
+      error: `Each cleanup pattern must be at least ${MIN_CLEANUP_PATTERN_LENGTH} characters (got: ${tooShort.join(', ')}).`,
+    };
+  }
+  return { patterns };
+}
+
+function parseExpectedCount(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isInteger(n) || n < 0) return NaN;
+  return n;
 }
 
 function buildNameEmailPatternFilter(patterns) {
@@ -109,8 +147,19 @@ exports.listDeveloperBusinesses = async (req, res) => {
     }
 
     if (req.query.cleanupMatch === 'true' || req.query.cleanupMatch === '1') {
-      const patterns = normalizePatterns(req.query.patterns);
-      Object.assign(filter, buildNameEmailPatternFilter(patterns));
+      // cleanupMatch requires explicit patterns (same rules as /cleanup) so the
+      // preview list always reflects exactly what a cleanup would target.
+      const { patterns, error } = validateCleanupPatterns(req.query.patterns);
+      if (error) {
+        return res.status(400).json({ success: false, message: error });
+      }
+      const patternFilter = buildNameEmailPatternFilter(patterns);
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, patternFilter];
+        delete filter.$or;
+      } else {
+        Object.assign(filter, patternFilter);
+      }
     }
 
     const [rows, total] = await Promise.all([
@@ -261,25 +310,77 @@ exports.deleteDeveloperBusiness = async (req, res) => {
 
 exports.cleanupDeveloperBusinesses = async (req, res) => {
   try {
-    const patterns = normalizePatterns(req.body?.patterns ?? req.query?.patterns);
+    const { patterns, error: patternError } = validateCleanupPatterns(
+      req.body?.patterns ?? req.query?.patterns
+    );
+    if (patternError) {
+      return res.status(400).json({ success: false, message: patternError });
+    }
     const dryRun = parseBoolean(req.body?.dryRun ?? req.query?.dryRun) !== false;
     const force = parseBoolean(req.body?.force ?? req.query?.force) === true;
 
     const filter = buildNameEmailPatternFilter(patterns);
-    const matches = await Business.find(filter)
-      .select('businessName email listingType isActive isApproved createdAt')
-      .sort({ createdAt: -1 })
-      .limit(200);
+    const matchedCount = await Business.countDocuments(filter);
 
     if (dryRun) {
+      const matches = await Business.find(filter)
+        .select('businessName email listingType isActive isApproved createdAt')
+        .sort({ createdAt: -1 })
+        .limit(MAX_CLEANUP_BATCH);
       const data = await attachListingCounts(matches);
       return res.status(200).json({
         success: true,
         dryRun: true,
         patterns,
-        matched: data.length,
+        matched: matchedCount,
+        matchedCount,
         data,
-        message: 'Dry run only — no records deleted. Resend with dryRun=false to delete.',
+        message:
+          'Dry run only — no records deleted. To delete, resend with dryRun=false and expectedCount set to matchedCount.',
+      });
+    }
+
+    const expectedCount = parseExpectedCount(
+      req.body?.expectedCount ?? req.query?.expectedCount
+    );
+    if (expectedCount === null || Number.isNaN(expectedCount)) {
+      return res.status(400).json({
+        success: false,
+        code: 'EXPECTED_COUNT_REQUIRED',
+        message:
+          'expectedCount (a non-negative integer from a dry run) is required when dryRun=false.',
+        matchedCount,
+      });
+    }
+    if (expectedCount !== matchedCount) {
+      return res.status(409).json({
+        success: false,
+        code: 'EXPECTED_COUNT_MISMATCH',
+        message: `Matched ${matchedCount} business(es) but expectedCount was ${expectedCount}. Nothing was deleted — run a new dry run and confirm again.`,
+        matchedCount,
+        expectedCount,
+      });
+    }
+    if (matchedCount > MAX_CLEANUP_BATCH) {
+      return res.status(400).json({
+        success: false,
+        code: 'TOO_MANY_MATCHES',
+        message: `Patterns match ${matchedCount} businesses; a single cleanup may delete at most ${MAX_CLEANUP_BATCH}. Narrow the patterns.`,
+        matchedCount,
+      });
+    }
+
+    const matches = await Business.find(filter)
+      .select('businessName email')
+      .sort({ createdAt: -1 })
+      .limit(MAX_CLEANUP_BATCH);
+    if (matches.length !== expectedCount) {
+      return res.status(409).json({
+        success: false,
+        code: 'EXPECTED_COUNT_MISMATCH',
+        message: `Matched ${matches.length} business(es) but expectedCount was ${expectedCount}. Nothing was deleted — run a new dry run and confirm again.`,
+        matchedCount: matches.length,
+        expectedCount,
       });
     }
 
@@ -320,6 +421,7 @@ exports.cleanupDeveloperBusinesses = async (req, res) => {
       success: true,
       dryRun: false,
       patterns,
+      matchedCount: matches.length,
       deletedCount: deleted.length,
       skippedCount: skipped.length,
       deleted,
@@ -336,6 +438,9 @@ exports.cleanupDeveloperBusinesses = async (req, res) => {
 };
 
 exports.DEFAULT_CLEANUP_PATTERNS = DEFAULT_CLEANUP_PATTERNS;
+exports.MIN_CLEANUP_PATTERN_LENGTH = MIN_CLEANUP_PATTERN_LENGTH;
+exports.MAX_CLEANUP_PATTERNS = MAX_CLEANUP_PATTERNS;
+exports.validateCleanupPatterns = validateCleanupPatterns;
 
 function normalizeBusinessIds(raw) {
   if (!Array.isArray(raw)) return [];

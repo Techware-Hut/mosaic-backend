@@ -22,7 +22,8 @@ router.patch('/business/:id/status', developerTools.toggleDeveloperBusinessStatu
 // DELETE /api/admin/developer/business/:id
 router.delete('/business/:id', developerTools.deleteDeveloperBusiness);
 
-// POST /api/admin/developer/cleanup  (dryRun default true)
+// POST /api/admin/developer/cleanup  (dryRun default true; explicit patterns
+// required; dryRun=false also requires expectedCount from a dry run)
 router.post('/cleanup', developerTools.cleanupDeveloperBusinesses);
 
 module.exports = router;
