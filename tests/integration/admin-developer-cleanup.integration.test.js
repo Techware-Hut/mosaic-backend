@@ -143,23 +143,50 @@ test('cleanup refuses email/domain-like patterns', async () => {
   assert.equal(await Business.countDocuments({}), 1);
 });
 
-test('cleanup refuses patterns matching more than 25% of businesses', async () => {
+test('cleanup refuses patterns matching more than 25% of businesses (above 10 matches)', async () => {
   const agent = await adminAgent();
-  await seedBusinesses(['QA-Synth Alpha', 'qa-synth beta']);
-  await seedBulk(5); // 2 of 7 = 28.6%
+  await seedBulk(11, 'QA-Synth Bulk');
+  await seedBulk(30); // 11 of 41 = 26.8%
 
   const dry = await agent.post(CLEANUP_URL).send({ patterns: ['qa-synth'], dryRun: true });
   assert.equal(dry.status, 400);
   assert.equal(dry.body.code, 'PATTERN_TOO_BROAD');
-  assert.equal(dry.body.matchedCount, 2);
-  assert.equal(dry.body.totalBusinesses, 7);
+  assert.equal(dry.body.matchedCount, 11);
+  assert.equal(dry.body.totalBusinesses, 41);
 
-  await seedBulk(1); // 2 of 8 = 25% -> allowed
+  const del = await agent
+    .post(CLEANUP_URL)
+    .send({ patterns: ['qa-synth'], dryRun: false, matchToken: 'x', expectedCount: 11 });
+  assert.equal(del.status, 400);
+  assert.equal(del.body.code, 'PATTERN_TOO_BROAD');
+
+  await seedBulk(3); // 11 of 44 = 25% -> allowed
   const ok = await agent.post(CLEANUP_URL).send({ patterns: ['qa-synth'], dryRun: true });
   assert.equal(ok.status, 200);
-  assert.equal(ok.body.matchedCount, 2);
+  assert.equal(ok.body.matchedCount, 11);
 
-  assert.equal(await Business.countDocuments({}), 8);
+  assert.equal(await Business.countDocuments({}), 44);
+});
+
+test('small databases: 3 matches out of 5 businesses is allowed', async () => {
+  const agent = await adminAgent();
+  const matches = await seedBusinesses(['QA-Synth One', 'QA-Synth Two', 'QA-Synth Three']);
+  await seedBulk(2); // 3 of 5 = 60%, but only 3 matches
+
+  const dry = await agent.post(CLEANUP_URL).send({ patterns: ['qa-synth'], dryRun: true });
+  assert.equal(dry.status, 200);
+  assert.equal(dry.body.matchedCount, 3);
+
+  const res = await agent.post(CLEANUP_URL).send({
+    patterns: ['qa-synth'],
+    dryRun: false,
+    matchToken: dry.body.matchToken,
+    expectedCount: 3,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.deletedCount, 3);
+  for (const m of matches) assert.equal(await Business.findById(m._id), null);
+  assert.equal(await Business.countDocuments({}), 2);
 });
 
 test('dry run returns count, sorted ids and match token, and deletes nothing', async () => {

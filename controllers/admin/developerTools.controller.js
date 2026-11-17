@@ -109,10 +109,17 @@ function isEmailOrDomainFragment(pattern) {
 }
 
 // Refuse cleanups whose patterns match more than this share of all businesses.
+// Only enforced above a small absolute count so small (e.g. staging) databases can
+// still remove a handful of QA records.
 const MAX_CLEANUP_MATCH_SHARE = 0.25;
+const BROAD_MATCH_MIN_COUNT = 10;
 
 function isPatternTooBroad(matchedCount, totalBusinesses) {
-  return totalBusinesses > 0 && matchedCount > totalBusinesses * MAX_CLEANUP_MATCH_SHARE;
+  return (
+    matchedCount > BROAD_MATCH_MIN_COUNT &&
+    totalBusinesses > 0 &&
+    matchedCount > totalBusinesses * MAX_CLEANUP_MATCH_SHARE
+  );
 }
 
 function sortedIdStrings(docs) {
