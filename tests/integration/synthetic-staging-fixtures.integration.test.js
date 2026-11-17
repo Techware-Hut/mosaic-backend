@@ -291,7 +291,7 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
     assert.match(refused.output, /run --cleanup first/);
     assert.equal(await totalDocuments(), before);
 
-    const cleaned = await run(['--cleanup']);
+    const cleaned = await run(['--cleanup', '--apply']);
     assert.equal(cleaned.code, 0, cleaned.output);
     const reapplied = await run(['--apply']);
     assert.equal(reapplied.code, 0, reapplied.output);
@@ -318,32 +318,114 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
     });
   });
 
-  it('cleanup --dry-run deletes nothing and reports referencing documents', async () => {
-    await withDb((db) =>
-      db.collection('bookings').insertOne({
+  const fid = (key) => fixtureObjectId(key);
+  const related = {};
+
+  it('cleanup preview classifies related QA documents, deletes nothing, and exits non-zero on manual-review items', async () => {
+    const foreignUser = unmarked.owner._id;
+    await withDb(async (db) => {
+      related.fixtureOrder = (await db.collection('orders').insertOne({
+        groupOrderId: 'qa-group-1',
+        userId: fid('user.buyer'),
+        vendorId: fid('user.vendorA'),
+        businessId: fid('business.vendorA.product'),
+        items: [{ productId: fid('product.widget'), variantId: fid('product.widget.variant'), quantity: 1 }],
+        inventoryAdjustments: [{ variantId: fid('product.widget.variant'), quantity: 1 }],
+        totalAmount: 10,
+      })).insertedId;
+      related.foreignOrder = (await db.collection('orders').insertOne({
+        groupOrderId: 'qa-group-2',
+        userId: foreignUser,
+        vendorId: fid('user.vendorA'),
+        businessId: fid('business.vendorA.product'),
+        items: [{ productId: fid('product.widget'), variantId: fid('product.widget.variant'), quantity: 1 }],
+        totalAmount: 10,
+      })).insertedId;
+      related.fixtureRefund = (await db.collection('refunds').insertOne({
+        orderId: related.fixtureOrder,
+        refundedItems: [{ productVariantId: fid('product.widget.variant'), quantity: 1, refundAmount: 10 }],
+        totalRefundAmount: 10,
+        reason: 'qa',
+      })).insertedId;
+      related.fixtureCartItem = (await db.collection('cartitems').insertOne({
+        userId: fid('user.buyer'),
+        productId: fid('product.widget'),
+        variantId: fid('product.widget.variant'),
+        businessId: fid('business.vendorA.product'),
+        quantity: 1,
+      })).insertedId;
+      related.mixedCart = (await db.collection('carts').insertOne({
+        userId: fid('user.buyer'),
+        businessId: unmarked.business._id,
+        items: [],
+      })).insertedId;
+      related.fixtureReview = (await db.collection('reviews').insertOne({
+        userId: fid('user.vendorB'),
+        listingId: fid('service.consult'),
+        listingType: 'service',
+        rating: 5,
+      })).insertedId;
+      related.foreignReview = (await db.collection('reviews').insertOne({
+        userId: foreignUser,
+        listingId: fid('product.widget'),
+        listingType: 'product',
+        rating: 4,
+      })).insertedId;
+      related.fixtureBooking = (await db.collection('bookings').insertOne({
         bookingType: 'service',
-        businessId: fixtureObjectId('business.vendorA.service'),
-        serviceId: fixtureObjectId('service.consult'),
-        customerId: fixtureObjectId('user.vendorB'),
-      })
-    );
+        customerId: fid('user.vendorB'),
+        ownerId: fid('user.vendorA'),
+        businessId: fid('business.vendorA.service'),
+        serviceId: fid('service.consult'),
+        customerInfo: { name: 'Private Name', email: 'private@example.test', phone: '+17575550199' },
+      })).insertedId;
+    });
+
     const before = await totalDocuments();
-    const { code, output } = await run(['--cleanup', '--dry-run']);
-    assert.equal(code, 0, output);
-    assert.match(output, /Cleanup preview/);
-    assert.match(output, /bookings\s+1/);
-    assert.match(output, /orders\s+0/);
+    const { code, output } = await run(['--cleanup']);
+    assert.equal(code, 1, output);
+    assert.match(output, /mode: cleanup-preview/);
+    assert.match(output, /3 document\(s\) need manual review/);
+    assert.match(output, new RegExp(`orders ids: ${related.foreignOrder}`));
+    assert.match(output, new RegExp(`carts ids: ${related.mixedCart}`));
+    assert.match(output, new RegExp(`reviews ids: ${related.foreignReview}`));
+    assert.match(output, /Stripe was not called/);
+    assert.ok(!output.includes('Private Name') && !output.includes('private@example.test'));
+    assert.equal(await totalDocuments(), before, 'dry-run deletes nothing');
+
+    const ok = await run(['--cleanup', '--allow-orphans-report']);
+    assert.equal(ok.code, 0, ok.output);
+    assert.match(ok.output, /Cleanup dry run: nothing was deleted/);
+    assert.equal(await totalDocuments(), before, 'dry-run deletes nothing');
+  });
+
+  it('cleanup --apply deletes nothing while manual-review items exist without --allow-orphans-report', async () => {
+    const before = await totalDocuments();
+    const { code, output } = await run(['--cleanup', '--apply']);
+    assert.equal(code, 1, output);
+    assert.match(output, /Nothing was deleted/);
     assert.equal(await totalDocuments(), before);
   });
 
-  it('cleanup removes only marked documents and leaves "test vendor" untouched', async () => {
-    const { code, output } = await run(['--cleanup']);
+  it('cleanup --apply removes fixture-owned related docs and marked fixtures only; "test vendor" untouched', async () => {
+    const { code, output } = await run(['--cleanup', '--apply', '--allow-orphans-report']);
     assert.equal(code, 0, output);
 
     const marked = await collectionCounts({ fixtureTag: FIXTURE_TAG });
     assert.ok(Object.values(marked).every((n) => n === 0), JSON.stringify(marked));
 
     await withDb(async (db) => {
+      // Fixture-owned related documents (all references fixture ids) are gone.
+      assert.equal(await db.collection('orders').findOne({ _id: related.fixtureOrder }), null);
+      assert.equal(await db.collection('refunds').findOne({ _id: related.fixtureRefund }), null);
+      assert.equal(await db.collection('cartitems').findOne({ _id: related.fixtureCartItem }), null);
+      assert.equal(await db.collection('reviews').findOne({ _id: related.fixtureReview }), null);
+      assert.equal(await db.collection('bookings').findOne({ _id: related.fixtureBooking }), null);
+      // Non-fixture-owned or mixed-reference documents are kept.
+      assert.ok(await db.collection('orders').findOne({ _id: related.foreignOrder }));
+      assert.ok(await db.collection('carts').findOne({ _id: related.mixedCart }));
+      assert.ok(await db.collection('reviews').findOne({ _id: related.foreignReview }));
+
       const business = await db.collection('businesses').findOne({ _id: unmarked.business._id });
       assert.ok(business, 'unmarked business must survive cleanup');
       assert.equal(business.businessName, 'test vendor');
@@ -351,8 +433,6 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
       assert.ok(await db.collection('subscriptions').findOne({ _id: unmarked.subscription._id }));
       assert.ok(await db.collection('subscriptionplans').findOne({ _id: unmarked.plan._id }));
       assert.equal(await db.collection('businesses').countDocuments({}), 1);
-      // Referencing documents are reported, never deleted.
-      assert.equal(await db.collection('bookings').countDocuments({}), 1);
     });
   });
 

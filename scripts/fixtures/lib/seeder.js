@@ -31,15 +31,59 @@ function fixtureObjectId(key) {
   return new mongoose.Types.ObjectId(digest.subarray(0, 12).toString('hex'));
 }
 
-// Non-fixture collections whose documents may reference fixture ids. Cleanup
-// does not delete them; the counts are reported so an operator can see them.
-const REFERENCING_COLLECTIONS = {
-  orders: ['userId', 'vendorId', 'businessId'],
-  bookings: ['customerId', 'ownerId', 'businessId', 'serviceId', 'foodId'],
-  carts: ['userId', 'businessId'],
-  cartitems: ['userId', 'businessId', 'productId', 'variantId'],
-  reviews: ['userId', 'listingId'],
-};
+/**
+ * Related (non-marker) documents that QA flows create against fixtures.
+ *
+ * For each collection: `owner` is the acting user's field (buyer, customer,
+ * reviewer); `refs` are the vendor/business/listing reference paths (dotted
+ * paths into arrays are allowed). A related document is deletable only when
+ * its owner is a fixture user id AND every non-empty ref is a fixture id.
+ * Anything else that touches a fixture id is reported for manual review and
+ * never deleted.
+ *
+ * Refunds (local payment records) have no owner field: a refund is deletable
+ * only when its order is itself deletable and every refunded variant is a
+ * fixture id. Stripe is never called.
+ */
+const RELATED_COLLECTIONS = [
+  {
+    collection: 'cartitems',
+    owner: 'userId',
+    refs: ['productId', 'variantId', 'businessId'],
+  },
+  {
+    collection: 'carts',
+    owner: 'userId',
+    refs: ['businessId'],
+    // A cart is deletable only if every item it lists is a deletable cart item.
+    childRefs: { path: 'items', collection: 'cartitems' },
+  },
+  {
+    collection: 'orders',
+    owner: 'userId',
+    refs: ['vendorId', 'businessId', 'items.productId', 'items.variantId', 'inventoryAdjustments.variantId'],
+  },
+  {
+    collection: 'refunds',
+    owner: null,
+    refs: ['refundedItems.productVariantId'],
+    parentRef: { path: 'orderId', collection: 'orders' },
+  },
+  {
+    collection: 'reviews',
+    owner: 'userId',
+    refs: ['listingId'],
+  },
+  {
+    collection: 'bookings',
+    owner: 'customerId',
+    refs: ['ownerId', 'businessId', 'serviceId', 'foodId'],
+  },
+];
+
+// Upper bound on related documents examined per collection; above it the
+// cleanup refuses rather than scanning or deleting an unbounded set.
+const MAX_RELATED_PER_COLLECTION = 5000;
 
 const MODEL_FILES = {
   User: 'User',
@@ -257,27 +301,105 @@ async function countFixtures() {
   return counts;
 }
 
-async function countReferencingDocuments() {
-  const models = loadModels();
-  const ids = [];
-  for (const name of FIXTURE_MODEL_NAMES) {
-    const docs = await models[name].collection
-      .find(markerFilter(), { projection: { _id: 1 } })
+function allFixtureIds() {
+  return buildFixtureSpec().map((entry) => fixtureObjectId(entry.key));
+}
+
+function valuesAtPath(doc, dottedPath) {
+  let current = [doc];
+  for (const part of dottedPath.split('.')) {
+    const next = [];
+    for (const value of current) {
+      if (value == null) continue;
+      const child = value[part];
+      if (Array.isArray(child)) next.push(...child);
+      else if (child !== undefined) next.push(child);
+    }
+    current = next;
+  }
+  return current.filter((v) => v !== null && v !== undefined && v !== '');
+}
+
+/**
+ * Classify related documents. Read-only.
+ * @returns {Promise<Record<string, { deletable: ObjectId[], review: ObjectId[] }>>}
+ */
+async function classifyRelatedDocuments() {
+  const { db } = mongoose.connection;
+  const fixtureIds = allFixtureIds();
+  const fixtureSet = new Set(fixtureIds.map(String));
+  const isFixture = (value) => fixtureSet.has(String(value));
+  const result = {};
+  const deletableByCollection = {};
+  const relatedByCollection = {};
+
+  for (const rule of RELATED_COLLECTIONS) {
+    const clauses = [];
+    if (rule.owner) clauses.push({ [rule.owner]: { $in: fixtureIds } });
+    for (const ref of rule.refs) clauses.push({ [ref]: { $in: fixtureIds } });
+    if (rule.parentRef) {
+      const parents = relatedByCollection[rule.parentRef.collection] || [];
+      if (parents.length) clauses.push({ [rule.parentRef.path]: { $in: parents } });
+    }
+
+    const docs = await db
+      .collection(rule.collection)
+      .find({ $or: clauses })
+      .limit(MAX_RELATED_PER_COLLECTION + 1)
       .toArray();
-    ids.push(...docs.map((d) => d._id));
+    if (docs.length > MAX_RELATED_PER_COLLECTION) {
+      throw new Error(
+        `more than ${MAX_RELATED_PER_COLLECTION} ${rule.collection} documents reference fixtures; refusing`
+      );
+    }
+
+    const deletable = [];
+    const review = [];
+    for (const doc of docs) {
+      let ok = true;
+      if (rule.owner) ok = isFixture(doc[rule.owner]);
+      if (ok) ok = rule.refs.every((ref) => valuesAtPath(doc, ref).every(isFixture));
+      if (ok && rule.childRefs) {
+        const allowed = new Set((deletableByCollection[rule.childRefs.collection] || []).map(String));
+        ok = valuesAtPath(doc, rule.childRefs.path).every((id) => allowed.has(String(id)));
+      }
+      if (ok && rule.parentRef) {
+        const allowed = new Set((deletableByCollection[rule.parentRef.collection] || []).map(String));
+        ok = valuesAtPath(doc, rule.parentRef.path).length > 0 &&
+          valuesAtPath(doc, rule.parentRef.path).every((id) => allowed.has(String(id)));
+      }
+      (ok ? deletable : review).push(doc._id);
+    }
+
+    deletableByCollection[rule.collection] = deletable;
+    relatedByCollection[rule.collection] = docs.map((d) => d._id);
+    result[rule.collection] = { deletable, review };
   }
 
-  const counts = {};
+  return result;
+}
+
+/**
+ * Delete only the deletable related documents from a classification, by id,
+ * re-checking the owner field so a document reassigned since classification
+ * is not removed.
+ */
+async function deleteRelatedDocuments(classification) {
   const { db } = mongoose.connection;
-  for (const [collection, fields] of Object.entries(REFERENCING_COLLECTIONS)) {
-    counts[collection] =
-      ids.length === 0
-        ? 0
-        : await db
-          .collection(collection)
-          .countDocuments({ $or: fields.map((field) => ({ [field]: { $in: ids } })) });
+  const fixtureIds = allFixtureIds();
+  const deleted = {};
+  for (const rule of RELATED_COLLECTIONS) {
+    const ids = classification[rule.collection].deletable;
+    if (ids.length === 0) {
+      deleted[rule.collection] = 0;
+      continue;
+    }
+    const filter = { _id: { $in: ids } };
+    if (rule.owner) filter[rule.owner] = { $in: fixtureIds };
+    const res = await db.collection(rule.collection).deleteMany(filter);
+    deleted[rule.collection] = res.deletedCount;
   }
-  return counts;
+  return deleted;
 }
 
 async function cleanupFixtures({ dryRun = false } = {}) {
@@ -297,9 +419,11 @@ async function cleanupFixtures({ dryRun = false } = {}) {
 
 module.exports = {
   FIXTURE_TAG,
-  REFERENCING_COLLECTIONS,
+  RELATED_COLLECTIONS,
+  MAX_RELATED_PER_COLLECTION,
   fixtureObjectId,
-  countReferencingDocuments,
+  classifyRelatedDocuments,
+  deleteRelatedDocuments,
   FIXTURE_MODEL_NAMES,
   buildPlan,
   applyPlan,

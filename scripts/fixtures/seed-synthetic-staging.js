@@ -12,8 +12,10 @@
  * Usage:
  *   node scripts/fixtures/seed-synthetic-staging.js [--dry-run]      # default: print the plan
  *   node scripts/fixtures/seed-synthetic-staging.js --apply          # insert missing fixtures
- *   node scripts/fixtures/seed-synthetic-staging.js --cleanup        # delete marker-carrying docs
- *   node scripts/fixtures/seed-synthetic-staging.js --cleanup --dry-run   # count only
+ *   node scripts/fixtures/seed-synthetic-staging.js --cleanup        # cleanup preview (dry-run)
+ *   node scripts/fixtures/seed-synthetic-staging.js --cleanup --apply   # delete (see Cleanup below)
+ *   add --allow-orphans-report to let cleanup proceed / exit 0 when documents
+ *   need manual review
  *
  * Required environment (every mode; the script refuses otherwise):
  *   RELEASE_ENVIRONMENT=staging
@@ -39,8 +41,23 @@
  * Only the database host(s) and name are printed. Connection credentials are not.
  * Stripe Connect is left unset and no payment objects are created. Subscription
  * ids are placeholders, so Stripe cancel/renew calls on them fail by design.
- * Cleanup does not delete orders, bookings, carts or reviews that reference
- * fixtures; it reports their counts.
+ *
+ * Cleanup (dry-run unless --apply is given):
+ *   1. Related QA documents in orders, refunds, carts, cart items, reviews and
+ *      bookings (service bookings and food reservations) are classified. A
+ *      document is deleted only if its acting user (buyer/customer/reviewer)
+ *      is a fixture user AND every vendor/business/product/service reference
+ *      in it is a fixture id or empty. Fixture ids are the deterministic
+ *      ObjectIds derived from the fixture keys.
+ *   2. Anything else that references a fixture (owned by a non-fixture user,
+ *      or mixing fixture and non-fixture references) is never deleted. It is
+ *      listed as "needs manual review" (counts and ids only). Cleanup then
+ *      exits non-zero and, with --apply, deletes nothing, unless
+ *      --allow-orphans-report is passed.
+ *   3. With --apply: fixture-owned related documents are deleted first, then
+ *      the marker-tagged fixture documents.
+ *   Stripe is never called: PaymentIntents, transfers and refunds in Stripe
+ *   TEST mode are left untouched.
  */
 
 const mongoose = require('mongoose');
@@ -56,7 +73,8 @@ const {
   applyPlan,
   countFixtures,
   cleanupFixtures,
-  countReferencingDocuments,
+  classifyRelatedDocuments,
+  deleteRelatedDocuments,
 } = require('./lib/seeder');
 
 const EMAIL_SOURCES = {
@@ -74,9 +92,10 @@ const MIN_PASSWORD_LENGTH = 12;
 class UsageError extends Error {}
 
 function parseArgs(argv) {
-  const opts = { apply: false, cleanup: false, dryRun: false, flags: {} };
+  const opts = { apply: false, cleanup: false, dryRun: false, allowOrphansReport: false, flags: {} };
   for (const arg of argv) {
     if (arg === '--apply') opts.apply = true;
+    else if (arg === '--allow-orphans-report') opts.allowOrphansReport = true;
     else if (arg === '--cleanup') opts.cleanup = true;
     else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg.startsWith('--') && arg.includes('=')) {
@@ -92,14 +111,15 @@ function parseArgs(argv) {
     if (!known.has(flag)) throw new UsageError(`Unknown argument: ${flag}`);
   }
 
-  if (opts.apply && opts.cleanup) {
-    throw new UsageError('--apply and --cleanup cannot be combined');
-  }
   if (opts.apply && opts.dryRun) {
     throw new UsageError('--apply and --dry-run cannot be combined');
   }
+  if (opts.allowOrphansReport && !opts.cleanup) {
+    throw new UsageError('--allow-orphans-report is only valid with --cleanup');
+  }
 
-  opts.mode = opts.apply ? 'apply' : opts.cleanup ? 'cleanup' : 'dry-run';
+  if (opts.cleanup) opts.mode = opts.apply ? 'cleanup-apply' : 'cleanup-preview';
+  else opts.mode = opts.apply ? 'apply' : 'dry-run';
   return opts;
 }
 
@@ -148,6 +168,43 @@ function formatCounts(counts) {
     .join('\n');
 }
 
+async function runCleanup({ opts, log, error }) {
+  const applying = opts.mode === 'cleanup-apply';
+  const related = await classifyRelatedDocuments();
+  const reviewTotal = Object.values(related).reduce((n, r) => n + r.review.length, 0);
+
+  log('Related QA documents (fixture-owned, all references fixture ids):');
+  log(formatCounts(Object.fromEntries(Object.entries(related).map(([c, r]) => [c, r.deletable.length]))));
+  log('Needs manual review (references fixtures; never deleted):');
+  log(formatCounts(Object.fromEntries(Object.entries(related).map(([c, r]) => [c, r.review.length]))));
+  for (const [collection, r] of Object.entries(related)) {
+    if (r.review.length) log(`  ${collection} ids: ${r.review.map(String).join(', ')}`);
+  }
+  log('Stripe was not called: PaymentIntents, transfers and refunds in Stripe TEST mode are left untouched.');
+
+  if (reviewTotal > 0 && !opts.allowOrphansReport) {
+    error(
+      `${reviewTotal} document(s) need manual review. ${applying ? 'Nothing was deleted. ' : ''}` +
+        'Resolve them, or re-run with --allow-orphans-report to leave them in place.'
+    );
+    return 1;
+  }
+
+  if (!applying) {
+    log('Marker-tagged fixture documents (would be deleted):');
+    log(formatCounts(await cleanupFixtures({ dryRun: true })));
+    log('Cleanup dry run: nothing was deleted. Re-run with --cleanup --apply to delete.');
+    return 0;
+  }
+
+  const relatedDeleted = await deleteRelatedDocuments(related);
+  log('Deleted related QA documents:');
+  log(formatCounts(relatedDeleted));
+  log('Deleted marker-tagged fixture documents:');
+  log(formatCounts(await cleanupFixtures({ dryRun: false })));
+  return 0;
+}
+
 /**
  * Entry point. Returns a process exit code; never calls process.exit itself.
  */
@@ -178,7 +235,7 @@ async function main({ argv = process.argv.slice(2), env = process.env, log = con
     }
   }
 
-  log(`Synthetic fixture seeder (tag ${FIXTURE_TAG}), mode: ${opts.mode}${opts.cleanup && opts.dryRun ? ' (dry-run)' : ''}`);
+  log(`Synthetic fixture seeder (tag ${FIXTURE_TAG}), mode: ${opts.mode}`);
   log(`Target database: host(s) ${target.hosts.join(', ')}, db "${target.dbName}"`);
   log('Fixture accounts:');
   for (const role of ROLE_ORDER) {
@@ -204,14 +261,8 @@ async function main({ argv = process.argv.slice(2), env = process.env, log = con
       return 2;
     }
 
-    if (opts.mode === 'cleanup') {
-      const referencing = await countReferencingDocuments();
-      const deleted = await cleanupFixtures({ dryRun: opts.dryRun });
-      log(opts.dryRun ? 'Cleanup preview (documents with the fixture marker):' : 'Cleanup deleted (fixture marker only):');
-      log(formatCounts(deleted));
-      log('Not deleted: other documents referencing fixtures (orders, bookings, carts, reviews):');
-      log(formatCounts(referencing));
-      return 0;
+    if (opts.cleanup) {
+      return await runCleanup({ opts, log, error });
     }
 
     const passwordHash =

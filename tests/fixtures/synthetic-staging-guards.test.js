@@ -188,8 +188,12 @@ test('domain allowlist entries match exactly, without subdomains', () => {
 test('parseArgs defaults to dry-run and rejects conflicting or unknown flags', () => {
   assert.equal(parseArgs([]).mode, 'dry-run');
   assert.equal(parseArgs(['--apply']).mode, 'apply');
-  assert.equal(parseArgs(['--cleanup']).mode, 'cleanup');
-  assert.throws(() => parseArgs(['--apply', '--cleanup']));
+  assert.equal(parseArgs(['--cleanup']).mode, 'cleanup-preview');
+  assert.equal(parseArgs(['--cleanup', '--dry-run']).mode, 'cleanup-preview');
+  assert.equal(parseArgs(['--cleanup', '--apply']).mode, 'cleanup-apply');
+  assert.equal(parseArgs(['--cleanup', '--allow-orphans-report']).allowOrphansReport, true);
+  assert.throws(() => parseArgs(['--allow-orphans-report']));
+  assert.throws(() => parseArgs(['--cleanup', '--apply', '--dry-run']));
   assert.throws(() => parseArgs(['--apply', '--dry-run']));
   assert.throws(() => parseArgs(['--force']));
   assert.throws(() => parseArgs(['--patterns=test']));
@@ -231,8 +235,8 @@ test('main refuses when fixture emails are missing or duplicated', async () => {
   assert.match(out.join('\n'), /distinct/);
 });
 
-test('guards also refuse in --cleanup and --cleanup --dry-run modes', async () => {
-  for (const argv of [['--cleanup'], ['--cleanup', '--dry-run']]) {
+test('guards also refuse in every --cleanup mode', async () => {
+  for (const argv of [['--cleanup'], ['--cleanup', '--dry-run'], ['--cleanup', '--apply']]) {
     for (const overrides of [
       { RELEASE_ENVIRONMENT: 'production' },
       { FIXTURE_SEED_CONFIRM: '' },
