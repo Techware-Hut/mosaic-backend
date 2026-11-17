@@ -3,12 +3,20 @@
 /**
  * Preconditions for the synthetic staging fixture seeder.
  *
+ * The MAIL_RECIPIENT_ALLOWLIST check here is a precondition only: it confirms
+ * the fixture emails are covered. Enforcement of the allowlist on outgoing
+ * mail is done by the backend itself (backend PR #330), which must already be
+ * deployed on staging before this seeder is used.
+ *
  * Every check fails closed: a missing or malformed value is a refusal.
  * Nothing in this module ever returns or prints connection credentials.
  */
 
 const REQUIRED_RELEASE_ENVIRONMENT = 'staging';
 const REQUIRED_CONFIRM_VALUE = 'synthetic-staging';
+
+// Transitive dependency of the mongodb driver (via mongoose).
+const { default: ConnectionString } = require('mongodb-connection-string-url');
 
 // Mongo falls back to the "test" database when the URI has no path.
 const REFUSED_DB_NAMES = new Set(['', 'test', 'admin', 'local', 'config']);
@@ -39,57 +47,48 @@ function stripPort(hostPart) {
 }
 
 /**
- * Parse hosts and database name from a MongoDB connection string without
- * keeping the credential segment. Throws a plain Error (no URI in the
- * message) when the string is not a mongodb:// or mongodb+srv:// URI.
+ * Parse hosts and database name from a MongoDB connection string with the
+ * driver's own parser (mongodb-connection-string-url). Errors never include
+ * any part of the URI.
  */
 function parseMongoTarget(uri) {
   if (typeof uri !== 'string' || !uri.trim()) {
     throw new Error('MONGODB_URI is not set');
   }
 
-  const match = /^(mongodb(?:\+srv)?):\/\/(.*)$/i.exec(uri.trim());
-  if (!match) {
-    throw new Error('MONGODB_URI is not a mongodb:// or mongodb+srv:// URI');
+  let parsed;
+  try {
+    parsed = new ConnectionString(uri.trim());
+  } catch (_err) {
+    throw new Error('MONGODB_URI is not a valid mongodb:// or mongodb+srv:// URI');
   }
 
-  let rest = match[2];
-  const pathStart = rest.search(/[/?]/);
-  let authority = pathStart === -1 ? rest : rest.slice(0, pathStart);
-  rest = pathStart === -1 ? '' : rest.slice(pathStart);
-
-  const at = authority.lastIndexOf('@');
-  if (at !== -1) {
-    authority = authority.slice(at + 1);
-  }
-
-  const hosts = authority
-    .split(',')
-    .map(stripPort)
-    .filter(Boolean);
-
+  const hosts = parsed.hosts.map(stripPort).filter(Boolean);
   if (hosts.length === 0) {
     throw new Error('MONGODB_URI has no host');
   }
 
   let dbName = '';
-  if (rest.startsWith('/')) {
-    const q = rest.indexOf('?');
-    dbName = rest.slice(1, q === -1 ? undefined : q);
-    try {
-      dbName = decodeURIComponent(dbName);
-    } catch (_err) {
-      throw new Error('MONGODB_URI database name is not valid');
-    }
+  try {
+    dbName = decodeURIComponent(String(parsed.pathname || '').replace(/^\//, ''));
+  } catch (_err) {
+    throw new Error('MONGODB_URI database name is not valid');
   }
 
-  return { scheme: match[1].toLowerCase(), hosts, dbName };
+  return { scheme: parsed.isSRV ? 'mongodb+srv' : 'mongodb', hosts, dbName };
 }
 
 function parseHostList(value) {
   return String(value || '')
     .split(',')
     .map(stripPort)
+    .filter(Boolean);
+}
+
+function parseNameList(value) {
+  return String(value || '')
+    .split(',')
+    .map((name) => name.trim())
     .filter(Boolean);
 }
 
@@ -179,6 +178,16 @@ function assertPreconditions({ env, emails }) {
         'DB_NAME_REFUSED',
         `database name "${target.dbName || '(none)'}" is not allowed; the URI must name the staging database`
       );
+    } else {
+      const allowedNames = new Set(parseNameList(env.FIXTURE_ALLOWED_DB_NAMES));
+      if (allowedNames.size === 0) {
+        fail('DB_NAME_ALLOWLIST', 'FIXTURE_ALLOWED_DB_NAMES is not set');
+      } else if (!allowedNames.has(target.dbName)) {
+        fail(
+          'DB_NAME_NOT_ALLOWED',
+          `database name "${target.dbName}" is not in FIXTURE_ALLOWED_DB_NAMES (exact match)`
+        );
+      }
     }
   }
 

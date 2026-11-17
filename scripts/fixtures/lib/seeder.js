@@ -17,8 +17,29 @@
  *            nothing else. It never matches on names or emails.
  */
 
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const { FIXTURE_TAG, buildFixtureSpec } = require('./fixtureSpec');
+
+/**
+ * Deterministic ObjectId for a fixture key: the first 12 bytes of
+ * sha256("<tag>:<key>"). References between fixtures therefore never depend
+ * on which documents already exist.
+ */
+function fixtureObjectId(key) {
+  const digest = crypto.createHash('sha256').update(`${FIXTURE_TAG}:${key}`).digest();
+  return new mongoose.Types.ObjectId(digest.subarray(0, 12).toString('hex'));
+}
+
+// Non-fixture collections whose documents may reference fixture ids. Cleanup
+// does not delete them; the counts are reported so an operator can see them.
+const REFERENCING_COLLECTIONS = {
+  orders: ['userId', 'vendorId', 'businessId'],
+  bookings: ['customerId', 'ownerId', 'businessId', 'serviceId', 'foodId'],
+  carts: ['userId', 'businessId'],
+  cartitems: ['userId', 'businessId', 'productId', 'variantId'],
+  reviews: ['userId', 'listingId'],
+};
 
 const MODEL_FILES = {
   User: 'User',
@@ -95,8 +116,25 @@ async function buildPlan({ emails, mobiles, planName, passwordHash, now = new Da
 
   const ids = new Map();
   for (const entry of spec) {
+    ids.set(entry.key, fixtureObjectId(entry.key));
+  }
+
+  const existingCount = spec.filter((entry) => existing.has(entry.key)).length;
+  if (existingCount > 0 && existingCount < spec.length) {
+    blockers.push({
+      code: 'FIXTURE_SET_PARTIAL',
+      message: `${existingCount} of ${spec.length} fixture documents exist (partial set); run --cleanup first, then --apply`,
+    });
+  }
+
+  for (const entry of spec) {
     const found = existing.get(entry.key);
-    ids.set(entry.key, found ? found._id : new mongoose.Types.ObjectId());
+    if (found && String(found._id) !== String(ids.get(entry.key))) {
+      blockers.push({
+        code: 'FIXTURE_ID_MISMATCH',
+        message: `${entry.key} exists with a non-deterministic id; run --cleanup first, then --apply`,
+      });
+    }
   }
 
   const ctx = {
@@ -219,6 +257,29 @@ async function countFixtures() {
   return counts;
 }
 
+async function countReferencingDocuments() {
+  const models = loadModels();
+  const ids = [];
+  for (const name of FIXTURE_MODEL_NAMES) {
+    const docs = await models[name].collection
+      .find(markerFilter(), { projection: { _id: 1 } })
+      .toArray();
+    ids.push(...docs.map((d) => d._id));
+  }
+
+  const counts = {};
+  const { db } = mongoose.connection;
+  for (const [collection, fields] of Object.entries(REFERENCING_COLLECTIONS)) {
+    counts[collection] =
+      ids.length === 0
+        ? 0
+        : await db
+          .collection(collection)
+          .countDocuments({ $or: fields.map((field) => ({ [field]: { $in: ids } })) });
+  }
+  return counts;
+}
+
 async function cleanupFixtures({ dryRun = false } = {}) {
   const models = loadModels();
   const deleted = {};
@@ -236,6 +297,9 @@ async function cleanupFixtures({ dryRun = false } = {}) {
 
 module.exports = {
   FIXTURE_TAG,
+  REFERENCING_COLLECTIONS,
+  fixtureObjectId,
+  countReferencingDocuments,
   FIXTURE_MODEL_NAMES,
   buildPlan,
   applyPlan,

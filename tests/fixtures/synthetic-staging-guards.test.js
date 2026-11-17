@@ -11,6 +11,7 @@ const {
 const { main, parseArgs } = require('../../scripts/fixtures/seed-synthetic-staging');
 
 const SECRET = 'n0t-a-real-pass';
+const NL = String.fromCharCode(10);
 
 const EMAILS = {
   buyer: 'qa+buyer@example.test',
@@ -26,6 +27,7 @@ function goodEnv(overrides = {}) {
     FIXTURE_SEED_CONFIRM: 'synthetic-staging',
     MONGODB_URI: `mongodb+srv://qa_user:${SECRET}@cluster0.example.test/mbh_fixture_db?retryWrites=true`,
     FIXTURE_ALLOWED_DB_HOSTS: 'cluster0.example.test',
+    FIXTURE_ALLOWED_DB_NAMES: 'mbh_fixture_db',
     MAIL_RECIPIENT_ALLOWLIST: Object.values(EMAILS).join(','),
     FIXTURE_EMAIL_BUYER: EMAILS.buyer,
     FIXTURE_EMAIL_VENDOR_A: EMAILS.vendorA,
@@ -56,9 +58,50 @@ test('parseMongoTarget returns hosts and db name without credentials', () => {
   assert.ok(!JSON.stringify(target).includes(SECRET));
 });
 
-test('parseMongoTarget rejects non-mongo URIs', () => {
-  assert.throws(() => parseMongoTarget('https://example.test/db'), /not a mongodb/);
+test('parseMongoTarget rejects malformed URIs without echoing any part of them', () => {
+  for (const uri of [
+    `https://u:${SECRET}@example.test/db`,
+    `mongodb://u:${SECRET}@/db`,
+    `mongodb+srv://u:${SECRET}@h1.example.test,h2.example.test/db`,
+  ]) {
+    assert.throws(
+      () => parseMongoTarget(uri),
+      (err) => !err.message.includes(SECRET) && !err.message.includes('example.test')
+    );
+  }
   assert.throws(() => parseMongoTarget(''), /not set/);
+});
+
+test('hosts are compared case-insensitively and ignore whitespace in the allowlist', () => {
+  const target = assertPreconditions({
+    env: goodEnv({
+      MONGODB_URI: 'mongodb://CLUSTER0.Example.TEST:27017/mbh_fixture_db',
+      FIXTURE_ALLOWED_DB_HOSTS: '  Cluster0.EXAMPLE.test , other.example.test ',
+    }),
+    emails: EMAILS,
+  });
+  assert.deepEqual(target.hosts, ['cluster0.example.test']);
+});
+
+test('refuses when FIXTURE_ALLOWED_DB_NAMES is unset', () => {
+  for (const value of [undefined, '', ' , ']) {
+    const codes = failureCodes(() =>
+      assertPreconditions({ env: goodEnv({ FIXTURE_ALLOWED_DB_NAMES: value }), emails: EMAILS })
+    );
+    assert.deepEqual(codes, ['DB_NAME_ALLOWLIST']);
+  }
+});
+
+test('refuses a database name not exactly in FIXTURE_ALLOWED_DB_NAMES', () => {
+  for (const name of ['mosaic_prod', 'MBH_FIXTURE_DB', 'mbh_fixture_db2']) {
+    const codes = failureCodes(() =>
+      assertPreconditions({
+        env: goodEnv({ MONGODB_URI: `mongodb://cluster0.example.test/${name}` }),
+        emails: EMAILS,
+      })
+    );
+    assert.deepEqual(codes, ['DB_NAME_NOT_ALLOWED']);
+  }
 });
 
 test('all guards pass with a complete staging configuration', () => {
@@ -183,6 +226,25 @@ test('main refuses when fixture emails are missing or duplicated', async () => {
   );
   assert.match(out.join('\n'), /FIXTURE_EMAIL_ADMIN/);
   assert.match(out.join('\n'), /distinct/);
+});
+
+test('guards also refuse in --cleanup and --cleanup --dry-run modes', async () => {
+  for (const argv of [['--cleanup'], ['--cleanup', '--dry-run']]) {
+    for (const overrides of [
+      { RELEASE_ENVIRONMENT: 'production' },
+      { FIXTURE_SEED_CONFIRM: '' },
+      { FIXTURE_ALLOWED_DB_HOSTS: 'other.example.test' },
+      { FIXTURE_ALLOWED_DB_NAMES: 'other_db' },
+      { MAIL_RECIPIENT_ALLOWLIST: '' },
+    ]) {
+      const out = [];
+      const capture = (line) => out.push(String(line));
+      const code = await main({ argv, env: goodEnv(overrides), log: capture, error: capture });
+      assert.equal(code, 2, `${argv.join(' ')} ${JSON.stringify(overrides)}`);
+      assert.match(out.join(NL), /Refusing to run/);
+      assert.ok(!out.join(NL).includes(SECRET));
+    }
+  }
 });
 
 test('main refuses --apply without a fixture password', async () => {

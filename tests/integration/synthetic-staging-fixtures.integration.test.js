@@ -4,7 +4,11 @@ const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 
 const { main } = require('../../scripts/fixtures/seed-synthetic-staging');
-const { FIXTURE_TAG, FIXTURE_MODEL_NAMES } = require('../../scripts/fixtures/lib/seeder');
+const {
+  FIXTURE_TAG,
+  FIXTURE_MODEL_NAMES,
+  fixtureObjectId,
+} = require('../../scripts/fixtures/lib/seeder');
 
 const DB_NAME = 'mbh_fixture_it';
 
@@ -95,6 +99,7 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
       FIXTURE_SEED_CONFIRM: 'synthetic-staging',
       MONGODB_URI: `${baseUri}${DB_NAME}`,
       FIXTURE_ALLOWED_DB_HOSTS: '127.0.0.1',
+      FIXTURE_ALLOWED_DB_NAMES: DB_NAME,
       MAIL_RECIPIENT_ALLOWLIST: '@example.test',
       FIXTURE_EMAIL_BUYER: 'qa+buyer@example.test',
       FIXTURE_EMAIL_VENDOR_A: 'qa+vendor-a@example.test',
@@ -157,6 +162,27 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
     if (mongoServer) await mongoServer.stop();
   });
 
+  it('refuses when a database connection is already open in the process', async () => {
+    await mongoose.connect(env.MONGODB_URI);
+    try {
+      const before = await totalDocuments();
+      const { code, output } = await run(['--apply']);
+      assert.equal(code, 2);
+      assert.match(output, /connection is already open/);
+      assert.equal(await totalDocuments(), before);
+    } finally {
+      await mongoose.disconnect();
+    }
+  });
+
+  it('refuses when the database name is not allowlisted, writing nothing', async () => {
+    const before = await totalDocuments();
+    const { code, output } = await run(['--apply'], { FIXTURE_ALLOWED_DB_NAMES: 'mosaic_staging' });
+    assert.equal(code, 2);
+    assert.match(output, /DB_NAME_NOT_ALLOWED/);
+    assert.equal(await totalDocuments(), before);
+  });
+
   it('refuses when the in-memory host is not allowlisted, writing nothing', async () => {
     const before = await totalDocuments();
     const { code, output } = await run(['--apply'], { FIXTURE_ALLOWED_DB_HOSTS: 'db.example.test' });
@@ -194,6 +220,9 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
     try {
       const User = mongoose.model('User');
       const users = await User.find({ fixtureTag: FIXTURE_TAG }).lean();
+      for (const u of users) {
+        assert.equal(String(u._id), String(fixtureObjectId(u.fixtureKey)), 'deterministic ids');
+      }
       const roles = users.map((u) => u.role).sort();
       assert.deepEqual(roles, ['admin', 'business_owner', 'business_owner', 'business_owner', 'customer']);
       assert.ok(users.every((u) => u.isOtpVerified === true && u.passwordHash));
@@ -246,11 +275,64 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
     assert.deepEqual(after, snapshot);
   });
 
-  it('cleanup --dry-run deletes nothing', async () => {
+  it('a partial fixture set blocks re-apply until cleanup; then apply restores consistent references', async () => {
+    // Simulate a partial apply: one product and its variant are missing.
+    await withDb(async (db) => {
+      await db.collection('products').deleteOne({ fixtureTag: FIXTURE_TAG, fixtureKey: 'product.limited' });
+      await db.collection('productvariants').deleteOne({
+        fixtureTag: FIXTURE_TAG,
+        fixtureKey: 'product.limited.variant',
+      });
+    });
+    const before = await totalDocuments();
+    const refused = await run(['--apply']);
+    assert.equal(refused.code, 1);
+    assert.match(refused.output, /FIXTURE_SET_PARTIAL/);
+    assert.match(refused.output, /run --cleanup first/);
+    assert.equal(await totalDocuments(), before);
+
+    const cleaned = await run(['--cleanup']);
+    assert.equal(cleaned.code, 0, cleaned.output);
+    const reapplied = await run(['--apply']);
+    assert.equal(reapplied.code, 0, reapplied.output);
+    assert.deepEqual(await collectionCounts({ fixtureTag: FIXTURE_TAG }), EXPECTED_COUNTS);
+
+    // Every reference held by a fixture business resolves to an existing fixture doc.
+    await withDb(async (db) => {
+      const businesses = await db.collection('businesses').find({ fixtureTag: FIXTURE_TAG }).toArray();
+      const refs = [];
+      for (const b of businesses) {
+        refs.push(['users', b.owner], ['subscriptions', b.subscriptionId]);
+        for (const id of b.products || []) refs.push(['products', id]);
+        for (const id of b.services || []) refs.push(['services', id]);
+        for (const id of b.foods || []) refs.push(['foods', id]);
+      }
+      const variants = await db.collection('productvariants').find({ fixtureTag: FIXTURE_TAG }).toArray();
+      for (const v of variants) refs.push(['products', v.productId], ['businesses', v.businessId]);
+      for (const [collection, id] of refs) {
+        assert.ok(
+          await db.collection(collection).findOne({ _id: id, fixtureTag: FIXTURE_TAG }),
+          `dangling reference into ${collection}`
+        );
+      }
+    });
+  });
+
+  it('cleanup --dry-run deletes nothing and reports referencing documents', async () => {
+    await withDb((db) =>
+      db.collection('bookings').insertOne({
+        bookingType: 'service',
+        businessId: fixtureObjectId('business.vendorA.service'),
+        serviceId: fixtureObjectId('service.consult'),
+        customerId: fixtureObjectId('user.vendorB'),
+      })
+    );
     const before = await totalDocuments();
     const { code, output } = await run(['--cleanup', '--dry-run']);
     assert.equal(code, 0, output);
     assert.match(output, /Cleanup preview/);
+    assert.match(output, /bookings\s+1/);
+    assert.match(output, /orders\s+0/);
     assert.equal(await totalDocuments(), before);
   });
 
@@ -269,8 +351,31 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
       assert.ok(await db.collection('subscriptions').findOne({ _id: unmarked.subscription._id }));
       assert.ok(await db.collection('subscriptionplans').findOne({ _id: unmarked.plan._id }));
       assert.equal(await db.collection('businesses').countDocuments({}), 1);
+      // Referencing documents are reported, never deleted.
+      assert.equal(await db.collection('bookings').countDocuments({}), 1);
     });
   });
+
+  for (const [label, collection, doc] of [
+    ['product slug', 'products', { title: 'Other', slug: 'mbh-synthetic-widget' }],
+    ['variant SKU', 'productvariants', { sku: 'MBH-SYNTH-WIDGET', stock: 1 }],
+    ['category name', 'productcategories', { name: 'QA Synthetic Goods', slug: 'other-goods' }],
+    ['category slug', 'servicecategories', { name: 'Other Services', slug: 'mbh-synthetic-service-category' }],
+    ['business slug', 'businesses', { businessName: 'Other', slug: 'mbh-synthetic-vendor-a-goods' }],
+  ]) {
+    it(`refuses to apply when a non-fixture ${label} collides`, async () => {
+      const { insertedId } = await withDb((db) => db.collection(collection).insertOne(doc));
+      try {
+        const before = await totalDocuments();
+        const { code, output } = await run(['--apply']);
+        assert.equal(code, 1);
+        assert.match(output, /NON_FIXTURE_COLLISION/);
+        assert.equal(await totalDocuments(), before);
+      } finally {
+        await withDb((db) => db.collection(collection).deleteOne({ _id: insertedId }));
+      }
+    });
+  }
 
   it('refuses to apply when a non-fixture user already holds a fixture email', async () => {
     await withDb((db) =>

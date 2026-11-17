@@ -4,6 +4,11 @@
 /**
  * Synthetic staging fixture seeder.
  *
+ * PREREQUISITE: backend PR #330 (MAIL_RECIPIENT_ALLOWLIST enforcement on
+ * outgoing mail) must be deployed on staging before this seeder is used. The
+ * allowlist check in this script is a precondition only; it is not the
+ * enforcement itself.
+ *
  * Usage:
  *   node scripts/fixtures/seed-synthetic-staging.js [--dry-run]      # default: print the plan
  *   node scripts/fixtures/seed-synthetic-staging.js --apply          # insert missing fixtures
@@ -14,7 +19,8 @@
  *   RELEASE_ENVIRONMENT=staging
  *   FIXTURE_SEED_CONFIRM=synthetic-staging
  *   MONGODB_URI                 must name the database; its host(s) must be listed in
- *   FIXTURE_ALLOWED_DB_HOSTS    comma-separated host names (ports ignored)
+ *   FIXTURE_ALLOWED_DB_HOSTS    comma-separated host names (ports ignored, case-insensitive)
+ *   FIXTURE_ALLOWED_DB_NAMES    comma-separated database names (exact match)
  *   MAIL_RECIPIENT_ALLOWLIST    must cover every fixture email (fails closed if unset)
  *
  * Fixture emails (env or CLI flag; no defaults):
@@ -31,7 +37,10 @@
  *   FIXTURE_SUBSCRIPTION_PLAN  existing plan name to attach, default "Launch Plan"
  *
  * Only the database host(s) and name are printed. Connection credentials are not.
- * Stripe Connect is left unset and no payment objects are created.
+ * Stripe Connect is left unset and no payment objects are created. Subscription
+ * ids are placeholders, so Stripe cancel/renew calls on them fail by design.
+ * Cleanup does not delete orders, bookings, carts or reviews that reference
+ * fixtures; it reports their counts.
  */
 
 const mongoose = require('mongoose');
@@ -47,6 +56,7 @@ const {
   applyPlan,
   countFixtures,
   cleanupFixtures,
+  countReferencingDocuments,
 } = require('./lib/seeder');
 
 const EMAIL_SOURCES = {
@@ -175,16 +185,18 @@ async function main({ argv = process.argv.slice(2), env = process.env, log = con
     log(`  ${ROLES[role].label.padEnd(12)} ${ROLES[role].role.padEnd(15)} ${maskEmail(emails[role])}`);
   }
 
-  const ownConnection = mongoose.connection.readyState === 0;
-  if (ownConnection) {
-    // autoIndex/autoCreate off: the seeder must not build indexes or create
-    // collections as a side effect (dry-run stays read-only).
-    await mongoose.connect(env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 10000,
-      autoIndex: false,
-      autoCreate: false,
-    });
+  // Only ever use a connection built here from the guarded URI.
+  if (mongoose.connection.readyState !== 0) {
+    error('Refusing: a database connection is already open in this process');
+    return 2;
   }
+  // autoIndex/autoCreate off: the seeder must not build indexes or create
+  // collections as a side effect (dry-run stays read-only).
+  await mongoose.connect(env.MONGODB_URI, {
+    serverSelectionTimeoutMS: 10000,
+    autoIndex: false,
+    autoCreate: false,
+  });
 
   try {
     if (mongoose.connection.db.databaseName !== target.dbName) {
@@ -193,9 +205,12 @@ async function main({ argv = process.argv.slice(2), env = process.env, log = con
     }
 
     if (opts.mode === 'cleanup') {
+      const referencing = await countReferencingDocuments();
       const deleted = await cleanupFixtures({ dryRun: opts.dryRun });
       log(opts.dryRun ? 'Cleanup preview (documents with the fixture marker):' : 'Cleanup deleted (fixture marker only):');
       log(formatCounts(deleted));
+      log('Not deleted: other documents referencing fixtures (orders, bookings, carts, reviews):');
+      log(formatCounts(referencing));
       return 0;
     }
 
@@ -233,9 +248,7 @@ async function main({ argv = process.argv.slice(2), env = process.env, log = con
     log(formatCounts(await countFixtures()));
     return 0;
   } finally {
-    if (ownConnection) {
-      await mongoose.disconnect();
-    }
+    await mongoose.disconnect();
   }
 }
 
