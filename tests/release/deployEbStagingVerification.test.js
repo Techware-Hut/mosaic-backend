@@ -63,11 +63,27 @@ test('verification fails on ERROR events since deploy start and asserts environm
   assert.match(body, /Health === "Red" \|\| Health === "Grey"/);
   assert.match(body, /VersionLabel !== expectedVersion/);
   assert.match(body, /set -euo pipefail/);
+  assert.match(body, /for attempt in 1 2 3; do/);
+  assert.match(body, /sleep 15/);
+  assert.match(body, /readFileSync\(0, "utf8"\)/);
+  assert.doesNotMatch(body, /process\.argv\[1\]\)\.Events|JSON\.parse\(process\.argv/);
+  assert.match(body, /describe-events \\\n\s+--environment-name/);
+  assert.match(body, /describe-environments \\\n\s+--environment-names/);
   assert.doesNotMatch(body, /\bprintenv\b|\benv\s*$|set -x/m);
+});
+
+test('verification step cannot be skipped or softened', () => {
+  const { body } = deploySteps().find((step) => step.name === 'Verify Elastic Beanstalk deploy outcome');
+  const runIndex = body.indexOf('\n        run: |');
+  assert.notEqual(runIndex, -1, 'verify step must have a run block');
+  const header = body.slice(0, runIndex);
+  assert.doesNotMatch(header, /continue-on-error/);
+  assert.doesNotMatch(header, /^\s+if:/m);
 });
 
 test('deploy keeps reusing an existing version label, which is why EB-side checks are needed', () => {
   const { body } = deploySteps().find((step) => step.name === 'Deploy to Elastic Beanstalk');
   assert.match(body, /use_existing_version_if_available: true/);
+  assert.match(body, /wait_for_environment_recovery: 60\n/);
   assert.match(body, /version_label: mosaic-staging-\$\{\{ github\.sha \}\}/);
 });
