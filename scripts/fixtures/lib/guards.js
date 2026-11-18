@@ -189,10 +189,16 @@ function maskEmail(email) {
 
 /**
  * Run every precondition and collect all failures.
+ * @param {object} options
+ * @param {object} options.env
+ * @param {Record<string,string>} [options.emails] role -> fixture email
+ * @param {boolean} [options.requireMailAllowlist=true] the reference-data
+ *   seeder creates no accounts and sends no mail, so it passes false; every
+ *   other check is unchanged.
  * @returns {{ hosts: string[], dbName: string }} the safe-to-print target
  * @throws {GuardError}
  */
-function assertPreconditions({ env, emails }) {
+function assertPreconditions({ env, emails, requireMailAllowlist = true }) {
   const failures = [];
   const fail = (code, message) => failures.push({ code, message });
 
@@ -260,7 +266,9 @@ function assertPreconditions({ env, emails }) {
   }
 
   const allowlist = parseMailAllowlist(env.MAIL_RECIPIENT_ALLOWLIST);
-  if (allowlist.size === 0) {
+  if (!requireMailAllowlist) {
+    // Skipped by the caller (no fixture emails to cover).
+  } else if (allowlist.size === 0) {
     fail('MAIL_ALLOWLIST_UNSET', 'MAIL_RECIPIENT_ALLOWLIST has no valid entry');
   } else {
     const missing = Object.entries(emails || {})
