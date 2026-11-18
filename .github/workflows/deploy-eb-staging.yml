@@ -107,6 +107,15 @@ jobs:
         run: |
           aws sts get-caller-identity
 
+      - name: Record deploy start time
+        id: deploy_start
+        shell: bash
+        run: |
+          set -euo pipefail
+          started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "Deploy start (UTC): ${started_at}"
+          echo "started_at=${started_at}" >> "$GITHUB_OUTPUT"
+
       - name: Deploy to Elastic Beanstalk
         uses: einaregilsson/beanstalk-deploy@v22
         with:
@@ -120,7 +129,72 @@ jobs:
           deployment_package: deploy.zip
           use_existing_version_if_available: true
           wait_for_deployment: true
-          wait_for_environment_recovery: true
+          # Seconds (not a boolean) to wait for the environment to return to
+          # Green/Ok after the deploy. A non-numeric value is not a documented
+          # setting for this input, so state the recovery window explicitly.
+          wait_for_environment_recovery: 60
+
+      # A same-version redeploy (use_existing_version_if_available) can report
+      # success even if Elastic Beanstalk rejects the update, because the
+      # release identity probe only sees the version that was already live.
+      # Assert the Elastic Beanstalk side of the deploy explicitly.
+      - name: Verify Elastic Beanstalk deploy outcome
+        shell: bash
+        env:
+          DEPLOY_STARTED_AT: ${{ steps.deploy_start.outputs.started_at }}
+          EXPECTED_VERSION_LABEL: mosaic-staging-${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Events can surface shortly after the deploy action returns, so poll
+          # several times and fail on any ERROR-or-higher event in any poll.
+          for attempt in 1 2 3; do
+            aws elasticbeanstalk describe-events \
+              --environment-name "$EB_ENVIRONMENT_NAME" \
+              --start-time "$DEPLOY_STARTED_AT" \
+              --severity ERROR \
+              --output json \
+              | node -e '
+                const attempt = process.argv[1];
+                const events = JSON.parse(require("fs").readFileSync(0, "utf8")).Events || [];
+                if (events.length === 0) {
+                  console.log(`Poll ${attempt}: no ERROR-or-higher Elastic Beanstalk events since deploy start`);
+                  process.exit(0);
+                }
+                console.error(`Poll ${attempt}: Elastic Beanstalk reported ${events.length} ERROR-or-higher event(s) since deploy start:`);
+                for (const event of events) {
+                  const message = String(event.Message || "").slice(0, 200);
+                  console.error(`- ${event.EventDate} ${event.Severity}: ${message}`);
+                }
+                process.exit(1);
+              ' "$attempt"
+            if [ "$attempt" -lt 3 ]; then
+              sleep 15
+            fi
+          done
+
+          aws elasticbeanstalk describe-environments \
+            --environment-names "$EB_ENVIRONMENT_NAME" \
+            --no-include-deleted \
+            --output json \
+            | node -e '
+              const envs = JSON.parse(require("fs").readFileSync(0, "utf8")).Environments || [];
+              const expectedVersion = process.argv[1];
+              if (envs.length !== 1) {
+                console.error(`Expected exactly one environment, found ${envs.length}`);
+                process.exit(1);
+              }
+              const { VersionLabel, Status, Health } = envs[0];
+              console.log(`VersionLabel=${VersionLabel} Status=${Status} Health=${Health}`);
+              const problems = [];
+              if (VersionLabel !== expectedVersion) problems.push(`VersionLabel is not ${expectedVersion}`);
+              if (Status !== "Ready") problems.push("Status is not Ready");
+              if (Health === "Red" || Health === "Grey") problems.push(`Health is ${Health}`);
+              if (problems.length > 0) {
+                console.error(`Elastic Beanstalk environment check failed: ${problems.join("; ")}`);
+                process.exit(1);
+              }
+            ' "$EXPECTED_VERSION_LABEL"
 
       - name: Post-deploy health probe
         run: |
