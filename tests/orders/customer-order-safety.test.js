@@ -46,6 +46,8 @@ function loadOrderController({
   order = null,
   variant = null,
   refundError = null,
+  transitionClaimFails = false,
+  restoreError = null,
 } = {}) {
   const originalLoad = Module._load;
   const calls = {
@@ -56,6 +58,8 @@ function loadOrderController({
     refundCreate: [],
     variantFindById: [],
     inventoryRestore: [],
+    updateOne: [],
+    refundOptions: [],
     sequence: [],
   };
 
@@ -64,9 +68,10 @@ function loadOrderController({
       return function Stripe() {
         return {
           refunds: {
-            create: async (payload) => {
+            create: async (payload, options) => {
               calls.sequence.push('refund');
               calls.refundCreate.push(payload);
+              calls.refundOptions.push(options);
               if (refundError) throw refundError;
               return { id: 're_test' };
             },
@@ -94,12 +99,16 @@ function loadOrderController({
           };
           return query;
         },
+        async updateOne(filter, update) {
+          calls.updateOne.push({ filter, update });
+          return { modifiedCount: transitionClaimFails && update.$set?.transitionLockedAt ? 0 : 1 };
+        },
         findOne(filter) {
           calls.findOne.push(filter);
           return {
             populate(field, select) {
               calls.populate.push({ field, select });
-              return Promise.resolve(order);
+              return this;
             },
             then(resolve, reject) {
               return Promise.resolve(order).then(resolve, reject);
@@ -126,6 +135,7 @@ function loadOrderController({
         restoreInventoryForOrder: async (targetOrder) => {
           calls.sequence.push('inventory_restore');
           calls.inventoryRestore.push(targetOrder._id);
+          if (restoreError) throw restoreError;
           const quantity = Number(targetOrder.items?.[0]?.quantity || 0);
           if (variant?.sizes?.[0]) variant.sizes[0].stock += quantity;
           if (variant?.save) await variant.save();
@@ -330,4 +340,132 @@ test('cancelOrderByUser restores accepted-order stock after successful refund', 
   assert.equal(calls.email[0][1], 'customer@example.com');
   assert.equal(calls.email[0][3], 'order_cancelled');
   assert.equal(order.getSaveCalls(), 2);
+});
+
+// --- Transition lock, refund idempotency and restock on reject (post-merge hardening) ---
+
+test('cancelOrderByUser returns 409 and never refunds when a concurrent transition holds the order', async () => {
+  const order = makeOrder({ status: 'accepted', paymentStatus: 'paid', paymentId: 'pi_race' });
+  const { controller, calls } = loadOrderController({ order, transitionClaimFails: true });
+  const res = mockResponse();
+
+  await controller.cancelOrderByUser(
+    { user: { _id: 'customer-1' }, params: { orderId: 'order-1' } },
+    res
+  );
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.code, 'ORDER_TRANSITION_CONFLICT');
+  assert.equal(calls.refundCreate.length, 0);
+  assert.equal(order.getSaveCalls(), 0);
+  // The claim is conditional on the status that was checked in memory.
+  assert.deepEqual(calls.updateOne[0].filter.status, { $in: ['ordered', 'accepted'] });
+  assert.equal(calls.updateOne[0].filter._id, 'order-1');
+});
+
+test('cancelOrderByUser refunds with a per-order idempotency key and releases the lock', async () => {
+  const order = makeOrder({ status: 'accepted', paymentStatus: 'paid', paymentId: 'pi_ok' });
+  const { controller, calls } = loadOrderController({ order });
+  const res = mockResponse();
+
+  await controller.cancelOrderByUser(
+    { user: { _id: 'customer-1' }, params: { orderId: 'order-1' } },
+    res
+  );
+
+  assert.equal(res.body.success, true);
+  assert.deepEqual(calls.refundOptions, [{ idempotencyKey: 'refund:order-1:order_cancelled_by_user' }]);
+  const release = calls.updateOne.find((c) => c.update.$set.transitionLockedAt === null);
+  assert.ok(release, 'lock must be released');
+  assert.ok(release.filter.transitionLockedAt instanceof Date, 'release matches the claim timestamp');
+});
+
+test('cancelOrderByUser still saves cancelled/refunded state when stock restore fails after refund', async () => {
+  const decrementedAt = new Date('2026-08-06T00:00:00Z');
+  const order = makeOrder({
+    status: 'accepted',
+    paymentStatus: 'paid',
+    paymentId: 'pi_ok',
+    inventoryDecrementedAt: decrementedAt,
+    items: [{ variantId: 'variant-1', size: 'M', quantity: 1 }],
+  });
+  const { controller, calls } = loadOrderController({ order, restoreError: new Error('db blip') });
+  const res = mockResponse();
+
+  await controller.cancelOrderByUser(
+    { user: { _id: 'customer-1' }, params: { orderId: 'order-1' } },
+    res
+  );
+
+  assert.equal(calls.refundCreate.length, 1);
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.inventoryRestore, 'failed');
+  assert.equal(order.status, 'cancelled');
+  assert.equal(order.paymentStatus, 'refunded');
+  assert.ok(order.getSaveCalls() >= 1, 'order must be persisted');
+  // Left set so the order can be found for manual stock reconciliation.
+  assert.equal(order.inventoryDecrementedAt, decrementedAt);
+});
+
+test('rejectOrder restores stock decremented at payment after refunding', async () => {
+  const order = makeOrder({
+    status: 'ordered',
+    paymentStatus: 'paid',
+    paymentId: 'pi_paid',
+    totalAmount: 40,
+    businessId: { stripeConnectAccountId: 'acct_vendor' },
+    inventoryDecrementedAt: new Date('2026-08-06T00:00:00Z'),
+    items: [{ variantId: 'variant-1', size: 'M', quantity: 2 }],
+  });
+  const { controller, calls } = loadOrderController({ order });
+  const res = mockResponse();
+
+  await controller.rejectOrder(
+    { user: { _id: 'vendor-1' }, params: { orderId: 'order-1' } },
+    res
+  );
+
+  assert.equal(res.body.success, true, JSON.stringify(res.body));
+  assert.deepEqual(calls.sequence.slice(0, 2), ['refund', 'inventory_restore']);
+  assert.deepEqual(calls.inventoryRestore, ['order-1']);
+  assert.equal(res.body.inventoryRestore, 'restored');
+  assert.equal(order.inventoryDecrementedAt, undefined);
+  assert.equal(order.status, 'rejected');
+  assert.equal(order.paymentStatus, 'refunded');
+  assert.deepEqual(calls.refundOptions, [{ idempotencyKey: 'refund:order-1:rejected_by_merchant' }]);
+});
+
+test('rejectOrder does not restore stock when the refund fails', async () => {
+  const order = makeOrder({
+    status: 'ordered',
+    paymentStatus: 'paid',
+    paymentId: 'pi_paid',
+    totalAmount: 40,
+    businessId: { stripeConnectAccountId: 'acct_vendor' },
+    inventoryDecrementedAt: new Date('2026-08-06T00:00:00Z'),
+  });
+  const { controller, calls } = loadOrderController({ order, refundError: new Error('Stripe down') });
+  const res = mockResponse();
+
+  await controller.rejectOrder(
+    { user: { _id: 'vendor-1' }, params: { orderId: 'order-1' } },
+    res
+  );
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(calls.inventoryRestore, []);
+  assert.equal(order.getSaveCalls(), 0);
+  const release = calls.updateOne.find((c) => c.update.$set.transitionLockedAt === null);
+  assert.ok(release, 'lock must be released on the failure path too');
+});
+
+test('rejectOrder returns 409 when the order changed after it was read', async () => {
+  const order = makeOrder({ status: 'ordered', paymentStatus: 'paid', paymentId: 'pi_paid', businessId: {} });
+  const { controller, calls } = loadOrderController({ order, transitionClaimFails: true });
+  const res = mockResponse();
+
+  await controller.rejectOrder({ user: { _id: 'vendor-1' }, params: { orderId: 'order-1' } }, res);
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(calls.refundCreate.length, 0);
 });

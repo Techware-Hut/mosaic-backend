@@ -260,6 +260,15 @@ const orderSchema = new Schema(
       type: Date,
       default: null,
     },
+    /**
+     * Short-lived lock held while a status transition (accept/reject/ship/
+     * deliver/return/cancel) runs, so two concurrent transitions cannot both
+     * pass the current-status check. Stale locks expire (lib/orders/orderTransitionLock).
+     */
+    transitionLockedAt: {
+      type: Date,
+      default: null,
+    },
     /** Set once when a reservation/sale is released back to stock. */
     inventoryRestoredAt: {
       type: Date,
