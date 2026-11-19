@@ -67,6 +67,12 @@ try {
 // Mongo falls back to the "test" database when the URI has no path.
 const REFUSED_DB_NAMES = new Set(['', 'test', 'admin', 'local', 'config']);
 
+// Hard-coded, non-configurable target rules. These apply before (and
+// regardless of) FIXTURE_ALLOWED_DB_NAMES, so an operator allowlist can never
+// widen the seeder onto a non-staging database.
+const PRODUCTION_DB_NAMES = new Set(['mosaic']);
+const STAGING_DB_NAME_RE = /^.+_staging$/;
+
 const EXACT_ADDRESS_RE = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;
 const DOMAIN_SUFFIX_RE = /^@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/;
 
@@ -230,6 +236,16 @@ function assertPreconditions({ env, emails }) {
         'DB_NAME_REFUSED',
         `database name "${target.dbName || '(none)'}" is not allowed; the URI must name the staging database`
       );
+    } else if (PRODUCTION_DB_NAMES.has(target.dbName.toLowerCase())) {
+      fail(
+        'DB_NAME_PRODUCTION',
+        `database name "${target.dbName}" is a production database; the seeder never runs against it`
+      );
+    } else if (!STAGING_DB_NAME_RE.test(target.dbName)) {
+      fail(
+        'DB_NAME_NOT_STAGING',
+        `database name "${target.dbName}" does not end with "_staging"; the seeder only runs against staging databases`
+      );
     } else {
       const allowedNames = new Set(parseNameList(env.FIXTURE_ALLOWED_DB_NAMES));
       if (allowedNames.size === 0) {
@@ -269,6 +285,8 @@ module.exports = {
   resolveDriverConnectionStringParser,
   REQUIRED_RELEASE_ENVIRONMENT,
   REQUIRED_CONFIRM_VALUE,
+  PRODUCTION_DB_NAMES,
+  STAGING_DB_NAME_RE,
   GuardError,
   parseMongoTarget,
   parseHostList,

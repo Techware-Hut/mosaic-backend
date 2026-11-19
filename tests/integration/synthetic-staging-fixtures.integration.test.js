@@ -11,7 +11,7 @@ const {
   MAX_RELATED_PER_COLLECTION,
 } = require('../../scripts/fixtures/lib/seeder');
 
-const DB_NAME = 'mbh_fixture_it';
+const DB_NAME = 'mbh_fixture_it_staging';
 
 const EXPECTED_COUNTS = {
   User: 5,
@@ -184,6 +184,19 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
     assert.equal(await totalDocuments(), before);
   });
 
+  it('refuses the production database name even when allowlisted, writing nothing', async () => {
+    const before = await totalDocuments();
+    const prodUri = env.MONGODB_URI.replace(new RegExp(`/${DB_NAME}$`), '/mosaic');
+    assert.notEqual(prodUri, env.MONGODB_URI);
+    const { code, output } = await run(['--apply'], {
+      MONGODB_URI: prodUri,
+      FIXTURE_ALLOWED_DB_NAMES: `mosaic,${DB_NAME}`,
+    });
+    assert.equal(code, 2);
+    assert.match(output, /DB_NAME_PRODUCTION/);
+    assert.equal(await totalDocuments(), before);
+  });
+
   it('refuses when the in-memory host is not allowlisted, writing nothing', async () => {
     const before = await totalDocuments();
     const { code, output } = await run(['--apply'], { FIXTURE_ALLOWED_DB_HOSTS: 'db.example.test' });
@@ -199,7 +212,7 @@ describe('synthetic staging fixture seeder (in-memory Mongo)', () => {
     assert.equal(code, 0, output);
     assert.match(output, new RegExp(`${EXPECTED_TOTAL} to create, 0 already present`));
     assert.match(output, /Dry run: nothing was written/);
-    assert.match(output, /host\(s\) 127\.0\.0\.1, db "mbh_fixture_it"/);
+    assert.match(output, /host\(s\) 127\.0\.0\.1, db "mbh_fixture_it_staging"/);
     assert.ok(!output.includes(env.FIXTURE_PASSWORD));
     assert.equal(await totalDocuments(), before);
     assert.deepEqual(await schemaShape(), shapeBefore, 'no collections or indexes created');

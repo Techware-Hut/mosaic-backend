@@ -22,7 +22,9 @@
  *   FIXTURE_SEED_CONFIRM=synthetic-staging
  *   MONGODB_URI                 must name the database; its host(s) must be listed in
  *   FIXTURE_ALLOWED_DB_HOSTS    comma-separated host names (ports ignored, case-insensitive)
- *   FIXTURE_ALLOWED_DB_NAMES    comma-separated database names (exact match)
+ *   FIXTURE_ALLOWED_DB_NAMES    comma-separated database names (exact match); independently
+ *                               of this list the name must end with "_staging" and must
+ *                               never be the production database name (hard-coded)
  *   MAIL_RECIPIENT_ALLOWLIST    must cover every fixture email (fails closed if unset)
  *
  * Fixture emails (env or CLI flag; no defaults):

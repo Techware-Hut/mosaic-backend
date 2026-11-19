@@ -39,9 +39,9 @@ function goodEnv(overrides = {}) {
   return {
     RELEASE_ENVIRONMENT: 'staging',
     FIXTURE_SEED_CONFIRM: 'synthetic-staging',
-    MONGODB_URI: `mongodb+srv://qa_user:${SECRET}@cluster0.example.test/mbh_fixture_db?retryWrites=true`,
+    MONGODB_URI: `mongodb+srv://qa_user:${SECRET}@cluster0.example.test/mbh_fixture_staging?retryWrites=true`,
     FIXTURE_ALLOWED_DB_HOSTS: 'cluster0.example.test',
-    FIXTURE_ALLOWED_DB_NAMES: 'mbh_fixture_db',
+    FIXTURE_ALLOWED_DB_NAMES: 'mbh_fixture_staging',
     MAIL_RECIPIENT_ALLOWLIST: Object.values(EMAILS).join(','),
     FIXTURE_EMAIL_BUYER: EMAILS.buyer,
     FIXTURE_EMAIL_VENDOR_A: EMAILS.vendorA,
@@ -89,7 +89,7 @@ test('parseMongoTarget rejects malformed URIs without echoing any part of them',
 test('hosts are compared case-insensitively and ignore whitespace in the allowlist', () => {
   const target = assertPreconditions({
     env: goodEnv({
-      MONGODB_URI: 'mongodb://CLUSTER0.Example.TEST:27017/mbh_fixture_db',
+      MONGODB_URI: 'mongodb://CLUSTER0.Example.TEST:27017/mbh_fixture_staging',
       FIXTURE_ALLOWED_DB_HOSTS: '  Cluster0.EXAMPLE.test , other.example.test ',
     }),
     emails: EMAILS,
@@ -107,7 +107,7 @@ test('refuses when FIXTURE_ALLOWED_DB_NAMES is unset', () => {
 });
 
 test('refuses a database name not exactly in FIXTURE_ALLOWED_DB_NAMES', () => {
-  for (const name of ['mosaic_prod', 'MBH_FIXTURE_DB', 'mbh_fixture_db2']) {
+  for (const name of ['other_staging', 'mbh_fixture2_staging', 'xmbh_fixture_staging']) {
     const codes = failureCodes(() =>
       assertPreconditions({
         env: goodEnv({ MONGODB_URI: `mongodb://cluster0.example.test/${name}` }),
@@ -118,9 +118,50 @@ test('refuses a database name not exactly in FIXTURE_ALLOWED_DB_NAMES', () => {
   }
 });
 
+test('refuses the production database name even when the env allowlists include it', () => {
+  for (const name of ['mosaic', 'Mosaic']) {
+    const codes = failureCodes(() =>
+      assertPreconditions({
+        env: goodEnv({
+          MONGODB_URI: `mongodb://cluster0.example.test/${name}`,
+          FIXTURE_ALLOWED_DB_NAMES: `${name},mosaic,mbh_fixture_staging`,
+        }),
+        emails: EMAILS,
+      })
+    );
+    assert.deepEqual(codes, ['DB_NAME_PRODUCTION']);
+  }
+});
+
+test('refuses any database name that does not end with _staging, regardless of env allowlists', () => {
+  for (const name of ['foo', 'mosaic_prod', 'mosaic_staging_old', 'staging', '_staging', 'MOSAIC_STAGING']) {
+    const codes = failureCodes(() =>
+      assertPreconditions({
+        env: goodEnv({
+          MONGODB_URI: `mongodb://cluster0.example.test/${name}`,
+          FIXTURE_ALLOWED_DB_NAMES: name,
+        }),
+        emails: EMAILS,
+      })
+    );
+    assert.deepEqual(codes, ['DB_NAME_NOT_STAGING'], name);
+  }
+});
+
+test('allows mosaic_staging when it is allowlisted', () => {
+  const target = assertPreconditions({
+    env: goodEnv({
+      MONGODB_URI: 'mongodb://cluster0.example.test/mosaic_staging',
+      FIXTURE_ALLOWED_DB_NAMES: 'mosaic_staging',
+    }),
+    emails: EMAILS,
+  });
+  assert.equal(target.dbName, 'mosaic_staging');
+});
+
 test('all guards pass with a complete staging configuration', () => {
   const target = assertPreconditions({ env: goodEnv(), emails: EMAILS });
-  assert.deepEqual(target, { hosts: ['cluster0.example.test'], dbName: 'mbh_fixture_db' });
+  assert.deepEqual(target, { hosts: ['cluster0.example.test'], dbName: 'mbh_fixture_staging' });
 });
 
 test('refuses unless RELEASE_ENVIRONMENT is exactly staging', () => {
@@ -152,7 +193,7 @@ test('refuses when any database host is not allowlisted', () => {
   const codes = failureCodes(() =>
     assertPreconditions({
       env: goodEnv({
-        MONGODB_URI: 'mongodb://h1.example.test,other.example.test/mbh_fixture_db',
+        MONGODB_URI: 'mongodb://h1.example.test,other.example.test/mbh_fixture_staging',
         FIXTURE_ALLOWED_DB_HOSTS: 'h1.example.test',
       }),
       emails: EMAILS,
