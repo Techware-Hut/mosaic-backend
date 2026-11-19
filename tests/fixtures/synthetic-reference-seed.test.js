@@ -19,9 +19,9 @@ function goodEnv(overrides = {}) {
   return {
     RELEASE_ENVIRONMENT: 'staging',
     FIXTURE_SEED_CONFIRM: 'synthetic-staging',
-    MONGODB_URI: `mongodb+srv://qa_user:${SECRET}@cluster0.example.test/mbh_reference_db?retryWrites=true`,
+    MONGODB_URI: `mongodb+srv://qa_user:${SECRET}@cluster0.example.test/mbh_reference_staging?retryWrites=true`,
     FIXTURE_ALLOWED_DB_HOSTS: 'cluster0.example.test',
-    FIXTURE_ALLOWED_DB_NAMES: 'mbh_reference_db',
+    FIXTURE_ALLOWED_DB_NAMES: 'mbh_reference_staging',
     ...overrides,
   };
 }
@@ -52,6 +52,22 @@ const REFUSALS = [
   ['db name allowlist unset', { FIXTURE_ALLOWED_DB_NAMES: undefined }, 'DB_NAME_ALLOWLIST'],
   ['db name not allowlisted', { FIXTURE_ALLOWED_DB_NAMES: 'mbh_other' }, 'DB_NAME_NOT_ALLOWED'],
   [
+    'db name is the production database, even when allowlisted',
+    {
+      MONGODB_URI: `mongodb+srv://qa_user:${SECRET}@cluster0.example.test/mosaic?retryWrites=true`,
+      FIXTURE_ALLOWED_DB_NAMES: 'mosaic,mbh_reference_staging',
+    },
+    'DB_NAME_PRODUCTION',
+  ],
+  [
+    'db name does not end with _staging, even when allowlisted',
+    {
+      MONGODB_URI: `mongodb+srv://qa_user:${SECRET}@cluster0.example.test/foo?retryWrites=true`,
+      FIXTURE_ALLOWED_DB_NAMES: 'foo',
+    },
+    'DB_NAME_NOT_STAGING',
+  ],
+  [
     'URI without database name',
     { MONGODB_URI: `mongodb+srv://qa_user:${SECRET}@cluster0.example.test/?retryWrites=true` },
     'DB_NAME_REFUSED',
@@ -74,10 +90,26 @@ for (const [label, overrides, code] of REFUSALS) {
   });
 }
 
+test('only an explicit requireMailAllowlist=false skips the mail allowlist; other falsy values still require it', () => {
+  const env = goodEnv({ MAIL_RECIPIENT_ALLOWLIST: undefined });
+  delete env.MAIL_RECIPIENT_ALLOWLIST;
+  for (const value of [null, 0, '', undefined, 'false']) {
+    assert.throws(
+      () => assertPreconditions({ env, emails: {}, requireMailAllowlist: value }),
+      (err) =>
+        err instanceof GuardError &&
+        err.failures.map((f) => f.code).includes('MAIL_ALLOWLIST_UNSET'),
+      `requireMailAllowlist=${JSON.stringify(value)} must still require the allowlist`
+    );
+  }
+  const target = assertPreconditions({ env, emails: {}, requireMailAllowlist: false });
+  assert.equal(target.dbName, 'mbh_reference_staging');
+});
+
 test('reference seeder does not require MAIL_RECIPIENT_ALLOWLIST; fixture seeder guard still does', () => {
   const env = goodEnv();
   const target = assertPreconditions({ env, emails: {}, requireMailAllowlist: false });
-  assert.deepEqual(target, { hosts: ['cluster0.example.test'], dbName: 'mbh_reference_db' });
+  assert.deepEqual(target, { hosts: ['cluster0.example.test'], dbName: 'mbh_reference_staging' });
 
   assert.throws(
     () => assertPreconditions({ env, emails: {} }),

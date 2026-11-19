@@ -89,7 +89,7 @@ describe('synthetic reference data seeder (in-memory Mongo)', () => {
   });
 
   it('dry-run on an empty database plans every entry and writes nothing', async () => {
-    const db = 'mbh_ref_dry';
+    const db = 'mbh_ref_dry_staging';
     const { code, output } = await run([], envFor(db));
     assert.equal(code, 0, output);
     assert.match(output, new RegExp(`Summary: ${EXPECTED_TOTAL} to create, 0 already present, 0 skipped`));
@@ -104,7 +104,7 @@ describe('synthetic reference data seeder (in-memory Mongo)', () => {
   });
 
   it('apply is idempotent: second run creates nothing and counts are unchanged', async () => {
-    const db = 'mbh_ref_apply';
+    const db = 'mbh_ref_apply_staging';
     const first = await run(['--apply'], envFor(db));
     assert.equal(first.code, 0, first.output);
     assert.match(first.output, new RegExp(`Applied: ${EXPECTED_TOTAL} created, 0 already present, 0 skipped`));
@@ -122,7 +122,7 @@ describe('synthetic reference data seeder (in-memory Mongo)', () => {
   });
 
   it('every stored document validates against its schema, is tagged, and subcategories point at seeded parents', async () => {
-    const db = 'mbh_ref_apply';
+    const db = 'mbh_ref_apply_staging';
     const models = loadModels();
     const spec = buildReferenceSpec();
     await withDb(db, async (d) => {
@@ -143,7 +143,7 @@ describe('synthetic reference data seeder (in-memory Mongo)', () => {
   });
 
   it('never overwrites a modified reference document', async () => {
-    const db = 'mbh_ref_apply';
+    const db = 'mbh_ref_apply_staging';
     await withDb(db, (d) =>
       d.collection(collectionOf('SubscriptionPlan')).updateOne(
         { fixtureKey: 'subscription-plan:launch-plan' },
@@ -159,7 +159,7 @@ describe('synthetic reference data seeder (in-memory Mongo)', () => {
   });
 
   it('skips (and leaves untouched) documents it did not create, plus their subcategories', async () => {
-    const db = 'mbh_ref_existing';
+    const db = 'mbh_ref_existing_staging';
     const theirs = {
       plan: { _id: new mongoose.Types.ObjectId(), name: 'Launch Plan', price: 1, limits: {} },
       category: { _id: new mongoose.Types.ObjectId(), name: 'Home & Living', slug: 'home-living' },
@@ -192,7 +192,7 @@ describe('synthetic reference data seeder (in-memory Mongo)', () => {
   });
 
   it('refuses before connecting when the database name is not allowlisted', async () => {
-    const db = 'mbh_ref_refused';
+    const db = 'mbh_ref_refused_staging';
     const { code, output } = await run(['--apply'], envFor(db, { FIXTURE_ALLOWED_DB_NAMES: 'mbh_other' }));
     assert.equal(code, 2);
     assert.match(output, /DB_NAME_NOT_ALLOWED/);
@@ -200,7 +200,7 @@ describe('synthetic reference data seeder (in-memory Mongo)', () => {
   });
 
   it('unblocks the fixture seeder: after reference apply its dry-run finds the Launch Plan', async () => {
-    const db = 'mbh_ref_then_fixtures';
+    const db = 'mbh_ref_then_fixtures_staging';
     const fixtureEnv = envFor(db, {
       MAIL_RECIPIENT_ALLOWLIST: '@example.test',
       FIXTURE_EMAIL_BUYER: 'qa+buyer@example.test',

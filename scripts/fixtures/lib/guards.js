@@ -194,7 +194,7 @@ function maskEmail(email) {
  * @param {Record<string,string>} [options.emails] role -> fixture email
  * @param {boolean} [options.requireMailAllowlist=true] the reference-data
  *   seeder creates no accounts and sends no mail, so it passes false; every
- *   other check is unchanged.
+ *   other check is unchanged. Only the boolean false opts out.
  * @returns {{ hosts: string[], dbName: string }} the safe-to-print target
  * @throws {GuardError}
  */
@@ -266,7 +266,9 @@ function assertPreconditions({ env, emails, requireMailAllowlist = true }) {
   }
 
   const allowlist = parseMailAllowlist(env.MAIL_RECIPIENT_ALLOWLIST);
-  if (!requireMailAllowlist) {
+  // Only an explicit boolean false opts out; any other value (null, 0, '',
+  // a string) keeps the allowlist requirement, so the guard fails closed.
+  if (requireMailAllowlist === false) {
     // Skipped by the caller (no fixture emails to cover).
   } else if (allowlist.size === 0) {
     fail('MAIL_ALLOWLIST_UNSET', 'MAIL_RECIPIENT_ALLOWLIST has no valid entry');
