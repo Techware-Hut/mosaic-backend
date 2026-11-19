@@ -107,3 +107,17 @@ test('post-deploy probes connect to the deployed environment, not whatever DNS p
   assert.ok(curls.length >= 3, 'expected the health, identity and auth probes');
   for (const line of curls) assert.match(line, /\$CURL_ROUTE/, `probe must use the deployed-environment route: ${line.trim()}`);
 });
+
+test('isolation probe enforces staging DB, Stripe test mode and mail/SMS guards once the self-check ships', () => {
+  const steps = deploySteps();
+  const iso = indexOfStep(steps, 'Post-deploy isolation probe');
+  assert.ok(iso > indexOfStep(steps, 'Route probes to the deployed environment'));
+  const body = steps[iso].body;
+  assert.match(body, /utils\/isolationSelfCheck\.js/);
+  assert.match(body, /\/api\/ready/);
+  assert.match(body, /"mosaic_staging"/);
+  assert.match(body, /mode !== "test"/);
+  assert.match(body, /\["mail", "sms"\]/);
+  assert.match(body, /policy === "off"/);
+  assert.doesNotMatch(body, /continue-on-error|\|\| true/);
+});

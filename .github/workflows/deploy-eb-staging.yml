@@ -267,6 +267,42 @@ jobs:
           echo "Staging /api/health did not report release ${RELEASE_SHA} in environment staging" >&2
           exit 1
 
+      - name: Post-deploy isolation probe
+        # Once the deployed code ships the isolation self-check (utils/isolationSelfCheck.js),
+        # staging must prove isolation before the deploy counts as good: staging marker on,
+        # staging-only database, Stripe test mode, and mail/SMS recipient guards not "off".
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [ ! -f utils/isolationSelfCheck.js ]; then
+            echo "::notice::Deployed code predates the isolation self-check; skipping isolation probe."
+            exit 0
+          fi
+          for i in 1 2 3 4 5; do
+            if body=$(curl -sS $CURL_ROUTE --fail --max-time 10 "${STAGING_API_URL}/api/ready"); then
+              if node -e '
+                const iso = (JSON.parse(process.argv[1]) || {}).isolation || {};
+                const problems = [];
+                if (iso.stagingMarker !== true) problems.push("stagingMarker is not true");
+                if ((iso.database || {}).name !== "mosaic_staging") problems.push("database is not mosaic_staging");
+                if ((iso.stripe || {}).mode !== "test") problems.push("stripe mode is not test");
+                for (const ch of ["mail", "sms"]) {
+                  const policy = (iso[ch] || {}).recipientPolicy;
+                  if (!policy || policy === "off") problems.push(ch + " recipient guard is off");
+                }
+                if (problems.length) { console.error(problems.join("; ")); process.exit(1); }
+                console.log("Isolation verified");
+              ' "$body"; then
+                exit 0
+              fi
+            else
+              echo "Attempt $i: ready request failed"
+            fi
+            sleep 15
+          done
+          echo "Staging isolation could not be verified" >&2
+          exit 1
+
       - name: Post-deploy auth probe
         run: |
           status=$(curl -s $CURL_ROUTE -o /dev/null -w "%{http_code}" \
