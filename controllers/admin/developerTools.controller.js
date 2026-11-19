@@ -131,10 +131,18 @@ function computeMatchToken(sortedIds) {
   return crypto.createHash('sha256').update(sortedIds.join(',')).digest('hex');
 }
 
+/**
+ * Parse the dry-run match count the caller confirms. Returns a non-negative
+ * integer, or null when the value is missing, empty or not a non-negative
+ * integer (the apply path requires it, so null is always a refusal there).
+ */
 function parseExpectedCount(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const n = typeof value === 'number' ? value : Number(String(value).trim());
-  if (!Number.isInteger(n) || n < 0) return NaN;
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  const text = String(value).trim();
+  if (text === '') return null;
+  const n = typeof value === 'number' ? value : Number(text);
+  if (!Number.isInteger(n) || n < 0) return null;
   return n;
 }
 
@@ -417,7 +425,7 @@ exports.cleanupDeveloperBusinesses = async (req, res) => {
         data,
         message: exceedsBatchLimit
           ? `Dry run only — no records deleted. ${matchedCount} matches exceed the ${MAX_CLEANUP_BATCH}-business cleanup limit; narrow the patterns.`
-          : 'Dry run only — no records deleted. To delete, resend with dryRun=false and the matchToken (and expectedCount) from this dry run.',
+          : 'Dry run only — no records deleted. To delete, resend with dryRun=false plus the matchToken and expectedCount (matchedCount) from this dry run.',
       });
     }
 
@@ -436,15 +444,16 @@ exports.cleanupDeveloperBusinesses = async (req, res) => {
 
     const rawExpected = req.body?.expectedCount ?? req.query?.expectedCount;
     const expectedCount = parseExpectedCount(rawExpected);
-    if (Number.isNaN(expectedCount)) {
+    if (expectedCount === null) {
       return res.status(400).json({
         success: false,
-        code: 'EXPECTED_COUNT_INVALID',
-        message: 'expectedCount, when provided, must be a non-negative integer.',
+        code: 'EXPECTED_COUNT_REQUIRED',
+        message:
+          'expectedCount (a non-negative integer: the matchedCount from the dry run) is required when dryRun=false.',
         matchedCount,
       });
     }
-    if (expectedCount !== null && expectedCount !== matchedCount) {
+    if (expectedCount !== matchedCount) {
       return res.status(409).json({
         success: false,
         code: 'EXPECTED_COUNT_MISMATCH',

@@ -23,7 +23,8 @@ router.patch('/business/:id/status', developerTools.toggleDeveloperBusinessStatu
 router.delete('/business/:id', developerTools.deleteDeveloperBusiness);
 
 // POST /api/admin/developer/cleanup  (dryRun default true; explicit patterns
-// required; dryRun=false also requires expectedCount from a dry run)
+// required; dryRun=false requires the dry run's matchToken and expectedCount,
+// and is refused with 400 EXPECTED_COUNT_REQUIRED without a valid expectedCount)
 router.post('/cleanup', developerTools.cleanupDeveloperBusinesses);
 
 module.exports = router;

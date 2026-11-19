@@ -220,7 +220,7 @@ test('regex special characters in patterns are matched literally', async () => {
   assert.deepEqual(res.body.matchedIds, [String(dotted._id)]);
 });
 
-test('delete without matchToken or with invalid expectedCount is refused', async () => {
+test('delete without matchToken or with missing/invalid expectedCount is refused', async () => {
   const agent = await adminAgent();
   await seedBusinesses(['QA-Synth Alpha']);
   await seedBulk(4);
@@ -232,15 +232,23 @@ test('delete without matchToken or with invalid expectedCount is refused', async
   assert.equal(noToken.body.code, 'MATCH_TOKEN_REQUIRED');
 
   const dry = await agent.post(CLEANUP_URL).send({ patterns: ['qa-synth'], dryRun: true });
-  for (const expectedCount of ['abc', 1.5, -1]) {
+  const missing = await agent.post(CLEANUP_URL).send({
+    patterns: ['qa-synth'],
+    dryRun: false,
+    matchToken: dry.body.matchToken,
+  });
+  assert.equal(missing.status, 400, 'expected 400 when expectedCount is omitted');
+  assert.equal(missing.body.code, 'EXPECTED_COUNT_REQUIRED');
+
+  for (const expectedCount of [null, '', '  ', 'abc', 1.5, '1.5', -1, true, [1], { n: 1 }]) {
     const res = await agent.post(CLEANUP_URL).send({
       patterns: ['qa-synth'],
       dryRun: false,
       matchToken: dry.body.matchToken,
       expectedCount,
     });
-    assert.equal(res.status, 400, `expected 400 for ${expectedCount}`);
-    assert.equal(res.body.code, 'EXPECTED_COUNT_INVALID');
+    assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(expectedCount)}`);
+    assert.equal(res.body.code, 'EXPECTED_COUNT_REQUIRED');
   }
 
   assert.equal(await Business.countDocuments({}), 5);
