@@ -12,9 +12,14 @@ concurrency:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  EB_APPLICATION_NAME: ${{ vars.EB_APPLICATION_NAME || 'mosaic-biz-hub-backend' }}
-  EB_ENVIRONMENT_NAME: mosaic-backend-staging
+  # Staging deploys only to its own Elastic Beanstalk application, which shares
+  # no application versions or bundles with production. Hard-coded on purpose:
+  # a repository variable must not be able to point this workflow at the
+  # production application.
+  EB_APPLICATION_NAME: mosaic-staging-backend
+  EB_ENVIRONMENT_NAME: mosaic-staging-api
   STAGING_API_URL: https://api-staging.mosaicbizhub.com
+  STAGING_API_HOST: api-staging.mosaicbizhub.com
 
 jobs:
   test:
@@ -196,6 +201,23 @@ jobs:
               }
             ' "$EXPECTED_VERSION_LABEL"
 
+      - name: Route probes to the deployed environment
+        # Probes must reach the environment that was just deployed, not whatever
+        # the public DNS name currently points at (before the DNS cutover it still
+        # points at the previous environment). curl --connect-to keeps the
+        # api-staging hostname for SNI/Host and certificate validation while
+        # connecting to this environment's own load balancer.
+        shell: bash
+        run: |
+          set -euo pipefail
+          cname=$(aws elasticbeanstalk describe-environments             --environment-names "$EB_ENVIRONMENT_NAME"             --query 'Environments[?Status!=`Terminated`] | [0].CNAME' --output text)
+          if ! [[ "$cname" =~ ^[a-z0-9.-]+\.elasticbeanstalk\.com$ ]]; then
+            echo "Could not resolve the CNAME of $EB_ENVIRONMENT_NAME (got: $cname)" >&2
+            exit 1
+          fi
+          echo "Probing ${STAGING_API_HOST} via ${cname}"
+          echo "CURL_ROUTE=--connect-to ${STAGING_API_HOST}:443:${cname}:443" >> "$GITHUB_ENV"
+
       - name: Post-deploy health probe
         run: |
           echo "Deployed commit: ${{ github.sha }}"
@@ -203,7 +225,7 @@ jobs:
           echo "Staging API: ${STAGING_API_URL}"
 
           for i in 1 2 3 4 5; do
-            status=$(curl -s -o /tmp/health.json -w "%{http_code}" "${STAGING_API_URL}/")
+            status=$(curl -s $CURL_ROUTE -o /tmp/health.json -w "%{http_code}" "${STAGING_API_URL}/")
 
             echo "Attempt $i: HTTP $status"
 
@@ -225,7 +247,7 @@ jobs:
         run: |
           set -uo pipefail
           for i in 1 2 3 4 5; do
-            if body=$(curl -sS --fail --max-time 10 "${STAGING_API_URL}/api/health"); then
+            if body=$(curl -sS $CURL_ROUTE --fail --max-time 10 "${STAGING_API_URL}/api/health"); then
               echo "Attempt $i: $body"
               if node -e '
                 const info = JSON.parse(process.argv[1]).release || {};
@@ -247,7 +269,7 @@ jobs:
 
       - name: Post-deploy auth probe
         run: |
-          status=$(curl -s -o /dev/null -w "%{http_code}" \
+          status=$(curl -s $CURL_ROUTE -o /dev/null -w "%{http_code}" \
             "${STAGING_API_URL}/api/users/auth/check")
 
           echo "Auth check (unauthenticated): HTTP $status"
