@@ -13,7 +13,9 @@
  * placeholders (see STRIPE_PLACEHOLDER_PREFIX) and are only meant for
  * Stripe TEST mode: the app's ensurePlanPrice() helper treats an unknown
  * price/product id as stale (Stripe "resource_missing") and creates a fresh
- * test-mode product and price on first subscription checkout.
+ * test-mode product and price on first subscription checkout. On hosted
+ * staging, ensurePlanPrice() refuses outright (no Stripe call) if the
+ * configured Stripe key is a live key.
  *
  * Each entry has a stable `key` ("<kind>:<slug>"); the seeder upserts by that
  * key and never touches a document it did not create.

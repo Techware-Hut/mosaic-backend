@@ -35,7 +35,8 @@
  * Stripe: plan stripePriceId / stripeProductId values are fake placeholders
  * (prefix "SYNTHETIC_TEST_ONLY_") for Stripe TEST mode only. Stripe is never
  * called by this script; on first checkout the app's ensurePlanPrice() sees the
- * placeholder as missing and creates a real test-mode product and price.
+ * placeholder as missing and creates a real test-mode product and price; on
+ * hosted staging it refuses (no Stripe call) when the Stripe key is a live key.
  *
  * Only the database host(s) and name are printed. Connection credentials are not.
  */
