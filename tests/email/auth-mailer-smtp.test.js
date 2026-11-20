@@ -244,7 +244,7 @@ for (const [label, urlEnv, expectedHome] of homepageCases) {
         const htmlTargets = [...message.html.matchAll(/href="([^"]+)"/g)]
           .map(([, href]) => href.replaceAll('&amp;', '&'));
         assert.ok(htmlTargets.includes(cta.href));
-        for (const legalPath of ['/terms', '/privacy', '/help']) {
+        for (const legalPath of ['/terms', '/privacy', '/contact']) {
           assert.ok(message.html.includes(`href="https://mosaicbizhub.com${legalPath}"`));
         }
       }
