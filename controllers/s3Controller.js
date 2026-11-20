@@ -1,4 +1,5 @@
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { buildS3ClientConfig } = require("../utils/s3ClientConfig");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const {
     ALLOWED_GENERIC_S3_UPLOAD_MIME_TYPES,
@@ -10,13 +11,7 @@ const {
 } = require("../utils/s3PresignedUploadContract");
 require("dotenv").config();
 
-const s3Client = new S3Client({
-    region: process.env.AWS_REGION,
-    credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    },
-});
+const s3Client = new S3Client(buildS3ClientConfig());
 
 exports.getPresignedUrl = async (req, res) => {
     // console.log("Generating presigned URL for S3 upload...");

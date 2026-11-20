@@ -1,15 +1,22 @@
-const REQUIRED_S3_UPLOAD_ENV_NAMES = [
-  'AWS_REGION',
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_S3_BUCKET',
-];
+// Region and bucket are always required. Static keys are optional: when both
+// AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are unset the S3 clients use the
+// AWS SDK default credential chain (e.g. an EC2 instance role), so their
+// absence is not a configuration error. If exactly one key is set the config is
+// partial and the missing counterpart is reported (see utils/s3ClientConfig.js).
+const REQUIRED_S3_UPLOAD_ENV_NAMES = ['AWS_REGION', 'AWS_S3_BUCKET'];
+const STATIC_S3_CREDENTIAL_ENV_NAMES = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'];
+
+function isMissing(value) {
+  return value === undefined || value === null || String(value).trim() === '';
+}
 
 function getMissingS3UploadEnvNames(env = process.env) {
-  return REQUIRED_S3_UPLOAD_ENV_NAMES.filter((name) => {
-    const value = env[name];
-    return value === undefined || value === null || String(value).trim() === '';
-  });
+  const missing = REQUIRED_S3_UPLOAD_ENV_NAMES.filter((name) => isMissing(env[name]));
+  const missingKeys = STATIC_S3_CREDENTIAL_ENV_NAMES.filter((name) => isMissing(env[name]));
+  if (missingKeys.length === 1) {
+    missing.push(missingKeys[0]);
+  }
+  return missing;
 }
 
 function buildUploadStorageConfigError(missingEnv) {
@@ -56,6 +63,7 @@ function buildUploadedMediaResponse(payload) {
 
 module.exports = {
   REQUIRED_S3_UPLOAD_ENV_NAMES,
+  STATIC_S3_CREDENTIAL_ENV_NAMES,
   buildUploadedMediaResponse,
   buildUploadStorageConfigError,
   getMissingS3UploadEnvNames,
