@@ -2,8 +2,10 @@
 const nodemailer = require("nodemailer");
 const { buildFrontendUrl, getFrontendLogoUrl } = require("./frontendUrl");
 const {
-  buildSmtpTransportConfig,
+  STAGING_SUPPRESSED_REASON,
+  createMosaicTransport,
   formatMosaicFromHeader,
+  isSuppressedMailResult,
 } = require("./smtpTransport");
 const { baseLayout, esc } = require("./emailTemplates/baseLayout");
 
@@ -20,7 +22,7 @@ const escapeHtml = (value = "") =>
     .replace(/'/g, "&#039;");
 
 // Configure transporter (swap service/config as needed)
-const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
+const transporter = createMosaicTransport(nodemailer);
 
 /**
  * HTML wrapper with logo header and CTA button
@@ -205,6 +207,32 @@ async function sendVendorNewOrderEmail(to, order) {
   });
 }
 
+// Identifiers only: never log the recipient address, in any environment.
+function orderStatusEmailLogIds(orderOrId, orderNo) {
+  const order = typeof orderOrId === "object" && orderOrId !== null ? orderOrId : null;
+  const user = order ? order.userId : null;
+  let userId;
+  if (user && typeof user === "object") {
+    if (user._id) userId = String(user._id);
+  } else if (user) {
+    userId = String(user);
+  }
+  return {
+    orderId: order?._id ? String(order._id) : undefined,
+    orderNo,
+    userId,
+  };
+}
+
+function logOrderStatusEmailResult(kind, orderOrId, orderNo, info) {
+  const ids = orderStatusEmailLogIds(orderOrId, orderNo);
+  if (isSuppressedMailResult(info)) {
+    console.log(`Order ${kind} email skipped`, { ...ids, reason: STAGING_SUPPRESSED_REASON });
+    return;
+  }
+  console.log(`Order ${kind} email sent`, { ...ids, messageId: info?.messageId });
+}
+
 async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
   const isAccepted = status === "accepted";
   const isObject = typeof orderOrId === 'object' && orderOrId !== null;
@@ -307,7 +335,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
 
     try {
       const info = await transporter.sendMail(mailOptions);
-      console.log("Order accepted email sent", { to, orderNo, messageId: info?.messageId });
+      logOrderStatusEmailResult("accepted", orderOrId, orderNo, info);
       return info;
     } catch (err) {
       console.error("Error sending order accepted email:", err);
@@ -406,7 +434,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
 
   try {
     const info = await transporter.sendMail(mailOptions);
-    console.log("Order rejected email sent", { to, orderNo, messageId: info?.messageId });
+    logOrderStatusEmailResult("rejected", orderOrId, orderNo, info);
     return info;
   } catch (err) {
     console.error("Error sending email:", err);
@@ -669,7 +697,8 @@ async function sendOrderLifecycleEmail(to, order, event) {
     lines: [...copy.textLines, `View your orders: ${orderUrl}`],
   });
 
-  await transporter.sendMail({
+  // Return the result so lifecycle evidence can tell a staging suppression from a send.
+  return transporter.sendMail({
     from: formatMosaicFromHeader(),
     to,
     subject: `${APP_NAME} - ${copy.title}`,

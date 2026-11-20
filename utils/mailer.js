@@ -4,7 +4,7 @@ const nodemailer = require('nodemailer');
 const { buildFrontendUrl } = require('./frontendUrl');
 const { deliverAuthOtpEmail } = require('./authEmailDelivery');
 const {
-  buildSmtpTransportConfig,
+  createMosaicTransport,
   formatMosaicFromHeader,
 } = require('./smtpTransport');
 const { baseLayout, esc } = require('./emailTemplates/baseLayout');
@@ -15,14 +15,14 @@ let authVerifyPromise = null;
 
 function getTransporter() {
   if (!transporter) {
-    transporter = nodemailer.createTransport(buildSmtpTransportConfig());
+    transporter = createMosaicTransport(nodemailer);
   }
   return transporter;
 }
 
 function getAuthTransporter() {
   if (!authTransporter) {
-    authTransporter = nodemailer.createTransport(buildSmtpTransportConfig());
+    authTransporter = createMosaicTransport(nodemailer);
   }
   return authTransporter;
 }

@@ -1,11 +1,11 @@
 const ContactInquiry = require('../models/ContactInquiry');
 const nodemailer = require('nodemailer');
 const {
-  buildSmtpTransportConfig,
+  createMosaicTransport,
   formatMosaicFromHeader,
 } = require('../utils/smtpTransport');
 
-const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
+const transporter = createMosaicTransport(nodemailer);
 
 exports.createContactInquiry = async (req, res) => {
   try {
