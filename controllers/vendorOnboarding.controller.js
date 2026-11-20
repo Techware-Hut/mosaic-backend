@@ -1715,7 +1715,9 @@ exports.getStatusByApplicationId = async (req, res) => {
                 // ✅ PROFILE + BUSINESS SYNCED - Move to Stage 4
                 syncedBusinessId = syncedBusiness._id;
                 currentStage = 4;
-                status = '✅ Onboarding Complete!';
+                // Stage 4 of 6: profile is done, but listings, payouts and final
+                // review remain, so this must not read as "complete".
+                status = 'Stage 4 - Add Products/Services';
                 nextAction = 'Proceed with product/service/food upload';
               } else {
                 // ❌ BUSINESS SYNC MISSING - keep vendor at Stage 3 with an

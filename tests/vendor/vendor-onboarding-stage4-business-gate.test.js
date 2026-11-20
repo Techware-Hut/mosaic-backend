@@ -328,7 +328,8 @@ test('status endpoint reports Stage 4 ready when Business exists (existing vendo
   assert.equal(res.body.success, true);
   const { data } = res.body;
   assert.equal(data.currentStage, 4);
-  assert.match(data.status, /Onboarding Complete/);
+  assert.equal(data.status, 'Stage 4 - Add Products/Services');
+  assert.doesNotMatch(data.status, /Complete/i);
   assert.equal(data.details.stage3.isComplete, true);
   assert.equal(data.details.stage3.businessSyncFailed, false);
   assert.equal(data.details.stage3.businessId, businessId);
