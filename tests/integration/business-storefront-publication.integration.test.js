@@ -17,12 +17,15 @@ const {
   seedVendorOnboarding,
 } = require('./helpers/factories');
 const User = require('../../models/User');
+const Business = require('../../models/Business');
 const Product = require('../../models/Product');
 const ProductVariant = require('../../models/ProductVariant');
 const Service = require('../../models/Service');
 const Food = require('../../models/Food');
+const originalProductListingLimitOverride = process.env.PRODUCT_LISTING_LIMIT_OVERRIDE;
 
 test.before(async () => {
+  process.env.PRODUCT_LISTING_LIMIT_OVERRIDE = '10';
   await startHarness();
 });
 
@@ -31,7 +34,15 @@ test.afterEach(async () => {
 });
 
 test.after(async () => {
-  await stopHarness();
+  try {
+    await stopHarness();
+  } finally {
+    if (originalProductListingLimitOverride === undefined) {
+      delete process.env.PRODUCT_LISTING_LIMIT_OVERRIDE;
+    } else {
+      process.env.PRODUCT_LISTING_LIMIT_OVERRIDE = originalProductListingLimitOverride;
+    }
+  }
 });
 
 async function setupVendorWithDraftProduct(agent, businessOverrides = {}) {
@@ -435,4 +446,96 @@ test('vendor publish-storefront publishes draft food listings and public food de
 
   const afterDetail = await agent.get(`/api/public/foods/${food._id}`);
   assert.equal(afterDetail.status, 200, JSON.stringify(afterDetail.body));
+});
+
+test('publish-storefront allows the tenth Silver product when nine are already published', async () => {
+  const agent = createAgent(getApp());
+  const { user, business, product } = await setupVendorWithDraftProduct(agent, { isActive: false });
+
+  await Product.insertMany(Array.from({ length: 9 }, (_, index) => ({
+    title: `Published quota product ${index}`,
+    slug: `published-quota-${Date.now()}-${index}`,
+    description: 'Published quota fixture.',
+    categoryId: new mongoose.Types.ObjectId(),
+    subcategoryId: new mongoose.Types.ObjectId(),
+    ownerId: user._id,
+    businessId: business._id,
+    coverImage: `https://example.test/quota-${index}.png`,
+    isPublished: true,
+    isActive: true,
+    isDeleted: false,
+    price: 25,
+  })));
+
+  const publishRes = await agent.post(`/api/business/${business._id}/publish-storefront`);
+  assert.equal(publishRes.status, 200, JSON.stringify(publishRes.body));
+
+  const [publishedProduct, publishedCount] = await Promise.all([
+    Product.findById(product._id).lean(),
+    Product.countDocuments({
+      businessId: business._id,
+      isPublished: true,
+      isActive: { $ne: false },
+      isDeleted: false,
+    }),
+  ]);
+  assert.equal(publishedProduct.isPublished, true);
+  assert.equal(publishedCount, 10);
+});
+
+test('publish-storefront rejects an over-quota batch before business activation or partial publication', async () => {
+  const agent = createAgent(getApp());
+  const { user, business, product, variant } = await setupVendorWithDraftProduct(agent, {
+    isActive: false,
+  });
+
+  await Product.insertMany(Array.from({ length: 9 }, (_, index) => ({
+    title: `At-cap quota product ${index}`,
+    slug: `at-cap-quota-${Date.now()}-${index}`,
+    description: 'At-cap quota fixture.',
+    categoryId: new mongoose.Types.ObjectId(),
+    subcategoryId: new mongoose.Types.ObjectId(),
+    ownerId: user._id,
+    businessId: business._id,
+    coverImage: `https://example.test/at-cap-${index}.png`,
+    isPublished: true,
+    isActive: true,
+    isDeleted: false,
+    price: 25,
+  })));
+  const secondDraft = await Product.create({
+    title: 'Second draft in over-quota batch',
+    description: 'Must remain a draft when the batch is rejected.',
+    categoryId: new mongoose.Types.ObjectId(),
+    subcategoryId: new mongoose.Types.ObjectId(),
+    ownerId: user._id,
+    businessId: business._id,
+    coverImage: 'https://example.test/second-draft.png',
+    isPublished: false,
+    isActive: true,
+    isDeleted: false,
+    price: 30,
+  });
+
+  const publishRes = await agent.post(`/api/business/${business._id}/publish-storefront`);
+  assert.equal(publishRes.status, 403, JSON.stringify(publishRes.body));
+  assert.ok(publishRes.body.blockers.some((blocker) => (
+    blocker.code === 'LISTING_LIMIT_REACHED' &&
+    blocker.listingType === 'product' &&
+    blocker.limit === 10 &&
+    blocker.current === 9 &&
+    blocker.attemptedIncrease === 2 &&
+    blocker.projected === 11
+  )));
+
+  const [reloadedBusiness, firstDraft, secondDraftReloaded, reloadedVariant] = await Promise.all([
+    Business.findById(business._id).lean(),
+    Product.findById(product._id).lean(),
+    Product.findById(secondDraft._id).lean(),
+    ProductVariant.findById(variant._id).lean(),
+  ]);
+  assert.equal(reloadedBusiness.isActive, false);
+  assert.equal(firstDraft.isPublished, false);
+  assert.equal(secondDraftReloaded.isPublished, false);
+  assert.equal(reloadedVariant.isPublished, false);
 });
