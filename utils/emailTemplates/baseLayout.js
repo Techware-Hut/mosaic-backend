@@ -158,7 +158,7 @@ function baseLayout({ preheader, bodyHtml, footerReason, logoUrl }) {
                 &nbsp;&nbsp;|&nbsp;&nbsp;
                 <a href="https://mosaicbizhub.com/privacy" style="color:#6B7280;text-decoration:none;">Privacy Policy</a>
                 &nbsp;&nbsp;|&nbsp;&nbsp;
-                <a href="https://mosaicbizhub.com/help" style="color:#6B7280;text-decoration:none;">Help &amp; Support</a>
+                <a href="https://mosaicbizhub.com/contact" style="color:#6B7280;text-decoration:none;">Help &amp; Support</a>
               </p>
 
               <!-- Support -->

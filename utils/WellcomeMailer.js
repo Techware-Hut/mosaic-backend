@@ -262,7 +262,7 @@ exports.sendWelcomeEmail = async (to, vendorName) => {
     html: `
       <div style="font-family: Arial, sans-serif; text-align: center; background-color: #f9f9f9; padding: 20px;">
         <img src="${logoSrcForHtml}" alt="Mosaic Biz Hub Logo" style="max-width: 150px; margin-bottom: 20px;">
-        <h2 style="color: #333;">Welcome to Mosaic Biz Hub, ${vendorName}!</h2>
+        <h2 style="color: #333;">Welcome to Mosaic Biz Hub, ${esc(vendorName)}!</h2>
         <p style="color: #555; font-size: 16px;">
           We’re excited to have you join our platform. Mosaic Biz Hub is here to help you grow your business and connect with new opportunities.
         </p>

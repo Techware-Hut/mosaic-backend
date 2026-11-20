@@ -1,4 +1,6 @@
 const express = require('express');
+const { validateFoodCreate } = require('../validators/foodValidators');
+const { rejectInvalidRequest } = require('../validators/requestValidation');
 const router = express.Router();
 
 const {
@@ -18,7 +20,7 @@ const { listReviews, upsertReview, deleteReview } = require('../controllers/revi
 
 router.get('/upload-url', authenticate, isBusinessOwner, getFoodUploadUrl);
 
-router.post('/add-food', authenticate, isBusinessOwner, createFood);
+router.post('/add-food', authenticate, isBusinessOwner, validateFoodCreate, rejectInvalidRequest, createFood);
 
 router.get('/my-foods', authenticate, isBusinessOwner, getMyFoods);
 
