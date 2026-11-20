@@ -13,7 +13,7 @@ Committing the workflow does not provision or enable a live gate.
 
 A canonical `staging` to `main` merge starts exact-SHA tests and read-only
 preflight automatically. Nothing mutates Production before a green
-`READY FOR PRODUCTION APPROVAL` state and approval of the protected `production`
+`READY FOR PRODUCTION APPROVAL` state and approval of the protected `production-release-control`
 Environment.
 
 After that one approval, the serialized job:
@@ -83,6 +83,28 @@ There is no atomic AWS update across two listeners. The controller enables HTTPS
 first and disables HTTPS last to minimize the canonical-surface window. Any
 failed transition best-effort reasserts active state on both rules and fails.
 The workflow also attempts fail-safe reactivation after any later failure.
+
+## Focused-baseline dual-route model (Wave 1 fixtures only)
+
+The separate `focused-baseline` mode models two checkout initiators on each
+pinned HTTP/80 and HTTPS/443 rule: `POST /api/orders/initiate` and the
+baseline's still-active `POST /api/payments/create-payment-intent`. It uses
+three anchored ALB regex values per listener: one canonical route with an
+optional trailing slash, and two legacy values for no slash and slash. Each
+also covers the case forms accepted by Express. The fixed action stays HTTP
+`503`; the disabled rule keeps the same sentinel as the normal mode. A
+partial transition still triggers best-effort re-gating.
+
+The code and fixtures verify both routes under explicit
+`--release-mode focused-baseline`; the default normal/rollback gate remains
+canonical-only. The public proof requires unauthenticated `401` for both
+routes before gating and after ungating, and `503` for both while gated.
+This is **not** live ALB proof. No focused production job calls the gate in
+Wave 1, the focused gate CLI rejects live enable/disable transitions, and the
+focused deploy script exits before AWS mutation. Future
+release work must pass the focused mode to every gate, public-proof, and
+fail-safe call, then verify the actual listener rules and Stripe liability
+controls before allowing a focused deployment.
 
 ## Drain contract
 

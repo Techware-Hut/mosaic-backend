@@ -7,16 +7,29 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Normal exact-main release or break-glass rollback
+        description: Exact-main release, break-glass rollback, or focused-baseline preflight
         required: true
         type: choice
         options:
           - release
           - rollback
+          - focused-baseline
         default: release
       release_sha:
-        description: Full current-main SHA, or rollback SHA in break-glass mode
+        description: Full exact target SHA
         required: true
+        type: string
+      baseline_sha:
+        description: Full approved production baseline SHA (focused-baseline only)
+        required: false
+        type: string
+      release_ref:
+        description: Protected refs/heads/release/focused/* ref (focused-baseline only)
+        required: false
+        type: string
+      source_pr:
+        description: Merged focused source PR number (focused-baseline only)
+        required: false
         type: string
       confirmation:
         description: For rollback only, type BREAK GLASS ROLLBACK EXACT SHA
@@ -48,6 +61,11 @@ jobs:
       current_main_sha: ${{ steps.resolve.outputs.current_main_sha }}
       release_mode: ${{ steps.resolve.outputs.release_mode }}
       normal_release: ${{ steps.resolve.outputs.normal_release }}
+      source_required: ${{ steps.resolve.outputs.source_required }}
+      focused_baseline: ${{ steps.resolve.outputs.focused_baseline }}
+      baseline_sha: ${{ steps.resolve.outputs.baseline_sha }}
+      release_ref: ${{ steps.resolve.outputs.release_ref }}
+      source_pr: ${{ steps.resolve.outputs.source_pr }}
     steps:
       - name: Checkout main history
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -64,6 +82,9 @@ jobs:
           RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'release' }}
           REQUESTED_RELEASE_SHA: ${{ inputs.release_sha }}
           ROLLBACK_CONFIRMATION: ${{ inputs.confirmation }}
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+          SOURCE_PR: ${{ inputs.source_pr }}
         run: |
           node scripts/release/resolve-production-release.js \
             --event "$EVENT_NAME" \
@@ -72,6 +93,9 @@ jobs:
             --requested-sha "$REQUESTED_RELEASE_SHA" \
             --mode "$RELEASE_MODE" \
             --confirmation "$ROLLBACK_CONFIRMATION" \
+            --baseline-sha "$BASELINE_SHA" \
+            --release-ref "$RELEASE_REF" \
+            --source-pr "$SOURCE_PR" \
             --output release-evidence/release-identity.json
 
       - name: Upload release identity
@@ -141,13 +165,15 @@ jobs:
         working-directory: release-target-runtime
         run: npm ci --ignore-scripts
 
-      - name: Prove exact target has only the canonical checkout initiator
+      - name: Prove exact target checkout initiation routes
         env:
           RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          RELEASE_MODE: ${{ needs.resolve-release.outputs.release_mode }}
         run: |
           node release-control-runtime/scripts/release/probe-target-checkout-surface.js \
             --root release-target-runtime \
             --release-sha "$RELEASE_SHA" \
+            --release-mode "$RELEASE_MODE" \
             --output release-evidence/exact-target-checkout-runtime.json
 
       - name: Upload exact-target route evidence
@@ -159,17 +185,22 @@ jobs:
           retention-days: 90
 
   verify-source:
-    name: Verify exact staging certificate
+    name: Verify exact release source certificate
     needs: resolve-release
-    if: needs.resolve-release.outputs.normal_release == 'true'
+    if: needs.resolve-release.outputs.source_required == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact release commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.resolve-release.outputs.current_main_sha }}
+          fetch-depth: 0
+          # The trusted verifier fetches the protected focused ref by Git SHA.
+          # This job has read-only repository permissions and no production role.
+          persist-credentials: true
 
       - name: Verify canonical promotion and certificate
+        if: needs.resolve-release.outputs.release_mode == 'release'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
@@ -177,6 +208,22 @@ jobs:
         run: |
           node scripts/release/verify-main-release-source.js \
             --main-sha "$RELEASE_SHA" \
+            --output release-evidence/source-certificate.json
+
+      - name: Verify protected focused source and exact two-file provenance
+        if: needs.resolve-release.outputs.release_mode == 'focused-baseline'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          BASELINE_SHA: ${{ needs.resolve-release.outputs.baseline_sha }}
+          RELEASE_REF: ${{ needs.resolve-release.outputs.release_ref }}
+          SOURCE_PR: ${{ needs.resolve-release.outputs.source_pr }}
+        run: |
+          node scripts/release/verify-focused-release-source.js \
+            --release-sha "$RELEASE_SHA" \
+            --baseline-sha "$BASELINE_SHA" \
+            --release-ref "$RELEASE_REF" \
+            --pr-number "$SOURCE_PR" \
             --output release-evidence/source-certificate.json
 
       - name: Upload source evidence
@@ -207,20 +254,30 @@ jobs:
           persist-credentials: false
           path: release-target
 
-      - name: Require exclusive canonical checkout surface in exact target
+      - name: Require approved checkout surface in exact target
+        env:
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          RELEASE_MODE: ${{ needs.resolve-release.outputs.release_mode }}
+          BASELINE_SHA: ${{ needs.resolve-release.outputs.baseline_sha }}
         run: |
-          node release-control/scripts/release/verify-checkout-surface-contract.js \
-            --root release-target \
-            --output release-evidence/checkout-surface.json
+          args=(--root release-target --release-mode "$RELEASE_MODE" \
+            --output release-evidence/checkout-surface.json)
+          if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            args+=(--release-sha "$RELEASE_SHA" --baseline-sha "$BASELINE_SHA" \
+              --baseline-repo release-control)
+          fi
+          node release-control/scripts/release/verify-checkout-surface-contract.js "${args[@]}"
 
       - name: Observe public production safely
         env:
           RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          RELEASE_MODE: ${{ needs.resolve-release.outputs.release_mode }}
           LEGACY_PAYMENT_RETIREMENT_SHA: ${{ vars.LEGACY_PAYMENT_RETIREMENT_SHA }}
           LEGACY_PAYMENT_RECONCILIATION_SHA256: ${{ vars.LEGACY_PAYMENT_RECONCILIATION_SHA256 }}
         run: |
           node release-control/scripts/release/verify-production-public-surfaces.js \
             --mode preflight \
+            --release-mode "$RELEASE_MODE" \
             --base-url "$PRODUCTION_API_URL" \
             --expected-sha "$RELEASE_SHA" \
             --legacy-retirement-sha "$LEGACY_PAYMENT_RETIREMENT_SHA" \
@@ -228,6 +285,7 @@ jobs:
             --output release-evidence/public-preflight.json
 
       - name: Bind retirement attestation to deployed and target ancestry
+        if: needs.resolve-release.outputs.release_mode != 'focused-baseline'
         env:
           RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
           LEGACY_PAYMENT_RETIREMENT_SHA: ${{ vars.LEGACY_PAYMENT_RETIREMENT_SHA }}
@@ -240,6 +298,14 @@ jobs:
           observed_sha=$(node -e 'const f=require("./release-evidence/public-preflight.json");process.stdout.write(f.observedSha)')
           git -C release-control merge-base --is-ancestor "$LEGACY_PAYMENT_RETIREMENT_SHA" "$observed_sha"
           git -C release-control merge-base --is-ancestor "$LEGACY_PAYMENT_RETIREMENT_SHA" "$RELEASE_SHA"
+
+      - name: Prove focused production baseline is still deployed
+        if: needs.resolve-release.outputs.release_mode == 'focused-baseline'
+        env:
+          BASELINE_SHA: ${{ needs.resolve-release.outputs.baseline_sha }}
+        run: |
+          observed_sha=$(node -e 'const f=require("./release-evidence/public-preflight.json");process.stdout.write(f.observedSha)')
+          test "$observed_sha" = "$BASELINE_SHA"
 
       - name: Upload public preflight
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -274,11 +340,19 @@ jobs:
       - name: Verify live topology without mutation
         env:
           RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
+          RELEASE_MODE: ${{ needs.resolve-release.outputs.release_mode }}
         run: |
-          node scripts/release/aws-release-topology.js preflight \
-            --release-sha "$RELEASE_SHA" \
-            --mixed-version-safe false \
-            --output release-evidence/aws-preflight.json
+          if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            node scripts/release/run-focused-baseline-preflight.js \
+              --mode "$RELEASE_MODE" \
+              --release-sha "$RELEASE_SHA" \
+              --output release-evidence/aws-preflight.json
+          else
+            node scripts/release/aws-release-topology.js preflight \
+              --release-sha "$RELEASE_SHA" \
+              --mixed-version-safe false \
+              --output release-evidence/aws-preflight.json
+          fi
 
       - name: Validate approved drain configuration
         env:
@@ -298,7 +372,7 @@ jobs:
           retention-days: 90
 
   release-readiness:
-    name: Ready for production approval
+    name: Release preflight readiness
     needs:
       - resolve-release
       - exact-ci
@@ -306,22 +380,29 @@ jobs:
       - verify-source
       - public-preflight
       - aws-preflight
-    if: ${{ !cancelled() && needs.resolve-release.result == 'success' && needs.exact-ci.result == 'success' && needs.target-checkout-surface.result == 'success' && (needs.verify-source.result == 'success' || needs.resolve-release.outputs.normal_release != 'true') && needs.public-preflight.result == 'success' && needs.aws-preflight.result == 'success' }}
+    if: ${{ !cancelled() && needs.resolve-release.result == 'success' && needs.exact-ci.result == 'success' && needs.target-checkout-surface.result == 'success' && (needs.verify-source.result == 'success' || (needs.resolve-release.outputs.release_mode == 'rollback' && needs.verify-source.result == 'skipped')) && needs.public-preflight.result == 'success' && needs.aws-preflight.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Report verified production approval readiness
+      - name: Report verified release preflight readiness
         env:
           RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
         run: |
           {
-            echo "## READY FOR PRODUCTION APPROVAL"
+            if [ "${{ needs.resolve-release.outputs.release_mode }}" = "focused-baseline" ]; then
+              echo "## FOCUSED PREFLIGHT VERIFIED - READY FOR PROTECTED PRODUCTION APPROVAL"
+            else
+              echo "## READY FOR PRODUCTION APPROVAL"
+            fi
             echo ""
             echo "- Exact release SHA: \`$RELEASE_SHA\`"
             echo "- Exact-SHA unit, contract, and integration suites: success"
-            echo "- Fresh exact-target canonical/legacy route proof: success"
-            echo "- Canonical staging source and certificate: verified (normal release) or explicit break-glass rollback"
+            echo "- Fresh exact-target checkout route proof: success"
+            echo "- Required exact source certificate: verified (release/focused); rollback alone may skip"
             echo "- Public probes and read-only AWS topology: success"
-            echo "- Production mutation: NO"
+            echo "- Production mutation: requires protected production-release-control approval"
+            if [ "${{ needs.resolve-release.outputs.release_mode }}" = "focused-baseline" ]; then
+              echo "- Focused deployment path requires the checkout gate to remain active and release blockers to stay zero"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   production-approval-and-release:
@@ -343,6 +424,10 @@ jobs:
     env:
       RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
       RELEASE_MODE: ${{ needs.resolve-release.outputs.release_mode }}
+      FOCUSED_BASELINE_SHA: ${{ needs.resolve-release.outputs.baseline_sha }}
+      FOCUSED_RELEASE_REF: ${{ needs.resolve-release.outputs.release_ref }}
+      FOCUSED_SOURCE_PR: ${{ needs.resolve-release.outputs.source_pr }}
+      EB_RELEASE_BUCKET: ${{ vars.EB_RELEASE_BUCKET }}
       CHECKOUT_GATE_LOAD_BALANCER_ARN: ${{ vars.CHECKOUT_GATE_LOAD_BALANCER_ARN }}
       CHECKOUT_GATE_HTTP_RULE_ARN: ${{ vars.CHECKOUT_GATE_HTTP_RULE_ARN }}
       CHECKOUT_GATE_HTTPS_RULE_ARN: ${{ vars.CHECKOUT_GATE_HTTPS_RULE_ARN }}
@@ -365,6 +450,10 @@ jobs:
         env:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
+          if [ -z "$EB_RELEASE_BUCKET" ]; then
+            echo "::error::Pinned EB release bucket is required."
+            exit 1
+          fi
           git fetch --no-tags origin main
           current_main=$(git rev-parse origin/main)
           if [ "$(git rev-parse HEAD)" != "$current_main" ]; then
@@ -387,6 +476,26 @@ jobs:
             echo "::error::Break-glass rollback target is not reachable from current main."
             exit 1
           fi
+          if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            if [ "$FOCUSED_BASELINE_SHA" != "9bc75c257a9f483a287f122dbd38514b7a4b55d4" ]; then
+              echo "::error::Focused baseline is not the approved deployed production baseline."
+              exit 1
+            fi
+            if [[ ! "$FOCUSED_RELEASE_REF" =~ ^refs/heads/release/focused/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              echo "::error::Focused release ref is not a protected focused release branch."
+              exit 1
+            fi
+            git fetch --no-tags origin "+$FOCUSED_RELEASE_REF:$FOCUSED_RELEASE_REF"
+            focused_tip=$(git rev-parse "$FOCUSED_RELEASE_REF")
+            if [ "$focused_tip" != "$RELEASE_SHA" ]; then
+              echo "::error::Focused release ref no longer points to the approved release SHA."
+              exit 1
+            fi
+            if [ "$RELEASE_SHA" = "$FOCUSED_BASELINE_SHA" ] || [ "$RELEASE_SHA" = "$current_main" ]; then
+              echo "::error::Focused release target must be distinct from the baseline and controller main."
+              exit 1
+            fi
+          fi
 
       - name: Configure production AWS credentials
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
@@ -397,10 +506,17 @@ jobs:
 
       - name: Revalidate topology before mutation
         run: |
-          node scripts/release/aws-release-topology.js preflight \
-            --release-sha "$RELEASE_SHA" \
-            --mixed-version-safe false \
-            --output release-evidence/aws-approved-preflight.json
+          if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            node scripts/release/run-focused-baseline-preflight.js \
+              --mode focused-baseline \
+              --release-sha "$RELEASE_SHA" \
+              --output release-evidence/aws-approved-preflight.json
+          else
+            node scripts/release/aws-release-topology.js preflight \
+              --release-sha "$RELEASE_SHA" \
+              --mixed-version-safe false \
+              --output release-evidence/aws-approved-preflight.json
+          fi
 
       - name: Enable exact checkout gate
         id: gate
@@ -412,12 +528,22 @@ jobs:
           test "$(git rev-parse HEAD)" = "$current_main"
           if [ "$RELEASE_MODE" = "release" ]; then
             test "$current_main" = "$RELEASE_SHA"
+          elif [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            test "$FOCUSED_BASELINE_SHA" = "9bc75c257a9f483a287f122dbd38514b7a4b55d4"
+            test "$RELEASE_SHA" != "$current_main"
           else
             git merge-base --is-ancestor "$RELEASE_SHA" "$current_main"
           fi
-          echo "attempted=true" >> "$GITHUB_OUTPUT"
           mkdir -p release-evidence
-          node - <<'NODE'
+          if [ "$RELEASE_MODE" = "focused-baseline" ]; then
+            echo "attempted=false" >> "$GITHUB_OUTPUT"
+            node scripts/release/manage-checkout-gate.js verify \
+              --release-mode focused-baseline \
+              --expected-state active \
+              --output release-evidence/gate-enabled.json
+          else
+            echo "attempted=true" >> "$GITHUB_OUTPUT"
+            node - <<'NODE'
           const fs = require('node:fs');
           fs.writeFileSync('release-evidence/gate-attempt.json', `${JSON.stringify({
             schemaVersion: 1,
@@ -427,14 +553,16 @@ jobs:
             attemptedAt: new Date().toISOString(),
           }, null, 2)}\n`, { mode: 0o600 });
           NODE
-          node scripts/release/manage-checkout-gate.js enable \
-            --confirm ENABLE_CHECKOUT_GATE \
-            --output release-evidence/gate-enabled.json
+            node scripts/release/manage-checkout-gate.js enable \
+              --confirm ENABLE_CHECKOUT_GATE \
+              --output release-evidence/gate-enabled.json
+          fi
           echo "active=true" >> "$GITHUB_OUTPUT"
 
       - name: Verify checkout gate on HTTPS and HTTP
         run: |
           bash scripts/release/verify-checkout-gate.sh \
+            --release-mode "$RELEASE_MODE" \
             "$PRODUCTION_API_URL" \
             "http://api.mosaicbizhub.com"
 
@@ -445,10 +573,11 @@ jobs:
             --output release-evidence/drain-approved.json
           sleep "$CHECKOUT_DRAIN_SECONDS"
           bash scripts/release/verify-checkout-gate.sh \
+            --release-mode "$RELEASE_MODE" \
             "$PRODUCTION_API_URL" \
             "http://api.mosaicbizhub.com"
 
-      - name: Require zero active reservations before deploy
+      - name: Require zero release blockers before deploy
         run: |
           node scripts/release/run-ssm-reservation-check.js --require-zero \
             --output release-evidence/reservations-before.json
@@ -463,18 +592,22 @@ jobs:
       - name: Re-prove gate immediately before EB mutation
         run: |
           node scripts/release/manage-checkout-gate.js verify \
+            --release-mode "$RELEASE_MODE" \
             --expected-state active \
             --output release-evidence/gate-before-deploy.json
           bash scripts/release/verify-checkout-gate.sh \
+            --release-mode "$RELEASE_MODE" \
             "$PRODUCTION_API_URL" \
             "http://api.mosaicbizhub.com"
 
       - name: Deploy immutable exact SHA to Elastic Beanstalk
         run: |
           node scripts/release/manage-checkout-gate.js verify \
+            --release-mode "$RELEASE_MODE" \
             --expected-state active \
             --output release-evidence/gate-at-deploy-command.json
           bash scripts/release/verify-checkout-gate.sh \
+            --release-mode "$RELEASE_MODE" \
             "$PRODUCTION_API_URL" \
             "http://api.mosaicbizhub.com"
           bash scripts/release/deploy-eb-exact-sha.sh \
@@ -499,6 +632,7 @@ jobs:
             --expected-sha "$RELEASE_SHA" \
             --output release-evidence/public-deployed.json
           bash scripts/release/verify-checkout-gate.sh \
+            --release-mode "$RELEASE_MODE" \
             "$PRODUCTION_API_URL" \
             "http://api.mosaicbizhub.com"
 
@@ -509,7 +643,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           output-credentials: false
 
-      - name: Require zero active reservations after deploy
+      - name: Require zero release blockers after deploy
         run: |
           node scripts/release/run-ssm-reservation-check.js --require-zero \
             --output release-evidence/reservations-after.json
@@ -523,6 +657,7 @@ jobs:
 
       - name: Disable exact checkout gate
         id: ungate
+        if: ${{ needs.resolve-release.outputs.release_mode != 'focused-baseline' }}
         run: |
           node scripts/release/manage-checkout-gate.js disable \
             --confirm DISABLE_CHECKOUT_GATE \
@@ -531,6 +666,7 @@ jobs:
 
       - name: Prove normal checkout and exact production health
         id: final-open
+        if: ${{ needs.resolve-release.outputs.release_mode != 'focused-baseline' }}
         run: |
           node scripts/release/verify-production-public-surfaces.js \
             --mode ungated \
@@ -544,6 +680,21 @@ jobs:
             --expected-state inactive \
             --output release-evidence/gate-final.json
           echo "safe_open=true" >> "$GITHUB_OUTPUT"
+
+
+      - name: Confirm focused checkout gate remains active
+        id: focused-final-gate
+        if: ${{ needs.resolve-release.outputs.release_mode == 'focused-baseline' }}
+        run: |
+          node scripts/release/manage-checkout-gate.js verify \
+            --release-mode focused-baseline \
+            --expected-state active \
+            --output release-evidence/gate-final.json
+          RELEASE_MODE=focused-baseline bash scripts/release/verify-checkout-gate.sh \
+            --release-mode focused-baseline \
+            "$PRODUCTION_API_URL" \
+            "http://api.mosaicbizhub.com"
+          echo "safe_gated=true" >> "$GITHUB_OUTPUT"
 
       - name: Refresh AWS credentials for fail-safe gate control
         if: ${{ always() && steps.gate.outputs.attempted == 'true' && steps.final-open.outputs.safe_open != 'true' }}
@@ -569,6 +720,7 @@ jobs:
           node scripts/release/build-production-evidence.js \
             --directory release-evidence \
             --release-sha "$RELEASE_SHA" \
+            --release-mode "$RELEASE_MODE" \
             --job-status "$JOB_STATUS" \
             --run-url "$RUN_URL" \
             --output release-evidence/production-release-evidence.json
@@ -625,11 +777,12 @@ jobs:
           READINESS_RESULT: ${{ needs.release-readiness.result }}
           RELEASE_JOB_RESULT: ${{ needs.production-approval-and-release.result }}
           NORMAL_RELEASE: ${{ needs.resolve-release.outputs.normal_release || 'unknown' }}
+          RELEASE_MODE: ${{ needs.resolve-release.outputs.release_mode || 'unknown' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           mkdir -p release-evidence
           node - <<'NODE'
-          const fs = require('node:fs');
+            const fs = require('node:fs');
           const keys = {
             resolve: 'RESOLVE_RESULT',
             exactCi: 'EXACT_CI_RESULT',
@@ -642,8 +795,9 @@ jobs:
           };
           const jobs = Object.fromEntries(Object.entries(keys).map(([key, envName]) => [key, process.env[envName] || 'unknown']));
           fs.writeFileSync('release-evidence/workflow-results.json', `${JSON.stringify({
-            schemaVersion: 1,
-            normalRelease: process.env.NORMAL_RELEASE === 'true',
+              schemaVersion: 1,
+              normalRelease: process.env.NORMAL_RELEASE === 'true',
+              releaseMode: process.env.RELEASE_MODE,
             jobs,
           }, null, 2)}\n`, { mode: 0o600 });
           NODE
@@ -657,11 +811,13 @@ jobs:
           node scripts/release/build-production-evidence.js \
             --directory release-evidence \
             --release-sha "$RELEASE_SHA" \
+            --release-mode "$RELEASE_MODE" \
             --job-status "$job_status" \
             --run-url "$RUN_URL" \
             --output release-evidence/production-release-summary.json
 
       - name: Update source release PR with evidence
+        if: needs.resolve-release.outputs.release_mode != 'focused-baseline'
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
