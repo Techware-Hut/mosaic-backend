@@ -5,6 +5,11 @@ const { captureOtp } = require('./otpCapture');
 let originalLoad = null;
 let stripeShouldFail = false;
 let otpEmailFailCount = 0;
+// Every stripe.refunds.create call, plus the refunds "Stripe" actually created.
+// Like Stripe, a repeated idempotency key with the same params returns the
+// original refund instead of creating another one.
+let refundCalls = [];
+let refundsByIdempotencyKey = new Map();
 
 function setStripeShouldFail(value) {
   stripeShouldFail = Boolean(value);
@@ -73,6 +78,31 @@ function createStripeClient() {
         return { url: 'https://connect.stripe.com/setup/test/integration' };
       },
     },
+    refunds: {
+      create: async (params, options = {}) => {
+        failIfRequested();
+        const idempotencyKey = options.idempotencyKey || null;
+        refundCalls.push({ params, idempotencyKey });
+        if (idempotencyKey && refundsByIdempotencyKey.has(idempotencyKey)) {
+          const prior = refundsByIdempotencyKey.get(idempotencyKey);
+          if (JSON.stringify(prior.params) !== JSON.stringify(params)) {
+            const err = new Error('Keys for idempotent requests can only be used with the same parameters');
+            err.type = 'StripeIdempotencyError';
+            throw err;
+          }
+          return prior.refund;
+        }
+        const refund = {
+          id: `re_integration_${refundCalls.length}`,
+          object: 'refund',
+          payment_intent: params?.payment_intent,
+          amount: params?.amount,
+          status: 'succeeded',
+        };
+        if (idempotencyKey) refundsByIdempotencyKey.set(idempotencyKey, { params, refund });
+        return refund;
+      },
+    },
     webhooks: {
       constructEvent: () => ({ type: 'test.event' }),
     },
@@ -136,5 +166,10 @@ module.exports = {
   resetOtpEmailFailCount,
   resetStripeStub: () => {
     stripeShouldFail = false;
+    refundCalls = [];
+    refundsByIdempotencyKey = new Map();
   },
+  getStripeRefundCalls: () => refundCalls.slice(),
+  getStripeRefundsCreated: () =>
+    new Set(refundCalls.map((c, i) => (c.idempotencyKey ? `key:${c.idempotencyKey}` : `call:${i}`))).size,
 };
