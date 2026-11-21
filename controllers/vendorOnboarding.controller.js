@@ -1193,15 +1193,33 @@ exports.handleVendorPaymentWebhook = async (req, res) => {
           });
 
           if (onboarding) {
-            onboarding.verificationPayment.status = 'paid';
-            onboarding.verificationPayment.paidAt = new Date();
-            // Only demote payment-in-progress apps. Never yank submitted /
+            // Conditional updates instead of load-then-save: a concurrent
+            // /submit may move this record to 'submitted' after our read, and
+            // a stale save() would revert it to draft.
+            const paymentMatch = {
+              _id: onboarding._id,
+              'verificationPayment.paymentIntentId': paymentIntent.id,
+            };
+            // (a) Mark paid once; duplicate deliveries keep the original paidAt.
+            await VendorOnboarding.updateOne(
+              { ...paymentMatch, 'verificationPayment.status': { $ne: 'paid' } },
+              { $set: { 'verificationPayment.status': 'paid', 'verificationPayment.paidAt': new Date() } },
+              { runValidators: true }
+            );
+            // (b) Only demote payment-in-progress apps. Never yank submitted /
             // rejected / verified applications back to draft on a late webhook.
-            if (onboarding.status === 'payment_pending') {
-              onboarding.status = 'draft';
+            await VendorOnboarding.updateOne(
+              { ...paymentMatch, status: 'payment_pending' },
+              { $set: { status: 'draft' } },
+              { runValidators: true }
+            );
+            // updateOne skips validate hooks; preserve legacy badge normalization.
+            if (onboarding.badge === 'Bronze') {
+              await VendorOnboarding.updateOne(
+                { _id: onboarding._id, badge: 'Bronze' },
+                { $set: { badge: 'Silver' } }
+              );
             }
-
-            await onboarding.save();
 
             console.log(`Vendor verification payment succeeded for user ${userId}`);
           } else {
