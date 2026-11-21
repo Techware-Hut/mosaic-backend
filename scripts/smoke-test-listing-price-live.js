@@ -94,6 +94,8 @@ async function main() {
       body: {
         title: `Smoke Zero Price ${Date.now()}`,
         description: 'Should be rejected at publish',
+        // add-food requires a cover image (#347); any reachable synthetic image URL works here.
+        coverImage: 'https://example.com/smoke-food-cover.webp',
         price: 0,
         businessId: foodBusiness._id,
         categoryId,
@@ -114,6 +116,8 @@ async function main() {
       body: {
         title: `Smoke Draft Zero ${Date.now()}`,
         description: 'Draft save should work',
+        // add-food requires a cover image (#347); any reachable synthetic image URL works here.
+        coverImage: 'https://example.com/smoke-food-cover.webp',
         price: 0,
         businessId: foodBusiness._id,
         categoryId,
