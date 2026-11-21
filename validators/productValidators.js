@@ -342,3 +342,48 @@ exports.validateVariantId = [
     .optional()
     .isMongoId().withMessage('Invalid variant ID'),
 ];
+
+/**
+ * Validation for POST /api/product (create with variants).
+ *
+ * Replaces the disabled `validateProductInput` on that route. That validator no
+ * longer matches the vendor form: it rejects single-price products (sent as one
+ * variant with `attributes: {}`) and discount type "fixed". This one checks the
+ * fields every create needs and leaves per-variant price/stock parsing to the
+ * controller (normalizeVariantPayload), which already runs before any write.
+ */
+const requiredString = (field, label) =>
+  body(field)
+    .custom((value) => typeof value === 'string' && value.trim().length > 0)
+    .withMessage(`${label} is required.`);
+
+exports.validateProductCreate = [
+  requiredString('title', 'Product title'),
+  requiredString('description', 'Product description'),
+  body('businessId').isMongoId().withMessage('Business is required.'),
+  body('categoryId').isMongoId().withMessage('Category is required.'),
+  body('subcategoryId').isMongoId().withMessage('Subcategory is required.'),
+  requiredString('coverImage', 'Cover image'),
+  body('galleryImages')
+    .optional()
+    .isArray().withMessage('Gallery images must be a list.'),
+  body('galleryImages.*')
+    .optional()
+    .isString().withMessage('Each gallery image must be a URL.'),
+  body('taxCategory')
+    .optional({ nullable: true })
+    .custom((taxCategory) => {
+      if (taxCategory && (typeof taxCategory !== 'object' || typeof taxCategory.code !== 'string' || !taxCategory.code)) {
+        throw new Error('Tax category is invalid.');
+      }
+      return true;
+    }),
+  body('variants')
+    .isArray({ min: 1 }).withMessage('At least one variant is required.'),
+  body('variants.*')
+    .custom((variant) => variant !== null && typeof variant === 'object' && !Array.isArray(variant))
+    .withMessage('Each variant must be an object.'),
+  body('isPublished')
+    .optional()
+    .isBoolean().withMessage('isPublished must be true or false.'),
+];
