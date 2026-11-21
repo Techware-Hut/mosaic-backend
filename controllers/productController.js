@@ -33,6 +33,10 @@ const {
   logUploadFailure,
 } = require('../utils/uploadDiagnostics');
 const { validateProductPublishState } = require('../lib/marketplace/listingPricePolicy');
+const {
+  summarizeVariantPrices,
+  recomputeProductPriceSummary,
+} = require('../utils/productPriceSummary');
 const { Decimal128 } = mongoose.Types;
 const s3Client = new S3Client(buildS3ClientConfig());
 
@@ -496,19 +500,11 @@ for (const variant of variants) {
       // -----------------------------
       // Update product price as minimum variant price
       // -----------------------------
-const prices = savedVariants.map(v => {
-  const sale = v.salePrice ? parseFloat(v.salePrice.toString()) : null;
-  const price = parseFloat(v.price.toString());
-
-  return sale !== null ? sale : price;
-});
-
-const minPrice = Math.min(...prices);
-const maxPrice = Math.max(...prices);
+const priceSummary = summarizeVariantPrices(savedVariants);
 
       await Product.findByIdAndUpdate(product._id, {
-        price: Decimal128.fromString(minPrice.toString()),
-        maxPrice: Decimal128.fromString(maxPrice.toString()),
+        price: priceSummary.price,
+        maxPrice: priceSummary.maxPrice,
         isPublished: willPublish,
       });
 
@@ -1003,25 +999,11 @@ exports.updateProduct = async (req, res) => {
 
     product.isPublished = nextPublished;
 
-    if (allVariants.length > 0) {
-      const prices = allVariants.map(v => {
-        const sale = v.salePrice ? parseFloat(v.salePrice.toString()) : null;
-        const price = parseFloat(v.price.toString());
-        return sale ?? price; // salePrice has priority
-      });
-
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
-
-      product.price = Decimal128.fromString(minPrice.toString());
-      product.maxPrice = Decimal128.fromString(maxPrice.toString());
-      await product.save();
-    } else {
-      // No variants → reset product price
-      product.price = null;
-      product.maxPrice = null;
-      await product.save();
-    }
+    // Non-deleted variants only; a $0/empty sale price falls back to base price.
+    const priceSummary = summarizeVariantPrices(allVariants);
+    product.price = priceSummary.price;
+    product.maxPrice = priceSummary.maxPrice;
+    await product.save();
 
     return res.status(200).json({
       success: true,
@@ -1310,6 +1292,7 @@ exports.addVariants = async (req, res) => {
     await Product.findByIdAndUpdate(productId, {
       $push: { variants: { $each: variantIds } },
     });
+    await recomputeProductPriceSummary(product._id);
 
     return res.status(201).json({
       message: 'Variants added successfully',
@@ -1419,6 +1402,7 @@ exports.updateVariant = async (req, res) => {
     if (isPublished !== undefined) variant.isPublished = isPublished;
 
     await variant.save();
+    await recomputeProductPriceSummary(product._id);
 
     // Auto-publish/unpublish product based on variants
     if (isPublished === true && !product.isPublished) {
@@ -1486,10 +1470,14 @@ exports.deleteVariant = async (req, res) => {
     // Soft delete
     variant.isDeleted = true;
     await variant.save();
+    await recomputeProductPriceSummary(product._id);
 
-    // Remove from product's variants array
-    product.variants = product.variants.filter(v => v.toString() !== variantId);
-    
+    // Remove from product's variants array (not a Product schema path, so
+    // usually undefined; guard so the soft delete doesn't end in a 500)
+    if (Array.isArray(product.variants)) {
+      product.variants = product.variants.filter(v => v.toString() !== variantId);
+    }
+
     // Check if any published variants remain
     const publishedVariants = await ProductVariant.countDocuments({
       productId,
