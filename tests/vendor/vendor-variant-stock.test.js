@@ -123,6 +123,10 @@ function buildVariantMutationMocks(captured) {
       }),
       findByIdAndUpdate: async () => ({}),
       countDocuments: async () => 0,
+      updateOne: async (filter, update) => {
+        captured.priceUpdate = update;
+        return {};
+      },
     },
     ProductVariant: {
       countDocuments: async () => 0,
@@ -130,6 +134,7 @@ function buildVariantMutationMocks(captured) {
         captured.docs = docs;
         return docs.map((doc, index) => ({ ...doc, _id: `variant-${index}` }));
       },
+      find: async () => captured.docs || [],
     },
     Business: {
       findById: async () => ({ _id: businessId }),
@@ -343,6 +348,7 @@ test('addVariants maps nested sizes[0] stock when top-level stock is absent', as
   assert.equal(captured.docs[0].sku, 'NESTED-STOCK');
   assert.equal(captured.docs[0].price.toString(), '19.5');
   assert.equal(captured.docs[0].salePrice.toString(), '15.5');
+  assert.equal(captured.priceUpdate.$set.price.toString(), '15.5');
 });
 
 test('getBusinessProducts includes stock metadata from real variant stock', async () => {

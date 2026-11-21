@@ -1,27 +1,18 @@
 const mongoose = require('mongoose');
-const { parseListingPrice } = require('../lib/marketplace/listingPricePolicy');
+const { getVariantEffectivePrice } = require('../lib/marketplace/listingPricePolicy');
 
 const { Decimal128 } = mongoose.Types;
 
-// A sale price only counts when it is a finite number greater than zero.
-// Decimal128("0"), 0, "", null, negative or unparseable values fall back to the
-// variant's base price (a Decimal128 object is truthy, so a plain truthiness
-// check would otherwise turn a $0 sale into a $0 product price).
-function getVariantSummaryPrice(variant = {}) {
-  const sale = parseListingPrice(variant.salePrice);
-  if (sale !== null && sale > 0) return sale;
-
-  const price = parseListingPrice(variant.price);
-  return price !== null && price >= 0 ? price : null;
-}
-
 // Pure summary of the product-level price fields from a list of variants.
-// Soft-deleted variants are excluded. Returns nulls when no usable variants
-// remain, matching Product.price's "null if no variants yet" default.
+// Uses the listing policy's effective price (sale if > 0, else price if > 0,
+// else null), so Decimal128("0") sales and $0 base prices never become the
+// card price. Soft-deleted variants and variants without a positive price are
+// skipped. Returns nulls when none remain, matching Product.price's
+// "null if no variants yet" default.
 function summarizeVariantPrices(variants = []) {
   const prices = (Array.isArray(variants) ? variants : [])
     .filter((variant) => variant && variant.isDeleted !== true)
-    .map(getVariantSummaryPrice)
+    .map((variant) => getVariantEffectivePrice(variant))
     .filter((price) => price !== null);
 
   if (prices.length === 0) {
@@ -35,19 +26,23 @@ function summarizeVariantPrices(variants = []) {
 }
 
 // Re-reads the product's non-deleted variants and persists the summary.
-// Note: maxPrice is not currently a Product schema path, so Mongoose strict
-// mode drops it on write (same as the pre-existing controller code).
-async function recomputeProductPriceSummary(productId, { session } = {}) {
-  // Required lazily so the pure helpers above can be unit-tested without models.
-  // eslint-disable-next-line global-require
-  const Product = require('../models/Product');
-  // eslint-disable-next-line global-require
-  const ProductVariant = require('../models/ProductVariant');
+// Callers pass their own Product/ProductVariant models (so test doubles of the
+// caller apply here too). Note: maxPrice is not currently a Product schema
+// path, so Mongoose strict mode drops it on write (same as the pre-existing
+// controller code).
+async function recomputeProductPriceSummary(
+  productId,
+  { Product, ProductVariant, session } = {}
+) {
+  if (!Product || !ProductVariant) {
+    throw new Error('recomputeProductPriceSummary requires Product and ProductVariant models');
+  }
 
-  const query = ProductVariant.find({ productId, isDeleted: { $ne: true } })
-    .select('price salePrice isDeleted');
-  if (session) query.session(session);
-  const variants = await query;
+  const variants = await ProductVariant.find(
+    { productId, isDeleted: { $ne: true } },
+    'price salePrice isDeleted',
+    session ? { session } : undefined
+  );
 
   const summary = summarizeVariantPrices(variants);
   await Product.updateOne(
@@ -58,8 +53,22 @@ async function recomputeProductPriceSummary(productId, { session } = {}) {
   return summary;
 }
 
+// Best-effort variant for error paths that already wrote variants: a recompute
+// failure is logged and swallowed so it never masks the caller's response.
+async function recomputeProductPriceSummarySafe(productId, options) {
+  try {
+    return await recomputeProductPriceSummary(productId, options);
+  } catch (err) {
+    console.error('[product-price-summary] recompute failed:', {
+      productId: String(productId),
+      message: err?.message,
+    });
+    return null;
+  }
+}
+
 module.exports = {
-  getVariantSummaryPrice,
   summarizeVariantPrices,
   recomputeProductPriceSummary,
+  recomputeProductPriceSummarySafe,
 };

@@ -101,3 +101,53 @@ test('addVariants and deleteVariant recompute product.price from non-deleted var
   assert.equal(deletedLast.status, 200, JSON.stringify(deletedLast.body));
   assert.equal((await Product.findById(productId)).price, null);
 });
+
+async function createTwoVariantProduct(agent, business) {
+  const res = await createProduct(agent, business, [
+    { attributes: { Size: 'A' }, sku: 'SYN-457-A', price: 20, stock: 2 },
+    { attributes: { Size: 'B' }, sku: 'SYN-457-B', price: 10, stock: 2 },
+  ]);
+  const productId = res.body.product._id;
+  const a = res.body.variants.find((v) => v.sku.endsWith('SYN-457-A'));
+  const b = res.body.variants.find((v) => v.sku.endsWith('SYN-457-B'));
+  assert.equal(priceOf(await Product.findById(productId)), 10);
+  return { productId, a, b };
+}
+
+test('PUT updateProduct excludes soft-deleted variants from product.price', async () => {
+  const { agent, business } = await setupVendor();
+  const { productId, a, b } = await createTwoVariantProduct(agent, business);
+
+  // Simulate a previously soft-deleted variant that is still referenced.
+  await ProductVariant.updateOne({ _id: b._id }, { $set: { isDeleted: true } });
+
+  const res = await agent.put(`/api/product/${productId}`).send({
+    variants: [
+      { _id: a._id, attributes: { Size: 'A' }, price: 25 },
+      { _id: b._id, attributes: { Size: 'B' } },
+    ],
+  });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal((await ProductVariant.findById(b._id)).isDeleted, true);
+  assert.equal(priceOf(await Product.findById(productId)), 25);
+  assert.equal(Number(res.body.product.price.$numberDecimal), 25);
+});
+
+test('PUT updateProduct 400 after partial variant writes still refreshes product.price', async () => {
+  const { agent, business } = await setupVendor();
+  const { productId, a, b } = await createTwoVariantProduct(agent, business);
+
+  // Variant A is saved and B is removed (not in payload) before the invalid
+  // new variant triggers the in-loop 400.
+  const res = await agent.put(`/api/product/${productId}`).send({
+    variants: [
+      { _id: a._id, attributes: { Size: 'A' }, price: 50 },
+      { attributes: { Size: 'C' }, price: -1 },
+    ],
+  });
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+
+  assert.equal((await ProductVariant.findById(a._id)).price.toString(), '50');
+  assert.equal(await ProductVariant.findById(b._id), null);
+  assert.equal(priceOf(await Product.findById(productId)), 50);
+});
