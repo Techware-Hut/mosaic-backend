@@ -8,6 +8,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const request = require('supertest');
+const jwt = require('jsonwebtoken');
+let app;
 const { startHarness, resetDatabase, stopHarness } = require('./setup/harness');
 
 let Product;
@@ -18,7 +21,7 @@ let factories;
 let controller;
 
 test.before(async () => {
-  await startHarness();
+  app = await startHarness();
   Product = require('../../models/Product');
   ProductVariant = require('../../models/ProductVariant');
   SubscriptionPlan = require('../../models/SubscriptionPlan');
@@ -157,7 +160,7 @@ test('normalization and request duplicates fail before save or insert', async (t
   const insert = t.mock.method(ProductVariant, 'insertMany', async () => { throw new Error('must not insert'); });
   for (const [variants, code] of [
     [[variant('A'), variant('B', -1, 'L')], 'PRODUCT_VARIANT_INVALID'],
-    [[variant(' AbC '), variant('abc', 20, 'L')], 'PRODUCT_DUPLICATE_SKU'],
+    [[variant(' abc '), variant('abc', 20, 'L')], 'PRODUCT_DUPLICATE_SKU'],
     [[{ ...variant('A'), attributes: { Size: 'M', Color: 'Red' } },
       { ...variant('B'), attributes: { Color: 'Red', Size: 'M' } }], 'PRODUCT_DUPLICATE_ATTRIBUTES'],
   ]) {
@@ -203,4 +206,68 @@ test('unexpected final-read failure cleans only this request and preserves exist
   assert.equal(await ProductVariant.countDocuments({}), 1);
   assert.ok(await Product.exists({ _id: existing.body.product._id }));
   assert.equal(await ProductVariant.countDocuments({ productId: existing.body.product._id }), 1);
+});
+
+async function postProduct(user, payload) {
+  const token = jwt.sign({ userId: String(user._id), sessionVersion: user.sessionVersion || 0 }, process.env.JWT_SECRET);
+  return request(app).post('/api/product').set('Authorization', 'Bearer ' + token).send(payload);
+}
+
+test('full published FE payload persists through the real route and Mongo', async () => {
+  const { user, business } = await seedVendor();
+  const payload = {
+    ...body(business, [
+      { ...variant('abc'), attributes: { Size: 'M', Color: 'Red' } },
+      { ...variant('ABC', 25), attributes: { Size: 'L', Color: 'Red' } },
+    ]),
+    isPublished: true,
+    attributes: [{ name: 'Size', values: ['M', 'L'] }, { name: 'Color', values: ['Red'] }],
+    discount: { type: 'fixed', amount: 5 },
+    taxCategory: { code: 'txcd_99999999' },
+    shipping: { standard: 3, overnight: 8, local: 1 },
+    metaFields: [{ key: 'Material', value: 'Cotton' }],
+  };
+  const res = await postProduct(user, payload);
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  const product = await Product.findById(res.body.product._id).lean();
+  assert.equal(product.isPublished, true);
+  assert.equal(product.discount.type, 'fixed');
+  assert.equal(product.discount.amount, 5);
+  assert.equal(product.taxCategory.code, payload.taxCategory.code);
+  assert.deepEqual(product.shipping, payload.shipping);
+  assert.equal(product.metaFields[0].key, 'Material');
+  assert.equal(product.metaFields[0].value, 'Cotton');
+  const variants = await ProductVariant.find({ productId: product._id }).lean();
+  assert.equal(variants.length, 2);
+  for (const expected of payload.variants) {
+    const stored = variants.find(v => v.sku === expected.sku);
+    assert.ok(stored);
+    assert.deepEqual(stored.attributes, expected.attributes);
+    assert.equal(Number(stored.price.toString()), expected.price);
+    assert.equal(stored.stock, expected.stock);
+    assert.equal(stored.isPublished, true);
+  }
+});
+
+test('published single-price empty attributes payload persists one variant', async () => {
+  const { user, business } = await seedVendor();
+  const res = await postProduct(user, { ...body(business, [{ attributes: {}, price: 20, stock: 2 }]), isPublished: true });
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  assert.equal((await Product.findById(res.body.product._id)).isPublished, true);
+  const variants = await ProductVariant.find({ productId: res.body.product._id }).lean();
+  assert.equal(variants.length, 1);
+  assert.deepEqual(variants[0].attributes, {});
+  assert.equal(Number(variants[0].price.toString()), 20);
+});
+
+test('product save ValidationError returns safe 400 and leaves no documents', async (t) => {
+  const { user, business } = await seedVendor();
+  const error = new mongoose.Error.ValidationError();
+  error.addError('discount.type', new mongoose.Error.ValidatorError({ message: 'private validation detail' }));
+  t.mock.method(Product.prototype, 'save', async () => { throw error; });
+  const res = await postProduct(user, body(business, [variant('INVALID')]));
+  assert.equal(res.status, 400);
+  assert.deepEqual(res.body, { code: 'PRODUCT_VALIDATION_FAILED', error: 'Invalid product details.' });
+  assert.equal(await Product.countDocuments({}), 0);
+  assert.equal(await ProductVariant.countDocuments({}), 0);
 });

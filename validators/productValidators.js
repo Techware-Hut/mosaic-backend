@@ -359,7 +359,6 @@ const requiredString = (field, label) =>
 
 exports.validateProductCreate = [
   requiredString('title', 'Product title'),
-  body('title').optional().isLength({ max: 200 }).withMessage('Product title must be 200 characters or fewer.'),
   requiredString('description', 'Product description'),
   body('businessId').isMongoId().withMessage('Business is required.'),
   body('categoryId').isMongoId().withMessage('Category is required.'),

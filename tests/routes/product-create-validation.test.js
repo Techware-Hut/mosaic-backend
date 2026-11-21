@@ -102,3 +102,8 @@ test('variants must be a nonempty array of objects', async () => {
     assert.ok(res.body.errors.some(path => path.startsWith('variants')));
   }
 });
+
+test('titles longer than 200 characters are accepted', async () => {
+  const res = await request(loadApp()).post('/api/product').send(validBody({ title: 'A'.repeat(201) }));
+  assert.deepEqual(res.body.errors, []);
+});

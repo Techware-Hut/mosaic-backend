@@ -390,7 +390,7 @@ exports.createProductWithVariants = async (req, res) => {
       if (!check.ok) {
         return res.status(400).json({ code: 'PRODUCT_VARIANT_INVALID', error: check.error });
       }
-      const skuKey = check.sku?.trim().toLowerCase();
+      const skuKey = check.sku?.trim();
       if (skuKey && usedSkus.has(skuKey)) {
         return res.status(400).json({ code: 'PRODUCT_DUPLICATE_SKU', error: 'Each variant must have a unique SKU.' });
       }
@@ -579,6 +579,9 @@ const maxPrice = Math.max(...prices);
   } catch (err) {
     console.error('Error in product creation:', err);
     await cleanupFailedProductCreate(createdProductId);
+    if (err instanceof mongoose.Error.ValidationError) {
+      return res.status(400).json({ code: 'PRODUCT_VALIDATION_FAILED', error: 'Invalid product details.' });
+    }
     return res.status(500).json({ error: 'Server error while creating product.' });
   }
 };
