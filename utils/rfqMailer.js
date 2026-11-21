@@ -1,3 +1,4 @@
+const { esc } = require('./emailTemplates/baseLayout');
 const nodemailer = require('nodemailer');
 const { buildFrontendUrl } = require('./frontendUrl');
 const {
@@ -9,7 +10,7 @@ const transporter = createMosaicTransport(nodemailer);
 
 const safe = (value, fallback = 'N/A') => {
   const normalized = String(value || '').trim();
-  return normalized || fallback;
+  return esc(normalized || fallback);
 };
 
 const buildPartnerInquiriesUrl = (businessSlug) => {

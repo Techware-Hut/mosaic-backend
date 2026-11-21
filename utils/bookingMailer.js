@@ -4,15 +4,14 @@ const {
   createMosaicTransport,
   formatMosaicFromHeader,
 } = require('./smtpTransport');
-const { baseLayout } = require('./emailTemplates/baseLayout');
+const { baseLayout, esc } = require('./emailTemplates/baseLayout');
 
 const transporter = createMosaicTransport(nodemailer);
 
-const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const safe = (value, fallback = 'N/A') => {
   const normalized = String(value || '').trim();
-  return normalized || fallback;
+  return esc(normalized || fallback);
 };
 
 const buildPartnerBookingsUrl = (businessSlug) => {
@@ -131,7 +130,7 @@ exports.sendVendorNewServiceBookingEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `A customer has booked one of your professional services on Mosaic Biz Hub. Please review the details below and confirm or deny the request so the customer knows what to expect.`,
     ``,
@@ -275,7 +274,7 @@ exports.sendVendorNewFoodBookingEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `A customer has requested a reservation at your restaurant through Mosaic Biz Hub. Please review the details below and confirm or deny the request so the customer knows what to expect.`,
     ``,
@@ -412,7 +411,7 @@ exports.sendCustomerNewFoodBookingConfirmationEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `Thank you for booking your dining experience through Mosaic Biz Hub. We’re excited to help you connect with restaurants that celebrate culture, flavor, and community.`,
     ``,
@@ -546,7 +545,7 @@ exports.sendCustomerNewServiceBookingConfirmationEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `Thank you for booking your professional service through Mosaic Biz Hub. We’re honored you chose our community of trusted vendors to support your needs.`,
     ``,

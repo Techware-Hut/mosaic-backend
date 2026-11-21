@@ -32,7 +32,7 @@ async function sendApproved({ to, vendorName = "there", business }) {
     ? buildFrontendUrl(`/partners/${encodeURIComponent(business.slug)}`)
     : buildFrontendUrl('/partners/dashboard');
   const ctaText = "Open Partners Dashboard";
-  const preheader = `🎉 Your business ${safeBizName} is approved and live on Mosaic Biz Hub!`;
+  const preheader = `🎉 Your business ${business?.name || 'Your Business'} is approved and live on Mosaic Biz Hub!`;
   const footerReason = "You are receiving this email because your business was approved on Mosaic Biz Hub.";
 
   const bodyHtml = `
@@ -101,7 +101,7 @@ async function sendApproved({ to, vendorName = "there", business }) {
   await transporter.sendMail({
     from: formatMosaicFromHeader(),
     to,
-    subject: `✅ ${business.name} is approved on Mosaic Biz Hub`,
+    subject: `✅ ${String(business.name).replace(/[\r\n]/g, "")} is approved on Mosaic Biz Hub`,
     text,
     html: baseLayout({ preheader, bodyHtml, footerReason }),
     headers: {
@@ -117,7 +117,7 @@ async function sendBlockedOrDeactivated({ to, vendorName = "there", business, ad
   const safeBizName = esc(business?.name || "Your Business");
   const ctaUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`Appeal Account Status - ${business?.name || ''}`)}`;
   const ctaText = 'Contact Support';
-  const preheader = `Important: Your vendor account for ${safeBizName} has been ${isBlocked ? 'blocked' : 'deactivated'}.`;
+  const preheader = `Important: Your vendor account for ${business?.name || 'Your Business'} has been ${isBlocked ? 'blocked' : 'deactivated'}.`;
   const footerReason = "You are receiving this email regarding your vendor account status on Mosaic Biz Hub.";
 
   const reasonHtml = adminNote
@@ -188,7 +188,7 @@ async function sendBlockedOrDeactivated({ to, vendorName = "there", business, ad
   await transporter.sendMail({
     from: formatMosaicFromHeader(),
     to,
-    subject: `Important: Your Vendor Account Status – ${business?.name || 'Mosaic Biz Hub'}`,
+    subject: `Important: Your Vendor Account Status – ${String(business?.name || 'Mosaic Biz Hub').replace(/[\r\n]/g, '')}`,
     text,
     html: baseLayout({ preheader, bodyHtml, footerReason }),
     headers: {

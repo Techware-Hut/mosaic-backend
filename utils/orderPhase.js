@@ -13,13 +13,7 @@ const APP_NAME = process.env.APP_NAME || "Mosaic Biz Hub";
 const LOGO_URL = getFrontendLogoUrl();
 const ORDERS_URL = buildFrontendUrl("/customer/order");
 
-const escapeHtml = (value = "") =>
-  String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+const escapeHtml = esc;
 
 // Configure transporter (swap service/config as needed)
 const transporter = createMosaicTransport(nodemailer);
@@ -241,12 +235,13 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
     : String(orderOrId || 'N/A');
 
   const rawCustomerName = (isObject ? orderOrId.userId?.name : null) || extra.customerName || extra.firstName || '';
-  const safeFirstName = esc(rawCustomerName ? rawCustomerName.split(' ')[0] : 'there');
+  const rawFirstName = rawCustomerName ? rawCustomerName.split(' ')[0] : 'there';
+  const safeFirstName = esc(rawFirstName);
   const safeOrderNo = esc(orderNo);
   const orderUrl = buildFrontendUrl("/customer/order");
 
   if (isAccepted) {
-    const preheader = `Great news! Your order #${safeOrderNo} has been accepted and is now being prepared.`;
+    const preheader = `Great news! Your order #${orderNo} has been accepted and is now being prepared.`;
     const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
     const bodyHtml = `
@@ -314,9 +309,9 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
     });
 
     const text = [
-      `Hi ${safeFirstName},`,
+      `Hi ${rawFirstName},`,
       ``,
-      `Great news — your order #${safeOrderNo} has been accepted by the vendor and is now being prepared.`,
+      `Great news — your order #${orderNo} has been accepted by the vendor and is now being prepared.`,
       `We’ll notify you when it ships.`,
       ``,
       `View Order Status: ${orderUrl}`,
@@ -328,7 +323,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
     const mailOptions = {
       from: formatMosaicFromHeader(),
       to,
-      subject: `Your Order Has Been Accepted - #${safeOrderNo}`,
+      subject: `Your Order Has Been Accepted - #${String(orderNo).replace(/[\r\n]/g, '')}`,
       html,
       text,
     };
@@ -345,7 +340,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
 
   // REJECTED
   const browseVendorsUrl = buildFrontendUrl("/");
-  const preheader = `We’re sorry — your order #${safeOrderNo} could not be fulfilled by the vendor.`;
+  const preheader = `We’re sorry — your order #${orderNo} could not be fulfilled by the vendor.`;
   const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
   const bodyHtml = `
@@ -413,7 +408,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `We’re sorry — the vendor was unable to accept your order. If you need help finding alternatives, we’re here to support you.`,
     `If payment was processed, a full refund has been initiated to your original payment method.`,
@@ -427,7 +422,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
   const mailOptions = {
     from: formatMosaicFromHeader(),
     to,
-    subject: `Your Order Could Not Be Fulfilled - #${safeOrderNo}`,
+    subject: `Your Order Could Not Be Fulfilled - #${String(orderNo).replace(/[\r\n]/g, '')}`,
     html,
     text,
   };
@@ -447,13 +442,14 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
   const order = details.order;
   const orderNo = order?.groupOrderId || order?._id?.toString() || details.orderId || details.orderNo || '';
   const rawCustomerName = order?.userId?.name || details.customerName || details.firstName || '';
-  const safeFirstName = esc(rawCustomerName ? rawCustomerName.split(' ')[0] : 'there');
+  const rawFirstName = rawCustomerName ? rawCustomerName.split(' ')[0] : 'there';
+  const safeFirstName = esc(rawFirstName);
   const safeOrderNo = esc(orderNo);
   const safeTrackingId = esc(details.trackingId || 'N/A');
   const safeTrackingUrl = trackingUrl || orderUrl;
 
   if (status === "shipped") {
-    const preheader = `Your order is on the way! Tracking Number: ${safeTrackingId}`;
+    const preheader = `Your order is on the way! Tracking Number: ${details.trackingId || 'N/A'}`;
     const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
     const bodyHtml = `
@@ -526,7 +522,7 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
     });
 
     const text = [
-      `Hi ${safeFirstName},`,
+      `Hi ${rawFirstName},`,
       ``,
       `Your order has shipped.`,
       `Tracking Number: ${details.trackingId || 'N/A'}`,
@@ -541,7 +537,7 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
     return transporter.sendMail({
       from: formatMosaicFromHeader(),
       to,
-      subject: `Your Order Is On the Way!${safeOrderNo ? ` - #${safeOrderNo}` : ''}`,
+      subject: `Your Order Is On the Way!${safeOrderNo ? ` - #${String(orderNo).replace(/[\r\n]/g, '')}` : ''}`,
       html,
       text,
     });
@@ -549,7 +545,7 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
 
   // DELIVERED
   if (status === "delivered") {
-    const preheader = `Your order ${safeOrderNo ? `#${safeOrderNo} ` : ''}has been delivered! Thank you for supporting our vendor community.`;
+    const preheader = `Your order ${safeOrderNo ? `#${orderNo} ` : ''}has been delivered! Thank you for supporting our vendor community.`;
     const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
     const bodyHtml = `
@@ -602,9 +598,9 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
     });
 
     const text = [
-      `Hi ${safeFirstName},`,
+      `Hi ${rawFirstName},`,
       ``,
-      `Your order ${safeOrderNo ? `#${safeOrderNo} ` : ''}has been delivered. We hope you enjoy your purchase — thank you for supporting our vendor community.`,
+      `Your order ${orderNo ? `#${orderNo} ` : ''}has been delivered. We hope you enjoy your purchase — thank you for supporting our vendor community.`,
       ``,
       `Thank you for being part of the Mosaic Biz Hub community.`,
       `Mosaic Biz Hub`,
@@ -613,7 +609,7 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
     return transporter.sendMail({
       from: formatMosaicFromHeader(),
       to,
-      subject: `Your Order Has Been Delivered${safeOrderNo ? ` - #${safeOrderNo}` : ''}`,
+      subject: `Your Order Has Been Delivered${safeOrderNo ? ` - #${String(orderNo).replace(/[\r\n]/g, '')}` : ''}`,
       html,
       text,
     });

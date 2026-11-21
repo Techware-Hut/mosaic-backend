@@ -25,9 +25,9 @@ const sendBusinessProfileReviewEmail = async (userEmail, userName, profileId) =>
           
           <h3>Details:</h3>
           <ul>
-            <li><strong>User:</strong> ${userName}</li>
-            <li><strong>Email:</strong> ${userEmail}</li>
-            <li><strong>Profile ID:</strong> ${profileId}</li>
+            <li><strong>User:</strong> ${esc(userName)}</li>
+            <li><strong>Email:</strong> ${esc(userEmail)}</li>
+            <li><strong>Profile ID:</strong> ${esc(profileId)}</li>
             <li><strong>Submission Time:</strong> ${new Date().toLocaleString()}</li>
           </ul>
           
@@ -150,7 +150,7 @@ const sendQuestionVerificationEmail = async (userEmail, userName, questionNumber
       subject: 'Business Profile Question Verified',
       html: `
         <div style="font-family: Arial, sans-serif; background:#f9f9f9; padding:20px;">
-          <h2 style="color:#28a745;">Great News, ${userName}!</h2>
+          <h2 style="color:#28a745;">Great News, ${esc(userName)}!</h2>
           
           <p>One of your business profile questions has been verified by our admin team.</p>
           
