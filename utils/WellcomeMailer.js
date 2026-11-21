@@ -8,13 +8,7 @@ const { baseLayout, esc } = require('./emailTemplates/baseLayout');
 
 const transporter = createMosaicTransport(nodemailer);
 
-const escapeHtml = (value = '') =>
-  String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+const escapeHtml = esc;
 
 const normalizeMailerList = (value) => {
   const values = Array.isArray(value) ? value : [value];
@@ -262,7 +256,7 @@ exports.sendWelcomeEmail = async (to, vendorName) => {
     html: `
       <div style="font-family: Arial, sans-serif; text-align: center; background-color: #f9f9f9; padding: 20px;">
         <img src="${logoSrcForHtml}" alt="Mosaic Biz Hub Logo" style="max-width: 150px; margin-bottom: 20px;">
-        <h2 style="color: #333;">Welcome to Mosaic Biz Hub, ${vendorName}!</h2>
+        <h2 style="color: #333;">Welcome to Mosaic Biz Hub, ${esc(vendorName)}!</h2>
         <p style="color: #555; font-size: 16px;">
           We’re excited to have you join our platform. Mosaic Biz Hub is here to help you grow your business and connect with new opportunities.
         </p>
@@ -305,7 +299,7 @@ exports.sendAdminOnboardingSubmissionEmail = async ({
 
   const ctaUrl = buildFrontendUrl(`/admin/vendor-applications/${applicationId || ''}`);
   const ctaText = 'Open Admin Dashboard';
-  const preheader = `A vendor has submitted Step 1 and requires review. Application #${safeAppId}`;
+  const preheader = `A vendor has submitted Step 1 and requires review. Application #${applicationId || 'N/A'}`;
   const footerReason = 'You are receiving this email because you are registered as an administrator for Mosaic Biz Hub.';
 
   const bodyHtml = `
@@ -396,7 +390,7 @@ exports.sendAdminOnboardingSubmissionEmail = async ({
   const mailOptions = {
     from: formatMosaicFromHeader(),
     to: safeAdminEmail,
-    subject: `Vendor Submission Requires Review – Application #${safeAppId}`,
+    subject: `Vendor Submission Requires Review – Application #${String(applicationId || 'N/A').replace(/[\r\n]/g, '')}`,
     text: textContent,
     html: baseLayout({ preheader, bodyHtml, footerReason }),
   };
@@ -575,7 +569,7 @@ exports.sendVendorApprovedEmail = async ({
   const continueOnboardingUrl = buildFrontendUrl('/login?type=vendor');
   const ctaUrl = buildFrontendUrl('/partners');
   const ctaText = 'Continue Tier Plan';
-  const preheader = `Congratulations ${safeFirstName}! Your business has passed initial verification.`;
+  const preheader = `Congratulations ${firstName || (vendorName ? vendorName.split(' ')[0] : 'there')}! Your business has passed initial verification.`;
   const footerReason = 'You are receiving this email because your vendor application was approved on Mosaic Biz Hub.';
 
   const bodyHtml = `
@@ -1095,8 +1089,8 @@ exports.sendAdminVendorProfileCompletedEmail = async ({
 
         <p><strong>Vendor Details:</strong></p>
         <ul>
-          <li><strong>Application Number:</strong> ${safeApplicationId}</li>
-          <li><strong>Business Name:</strong> ${safeBusinessName}</li>
+          <li><strong>Application Number:</strong> ${esc(safeApplicationId)}</li>
+          <li><strong>Business Name:</strong> ${esc(safeBusinessName)}</li>
         </ul>
 
         <p>

@@ -13,13 +13,7 @@ const APP_NAME = process.env.APP_NAME || "Mosaic Biz Hub";
 const LOGO_URL = getFrontendLogoUrl();
 const ORDERS_URL = buildFrontendUrl("/customer/order");
 
-const escapeHtml = (value = "") =>
-  String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+const escapeHtml = esc;
 
 // Configure transporter (swap service/config as needed)
 const transporter = createMosaicTransport(nodemailer);
@@ -246,7 +240,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
   const orderUrl = buildFrontendUrl("/customer/order");
 
   if (isAccepted) {
-    const preheader = `Great news! Your order #${safeOrderNo} has been accepted and is now being prepared.`;
+    const preheader = `Great news! Your order #${orderNo} has been accepted and is now being prepared.`;
     const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
     const bodyHtml = `
@@ -328,7 +322,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
     const mailOptions = {
       from: formatMosaicFromHeader(),
       to,
-      subject: `Your Order Has Been Accepted - #${safeOrderNo}`,
+      subject: `Your Order Has Been Accepted - #${String(orderNo).replace(/[\r\n]/g, '')}`,
       html,
       text,
     };
@@ -345,7 +339,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
 
   // REJECTED
   const browseVendorsUrl = buildFrontendUrl("/");
-  const preheader = `We’re sorry — your order #${safeOrderNo} could not be fulfilled by the vendor.`;
+  const preheader = `We’re sorry — your order #${orderNo} could not be fulfilled by the vendor.`;
   const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
   const bodyHtml = `
@@ -427,7 +421,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
   const mailOptions = {
     from: formatMosaicFromHeader(),
     to,
-    subject: `Your Order Could Not Be Fulfilled - #${safeOrderNo}`,
+    subject: `Your Order Could Not Be Fulfilled - #${String(orderNo).replace(/[\r\n]/g, '')}`,
     html,
     text,
   };
@@ -453,7 +447,7 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
   const safeTrackingUrl = trackingUrl || orderUrl;
 
   if (status === "shipped") {
-    const preheader = `Your order is on the way! Tracking Number: ${safeTrackingId}`;
+    const preheader = `Your order is on the way! Tracking Number: ${details.trackingId || 'N/A'}`;
     const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
     const bodyHtml = `
@@ -541,7 +535,7 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
     return transporter.sendMail({
       from: formatMosaicFromHeader(),
       to,
-      subject: `Your Order Is On the Way!${safeOrderNo ? ` - #${safeOrderNo}` : ''}`,
+      subject: `Your Order Is On the Way!${safeOrderNo ? ` - #${String(orderNo).replace(/[\r\n]/g, '')}` : ''}`,
       html,
       text,
     });
@@ -549,7 +543,7 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
 
   // DELIVERED
   if (status === "delivered") {
-    const preheader = `Your order ${safeOrderNo ? `#${safeOrderNo} ` : ''}has been delivered! Thank you for supporting our vendor community.`;
+    const preheader = `Your order ${safeOrderNo ? `#${orderNo} ` : ''}has been delivered! Thank you for supporting our vendor community.`;
     const footerReason = 'You are receiving this email because you placed an order on Mosaic Biz Hub.';
 
     const bodyHtml = `
@@ -613,7 +607,7 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
     return transporter.sendMail({
       from: formatMosaicFromHeader(),
       to,
-      subject: `Your Order Has Been Delivered${safeOrderNo ? ` - #${safeOrderNo}` : ''}`,
+      subject: `Your Order Has Been Delivered${safeOrderNo ? ` - #${String(orderNo).replace(/[\r\n]/g, '')}` : ''}`,
       html,
       text,
     });

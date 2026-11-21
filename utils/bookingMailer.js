@@ -4,15 +4,14 @@ const {
   createMosaicTransport,
   formatMosaicFromHeader,
 } = require('./smtpTransport');
-const { baseLayout } = require('./emailTemplates/baseLayout');
+const { baseLayout, esc } = require('./emailTemplates/baseLayout');
 
 const transporter = createMosaicTransport(nodemailer);
 
-const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const safe = (value, fallback = 'N/A') => {
   const normalized = String(value || '').trim();
-  return normalized || fallback;
+  return esc(normalized || fallback);
 };
 
 const buildPartnerBookingsUrl = (businessSlug) => {

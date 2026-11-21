@@ -427,7 +427,7 @@ exports.sendOrderPaidEmails = async ({
     results.customer = await sendRoleEmail({
       from: formatMosaicFromHeader(),
       to: normalizedCustomerEmails,
-      subject: `✅ Order #${orderNo} confirmed`,
+      subject: `✅ Order #${String(orderNo).replace(/[\r\n]/g, '')} confirmed`,
       text: customerText,
       html: customerHtml,
       attachments,
@@ -469,7 +469,7 @@ exports.sendOrderPaidEmails = async ({
     results.vendor = await sendRoleEmail({
       from: formatMosaicFromHeader(),
       to: filteredVendorEmails,
-      subject: `New Order Received - #${orderNo}`,
+      subject: `New Order Received - #${String(orderNo).replace(/[\r\n]/g, '')}`,
       text: vendorText,
       html: vendorHtml,
       attachments,
