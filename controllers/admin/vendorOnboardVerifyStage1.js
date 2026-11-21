@@ -1134,7 +1134,9 @@ exports.finalizeVerification = async (req, res) => {
           send: () => sendVendorApprovedEmail({
             to: vendorEmail,
             vendorName,
+            businessName: application.businessName,
             applicationId: application.applicationId,
+            submissionDate: application.submittedAt || application.createdAt,
           }),
         },
       ];

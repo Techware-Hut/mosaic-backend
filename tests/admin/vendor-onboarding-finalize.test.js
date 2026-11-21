@@ -160,6 +160,20 @@ test('finalizeVerification approves when required docs verified', async () => {
   assert.equal(businessUpdates.at(-1).update.$set.isApproved, true);
 });
 
+test('approval email names the vendor business instead of "Your Business"', async () => {
+  const submittedAt = new Date('2026-11-19T15:00:00Z');
+  const application = buildApplication({ businessName: 'BKH Vendor Test Prod', submittedAt });
+  const { controller, mailerCalls } = loadController({ application });
+  const res = createResponse();
+
+  await controller.finalizeVerification({ params: { applicationId: application.applicationId } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(mailerCalls.approved.businessName, 'BKH Vendor Test Prod');
+  assert.equal(mailerCalls.approved.submissionDate, submittedAt);
+  assert.equal(mailerCalls.approved.applicationId, application.applicationId);
+});
+
 test('corrected required checks reverify once and finalize from the corrected score', async () => {
   const paidVerification = {
     status: 'paid',
