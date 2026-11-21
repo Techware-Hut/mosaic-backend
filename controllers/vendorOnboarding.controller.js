@@ -1071,6 +1071,19 @@ exports.createVerificationPayment = async (req, res) => {
         const existingIntent = await stripe.paymentIntents.retrieve(
           onboarding.verificationPayment.paymentIntentId
         );
+        // Paid on Stripe but the webhook has not landed yet: record the
+        // payment instead of replacing the PaymentIntent, which would orphan
+        // the charge and make the late webhook miss this record.
+        if (existingIntent?.status === "succeeded") {
+          const { paid } = await reconcileVendorVerificationPaymentFromStripe(onboarding, userId);
+          if (paid) {
+            return res.status(400).json({
+              success: false,
+              message: "Verification fee already paid"
+            });
+          }
+          // id/metadata mismatch: not this vendor's payment; create a new one.
+        }
         if (
           existingIntent &&
           existingIntent.status !== "succeeded" &&
@@ -1111,20 +1124,54 @@ exports.createVerificationPayment = async (req, res) => {
       description: 'Vendor Onboarding Verification Fee - $24.99'
     });
 
-    onboarding.verificationPayment = {
-      provider: 'stripe',
-      paymentIntentId: paymentIntent.id,
-      amount: 24.99,
-      amount_cents: 2499,
-      currency: 'usd',
-      status: 'pending',
-      paidAt: null
+    const createFields = {
+      verificationPayment: {
+        provider: 'stripe',
+        paymentIntentId: paymentIntent.id,
+        amount: 24.99,
+        amount_cents: 2499,
+        currency: 'usd',
+        status: 'pending',
+        paidAt: null
+      },
+      status: 'payment_pending',
     };
+    // updateOne skips validate hooks; preserve legacy badge normalization.
+    if (onboarding.badge === 'Bronze') createFields.badge = 'Silver';
 
-    onboarding.status = 'payment_pending';
-    onboarding.submittedAt = undefined;
-
-    await onboarding.save();
+    // Conditional write instead of a stale save(): only replace the payment
+    // if the record is still as we read it (same status and PaymentIntent, not
+    // paid). A webhook or /submit landing in between must win.
+    const createResult = await VendorOnboarding.updateOne(
+      {
+        _id: onboarding._id,
+        status: onboarding.status,
+        'verificationPayment.status': { $ne: 'paid' },
+        'verificationPayment.paymentIntentId': onboarding.verificationPayment?.paymentIntentId ?? null,
+      },
+      { $set: createFields, $unset: { submittedAt: 1 } },
+      { runValidators: true }
+    );
+    if (!createResult?.matchedCount) {
+      // Lost the race. The new PaymentIntent's client secret is never
+      // returned, so it cannot be confirmed; report the current state.
+      const current = await VendorOnboarding.findById(onboarding._id);
+      if (current?.verificationPayment?.status === 'paid') {
+        return res.status(400).json({
+          success: false,
+          message: "Verification fee already paid"
+        });
+      }
+      return res.status(409).json({
+        success: false,
+        message: "Verification payment state changed. Please retry.",
+        data: {
+          status: current?.verificationPayment?.status || 'not_started',
+          applicationStatus: current?.status || null,
+          applicationId: current?.applicationId || "N/A"
+        }
+      });
+    }
 
     return res.status(200).json({
       success: true,
