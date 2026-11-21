@@ -1045,6 +1045,28 @@ async function reconcileVendorVerificationPaymentFromStripe(onboarding, userId) 
 }
 
 //payment controllers
+
+// Used when a conditional write in createVerificationPayment loses a race:
+// re-read and report what actually won.
+async function respondWithCurrentPaymentState(res, onboardingId) {
+  const current = await VendorOnboarding.findById(onboardingId);
+  if (current?.verificationPayment?.status === 'paid') {
+    return res.status(400).json({
+      success: false,
+      message: "Verification fee already paid"
+    });
+  }
+  return res.status(409).json({
+    success: false,
+    message: "Verification payment state changed. Please retry.",
+    data: {
+      status: current?.verificationPayment?.status || 'not_started',
+      applicationStatus: current?.status || null,
+      applicationId: current?.applicationId || "N/A"
+    }
+  });
+}
+
 exports.createVerificationPayment = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -1089,8 +1111,25 @@ exports.createVerificationPayment = async (req, res) => {
           existingIntent.status !== "succeeded" &&
           existingIntent.status !== "canceled"
         ) {
-          onboarding.status = "payment_pending";
-          await onboarding.save();
+          // Conditional write instead of a stale save(): a webhook that marked
+          // this PaymentIntent paid (and moved the record to draft) after our
+          // read must not be flipped back to payment_pending.
+          const reuseFields = { status: "payment_pending" };
+          // updateOne skips validate hooks; preserve legacy badge normalization.
+          if (onboarding.badge === "Bronze") reuseFields.badge = "Silver";
+          const reuseResult = await VendorOnboarding.updateOne(
+            {
+              _id: onboarding._id,
+              status: onboarding.status,
+              "verificationPayment.status": { $ne: "paid" },
+              "verificationPayment.paymentIntentId": onboarding.verificationPayment.paymentIntentId,
+            },
+            { $set: reuseFields },
+            { runValidators: true }
+          );
+          if (!reuseResult?.matchedCount) {
+            return respondWithCurrentPaymentState(res, onboarding._id);
+          }
 
           return res.status(200).json({
             success: true,
@@ -1155,22 +1194,7 @@ exports.createVerificationPayment = async (req, res) => {
     if (!createResult?.matchedCount) {
       // Lost the race. The new PaymentIntent's client secret is never
       // returned, so it cannot be confirmed; report the current state.
-      const current = await VendorOnboarding.findById(onboarding._id);
-      if (current?.verificationPayment?.status === 'paid') {
-        return res.status(400).json({
-          success: false,
-          message: "Verification fee already paid"
-        });
-      }
-      return res.status(409).json({
-        success: false,
-        message: "Verification payment state changed. Please retry.",
-        data: {
-          status: current?.verificationPayment?.status || 'not_started',
-          applicationStatus: current?.status || null,
-          applicationId: current?.applicationId || "N/A"
-        }
-      });
+      return respondWithCurrentPaymentState(res, onboarding._id);
     }
 
     return res.status(200).json({

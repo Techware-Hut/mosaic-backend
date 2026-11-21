@@ -271,3 +271,57 @@ test('status moved past payment stage between read and write is not reverted', a
   assert.equal(res.body.success, false);
   assert.equal(res.body.data.applicationStatus, 'submitted');
 });
+
+test('reuse path: webhook marking paid between read and write is not reverted to payment_pending', async () => {
+  const record = buildRecord({ status: 'draft' });
+  const { controller, calls } = loadController(record, {
+    intents: { [PI]: { status: 'processing', metadata: vendorMetadata } },
+    onRead: async () => {
+      record.verificationPayment.status = 'paid';
+      record.verificationPayment.paidAt = new Date('2026-11-20T00:00:00Z');
+    },
+  });
+  const res = jsonResponse();
+  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  assert.equal(calls.created.length, 0);
+  assert.equal(calls.save, 0);
+  assert.equal(record.status, 'draft');
+  assert.equal(record.verificationPayment.status, 'paid');
+  assert.equal(record.verificationPayment.paymentIntentId, PI);
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, { success: false, message: 'Verification fee already paid' });
+});
+
+test('reuse path: status moved between read and write is not reverted (409)', async () => {
+  const record = buildRecord({ status: 'draft' });
+  const { controller, calls } = loadController(record, {
+    intents: { [PI]: { status: 'requires_payment_method', metadata: vendorMetadata } },
+    onRead: async () => { record.status = 'submitted'; },
+  });
+  const res = jsonResponse();
+  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  assert.equal(calls.created.length, 0);
+  assert.equal(record.status, 'submitted');
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.data.applicationStatus, 'submitted');
+});
+
+test('reuse path write matches on _id, read status, PaymentIntent and not-paid', async () => {
+  const record = buildRecord({ status: 'draft', badge: 'Bronze' });
+  const { controller, calls } = loadController(record, {
+    intents: { [PI]: { status: 'requires_payment_method', metadata: vendorMetadata } },
+  });
+  const res = jsonResponse();
+  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(calls.save, 0);
+  assert.deepEqual(calls.updateOne[0].filter, {
+    _id: 'onb_create_1',
+    status: 'draft',
+    'verificationPayment.status': { $ne: 'paid' },
+    'verificationPayment.paymentIntentId': PI,
+  });
+  assert.deepEqual(calls.updateOne[0].update, { $set: { status: 'payment_pending', badge: 'Silver' } });
+  assert.equal(record.status, 'payment_pending');
+  assert.equal(record.badge, 'Silver');
+});
