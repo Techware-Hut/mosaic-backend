@@ -11,6 +11,15 @@ const controllerPath = path.resolve(__dirname, '../../controllers/vendorOnboardi
 const userId = '507f1f77bcf86cd799439011';
 const PI = 'pi_test_create_reconcile';
 
+const ENV_KEYS = ['STRIPE_SECRET_KEY', 'STRIPE_VENDOR_VERIFICATION_WEBHOOK_SECRET'];
+const originalEnv = Object.fromEntries(ENV_KEYS.map(key => [key, process.env[key]]));
+test.after(() => {
+  for (const key of ENV_KEYS) {
+    if (originalEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = originalEnv[key];
+  }
+});
+
 function getPath(doc, key) {
   return key.split('.').reduce((v, k) => (v == null ? undefined : v[k]), doc);
 }
@@ -41,11 +50,16 @@ function withSave(record, calls) {
   });
   return snapshot;
 }
+function stripeError(message, extra = {}) {
+  return Object.assign(new Error(message), extra);
+}
 
-function loadController(record, { intents = {}, onRead } = {}) {
+// intents[id] is either a PaymentIntent shape or a function(callIndex) that
+// returns one or throws, so successive retrieves can differ.
+function loadController(record, { intents = {}, onRead, updateOneError, cancelError } = {}) {
   process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_mock';
   process.env.STRIPE_VENDOR_VERIFICATION_WEBHOOK_SECRET = 'whsec_test_mock';
-  const calls = { save: 0, updateOne: [], created: [], retrieved: [] };
+  const calls = { save: 0, updateOne: [], created: [], retrieved: [], canceled: [] };
   const vendorOnboardingMock = {
     findOne: async filter => {
       if (!matches(record, filter)) return null;
@@ -60,6 +74,7 @@ function loadController(record, { intents = {}, onRead } = {}) {
     findById: async () => withSave(record, calls),
     updateOne: async (filter, update) => {
       calls.updateOne.push({ filter, update });
+      if (updateOneError) throw updateOneError;
       if (!matches(record, filter)) return { matchedCount: 0, modifiedCount: 0 };
       for (const [key, value] of Object.entries(update.$set || {})) setPath(record, key, structuredClone(value));
       for (const key of Object.keys(update.$unset || {})) delete record[key];
@@ -70,14 +85,22 @@ function loadController(record, { intents = {}, onRead } = {}) {
     webhooks: { constructEvent: payload => JSON.parse(payload.toString()) },
     paymentIntents: {
       retrieve: async id => {
+        const callIndex = calls.retrieved.filter(r => r === id).length;
         calls.retrieved.push(id);
-        if (!intents[id]) throw new Error('No such payment_intent');
-        return { id, client_secret: `${id}_secret`, ...intents[id] };
+        const entry = intents[id];
+        if (!entry) throw stripeError('No such payment_intent', { code: 'resource_missing', statusCode: 404 });
+        const intent = typeof entry === 'function' ? entry(callIndex) : entry;
+        return { id, client_secret: `${id}_secret`, ...intent };
       },
       create: async params => {
         const id = `pi_new_${calls.created.length + 1}`;
         calls.created.push({ id, params });
         return { id, client_secret: `${id}_secret`, status: 'requires_payment_method', metadata: params.metadata };
+      },
+      cancel: async id => {
+        calls.canceled.push(id);
+        if (cancelError) throw cancelError;
+        return { id, status: 'canceled' };
       },
     },
   });
@@ -108,6 +131,7 @@ function buildRecord(overrides = {}) {
   };
 }
 const vendorMetadata = { type: 'vendor_verification', userId };
+const ALREADY_PAID = { success: false, code: 'ALREADY_PAID', message: 'Verification fee already paid' };
 function jsonResponse() {
   return {
     statusCode: 200,
@@ -120,6 +144,14 @@ function webhookReq(paymentIntentId) {
   const event = { type: 'payment_intent.succeeded', data: { object: { id: paymentIntentId, metadata: vendorMetadata } } };
   return { headers: { 'stripe-signature': 't=1,v1=synthetic' }, body: Buffer.from(JSON.stringify(event)) };
 }
+async function quietly(fn) {
+  const { warn, error } = console;
+  console.warn = () => {};
+  console.error = () => {};
+  try { return await fn(); } finally { console.warn = warn; console.error = error; }
+}
+const create = (controller, res) =>
+  quietly(() => controller.createVerificationPayment({ user: { _id: userId } }, res));
 
 test('existing PaymentIntent already succeeded (webhook pending): no new PI, record reconciled to paid/draft, already-paid response', async () => {
   const record = buildRecord();
@@ -127,11 +159,12 @@ test('existing PaymentIntent already succeeded (webhook pending): no new PI, rec
     intents: { [PI]: { status: 'succeeded', metadata: vendorMetadata } },
   });
   const res = jsonResponse();
-  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  await create(controller, res);
 
   assert.equal(calls.created.length, 0, 'must not create a new PaymentIntent');
+  assert.deepEqual(calls.retrieved, [PI], 'reconcile reuses the retrieved intent');
   assert.equal(res.statusCode, 400);
-  assert.deepEqual(res.body, { success: false, message: 'Verification fee already paid' });
+  assert.deepEqual(res.body, ALREADY_PAID);
   assert.equal(record.verificationPayment.paymentIntentId, PI);
   assert.equal(record.verificationPayment.status, 'paid');
   assert.ok(record.verificationPayment.paidAt instanceof Date);
@@ -143,7 +176,7 @@ test('late webhook for the reconciled PaymentIntent still finds the record and i
   const { controller } = loadController(record, {
     intents: { [PI]: { status: 'succeeded', metadata: vendorMetadata } },
   });
-  await controller.createVerificationPayment({ user: { _id: userId } }, jsonResponse());
+  await create(controller, jsonResponse());
   const paidAt = record.verificationPayment.paidAt;
 
   const logs = [];
@@ -169,11 +202,57 @@ test('succeeded PaymentIntent with foreign metadata is not trusted; a new PI is 
     intents: { [PI]: { status: 'succeeded', metadata: { type: 'vendor_verification', userId: 'someone_else' } } },
   });
   const res = jsonResponse();
-  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  await create(controller, res);
   assert.equal(calls.created.length, 1);
   assert.equal(res.statusCode, 200);
   assert.equal(record.verificationPayment.paymentIntentId, 'pi_new_1');
   assert.equal(record.verificationPayment.status, 'pending');
+});
+
+test('succeeded vendor PaymentIntent but a second retrieve / reconcile write fails: no new PI, stored PI unchanged, PAYMENT_CONFIRMING', async () => {
+  const record = buildRecord();
+  const { controller, calls } = loadController(record, {
+    // First retrieve succeeds; any second retrieve throws.
+    intents: {
+      [PI]: callIndex => {
+        if (callIndex > 0) throw stripeError('Stripe unavailable', { statusCode: 500 });
+        return { status: 'succeeded', metadata: vendorMetadata };
+      },
+    },
+    updateOneError: new Error('db write failed'),
+  });
+  const res = jsonResponse();
+  await create(controller, res);
+  assert.equal(calls.created.length, 0, 'must not create a new PaymentIntent over a succeeded one');
+  assert.equal(record.verificationPayment.paymentIntentId, PI);
+  assert.equal(record.verificationPayment.status, 'pending');
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.success, false);
+  assert.equal(res.body.code, 'PAYMENT_CONFIRMING');
+});
+
+test('generic Stripe retrieve error: 503, no new PI', async () => {
+  const record = buildRecord();
+  const { controller, calls } = loadController(record, {
+    intents: { [PI]: () => { throw stripeError('connection reset', { type: 'StripeConnectionError' }); } },
+  });
+  const res = jsonResponse();
+  await create(controller, res);
+  assert.equal(calls.created.length, 0);
+  assert.equal(calls.updateOne.length, 0);
+  assert.equal(record.verificationPayment.paymentIntentId, PI);
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.code, 'PAYMENT_PROVIDER_UNAVAILABLE');
+});
+
+test('stored PaymentIntent missing on Stripe (resource_missing): new PI created as before', async () => {
+  const record = buildRecord();
+  const { controller, calls } = loadController(record); // no intents -> resource_missing
+  const res = jsonResponse();
+  await create(controller, res);
+  assert.equal(calls.created.length, 1);
+  assert.equal(res.statusCode, 200);
+  assert.equal(record.verificationPayment.paymentIntentId, 'pi_new_1');
 });
 
 test('existing PaymentIntent processing: no new PI, existing client secret returned', async () => {
@@ -182,34 +261,46 @@ test('existing PaymentIntent processing: no new PI, existing client secret retur
     intents: { [PI]: { status: 'processing', metadata: vendorMetadata } },
   });
   const res = jsonResponse();
-  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  await create(controller, res);
   assert.equal(calls.created.length, 0);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.data.clientSecret, `${PI}_secret`);
   assert.equal(record.verificationPayment.paymentIntentId, PI);
 });
 
-for (const status of ['canceled']) {
-  test(`existing PaymentIntent ${status}: new PI created and stored as before`, async () => {
-    const record = buildRecord({ submittedAt: new Date('2026-11-01T00:00:00Z') });
-    const { controller, calls } = loadController(record, {
-      intents: { [PI]: { status, metadata: vendorMetadata } },
-    });
-    const res = jsonResponse();
-    await controller.createVerificationPayment({ user: { _id: userId } }, res);
-    assert.equal(calls.created.length, 1);
-    assert.equal(calls.created[0].params.amount, 2499);
-    assert.equal(calls.created[0].params.currency, 'usd');
-    assert.deepEqual(calls.created[0].params.metadata, { userId, type: 'vendor_verification', applicationId: 'MBH-APP-TEST-516' });
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.body.message, 'Payment intent created successfully. Complete payment to continue.');
-    assert.equal(res.body.data.clientSecret, 'pi_new_1_secret');
-    assert.equal(record.verificationPayment.paymentIntentId, 'pi_new_1');
-    assert.equal(record.verificationPayment.status, 'pending');
-    assert.equal(record.status, 'payment_pending');
-    assert.equal(record.submittedAt, undefined);
+test('reuse write DB error propagates to 500 and does not create a new PI', async () => {
+  const record = buildRecord();
+  const { controller, calls } = loadController(record, {
+    intents: { [PI]: { status: 'requires_payment_method', metadata: vendorMetadata } },
+    updateOneError: new Error('db write failed'),
   });
-}
+  const res = jsonResponse();
+  await create(controller, res);
+  assert.equal(calls.created.length, 0);
+  assert.equal(res.statusCode, 500);
+  assert.equal(record.verificationPayment.paymentIntentId, PI);
+});
+
+test('existing PaymentIntent canceled: new PI created and stored as before', async () => {
+  const record = buildRecord({ submittedAt: new Date('2026-11-01T00:00:00Z') });
+  const { controller, calls } = loadController(record, {
+    intents: { [PI]: { status: 'canceled', metadata: vendorMetadata } },
+  });
+  const res = jsonResponse();
+  await create(controller, res);
+  assert.equal(calls.created.length, 1);
+  assert.equal(calls.created[0].params.amount, 2499);
+  assert.equal(calls.created[0].params.currency, 'usd');
+  assert.deepEqual(calls.created[0].params.metadata, { userId, type: 'vendor_verification', applicationId: 'MBH-APP-TEST-516' });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.message, 'Payment intent created successfully. Complete payment to continue.');
+  assert.equal(res.body.data.clientSecret, 'pi_new_1_secret');
+  assert.equal(record.verificationPayment.paymentIntentId, 'pi_new_1');
+  assert.equal(record.verificationPayment.status, 'pending');
+  assert.equal(record.status, 'payment_pending');
+  assert.equal(record.submittedAt, undefined);
+  assert.equal(calls.canceled.length, 0);
+});
 
 test('existing PaymentIntent failed (requires_payment_method after webhook failure): reused, no new PI', async () => {
   const record = buildRecord({ verificationPayment: { provider: 'stripe', status: 'failed', paymentIntentId: PI, paidAt: null } });
@@ -217,7 +308,7 @@ test('existing PaymentIntent failed (requires_payment_method after webhook failu
     intents: { [PI]: { status: 'requires_payment_method', metadata: vendorMetadata } },
   });
   const res = jsonResponse();
-  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  await create(controller, res);
   assert.equal(calls.created.length, 0);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.data.clientSecret, `${PI}_secret`);
@@ -227,7 +318,7 @@ test('first payment (no PaymentIntent yet) creates one and moves draft to paymen
   const record = buildRecord({ status: 'draft', badge: 'Bronze', verificationPayment: { status: 'not_started' } });
   const { controller, calls } = loadController(record);
   const res = jsonResponse();
-  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  await create(controller, res);
   assert.equal(calls.created.length, 1);
   assert.equal(res.statusCode, 200);
   assert.equal(record.status, 'payment_pending');
@@ -236,7 +327,7 @@ test('first payment (no PaymentIntent yet) creates one and moves draft to paymen
   assert.equal(calls.save, 0, 'final write must be conditional, not save()');
 });
 
-test('webhook marking paid between read and write is not overwritten', async () => {
+test('webhook marking paid between read and write is not overwritten; orphan PI is canceled', async () => {
   const record = buildRecord();
   const { controller, calls } = loadController(record, {
     intents: { [PI]: { status: 'canceled', metadata: vendorMetadata } },
@@ -248,27 +339,31 @@ test('webhook marking paid between read and write is not overwritten', async () 
     },
   });
   const res = jsonResponse();
-  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  await create(controller, res);
   assert.equal(record.verificationPayment.status, 'paid');
   assert.equal(record.verificationPayment.paymentIntentId, PI);
   assert.equal(record.verificationPayment.paidAt.toISOString(), '2026-11-20T00:00:00.000Z');
   assert.equal(record.status, 'draft');
   assert.equal(calls.save, 0);
+  assert.deepEqual(calls.canceled, ['pi_new_1']);
   assert.equal(res.statusCode, 400);
-  assert.deepEqual(res.body, { success: false, message: 'Verification fee already paid' });
+  assert.deepEqual(res.body, ALREADY_PAID);
 });
 
-test('status moved past payment stage between read and write is not reverted', async () => {
+test('status moved past payment stage between read and write is not reverted; a failing orphan cancel does not change the response', async () => {
   const record = buildRecord({ status: 'draft', verificationPayment: { status: 'not_started' } });
-  const { controller } = loadController(record, {
+  const { controller, calls } = loadController(record, {
     onRead: async () => { record.status = 'submitted'; },
+    cancelError: stripeError('cancel failed', { statusCode: 500 }),
   });
   const res = jsonResponse();
-  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  await create(controller, res);
   assert.equal(record.status, 'submitted');
   assert.equal(record.verificationPayment.paymentIntentId, undefined);
+  assert.deepEqual(calls.canceled, ['pi_new_1']);
   assert.equal(res.statusCode, 409);
   assert.equal(res.body.success, false);
+  assert.equal(res.body.code, 'PAYMENT_STATE_CHANGED');
   assert.equal(res.body.data.applicationStatus, 'submitted');
 });
 
@@ -282,46 +377,72 @@ test('reuse path: webhook marking paid between read and write is not reverted to
     },
   });
   const res = jsonResponse();
-  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  await create(controller, res);
   assert.equal(calls.created.length, 0);
   assert.equal(calls.save, 0);
   assert.equal(record.status, 'draft');
   assert.equal(record.verificationPayment.status, 'paid');
   assert.equal(record.verificationPayment.paymentIntentId, PI);
   assert.equal(res.statusCode, 400);
-  assert.deepEqual(res.body, { success: false, message: 'Verification fee already paid' });
+  assert.deepEqual(res.body, ALREADY_PAID);
 });
 
-test('reuse path: status moved between read and write is not reverted (409)', async () => {
+test('reuse path: status moved past payment stage between read and write is not reverted (409)', async () => {
   const record = buildRecord({ status: 'draft' });
   const { controller, calls } = loadController(record, {
     intents: { [PI]: { status: 'requires_payment_method', metadata: vendorMetadata } },
     onRead: async () => { record.status = 'submitted'; },
   });
   const res = jsonResponse();
-  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  await create(controller, res);
   assert.equal(calls.created.length, 0);
   assert.equal(record.status, 'submitted');
   assert.equal(res.statusCode, 409);
+  assert.equal(res.body.code, 'PAYMENT_STATE_CHANGED');
   assert.equal(res.body.data.applicationStatus, 'submitted');
 });
 
-test('reuse path write matches on _id, read status, PaymentIntent and not-paid', async () => {
+test('reuse path: draft double-click is idempotent (second request also gets 200 reuse)', async () => {
+  const record = buildRecord({ status: 'draft' });
+  const { controller, calls } = loadController(record, {
+    intents: { [PI]: { status: 'requires_payment_method', metadata: vendorMetadata } },
+    // The first click's write lands after the second click read 'draft'.
+    onRead: async () => { record.status = 'payment_pending'; },
+  });
+  const res = jsonResponse();
+  await create(controller, res);
+  assert.equal(calls.created.length, 0);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.data.clientSecret, `${PI}_secret`);
+  assert.equal(record.status, 'payment_pending');
+});
+
+test('reuse path write matches on _id, read/payment_pending status, PaymentIntent and not-paid', async () => {
   const record = buildRecord({ status: 'draft', badge: 'Bronze' });
   const { controller, calls } = loadController(record, {
     intents: { [PI]: { status: 'requires_payment_method', metadata: vendorMetadata } },
   });
   const res = jsonResponse();
-  await controller.createVerificationPayment({ user: { _id: userId } }, res);
+  await create(controller, res);
   assert.equal(res.statusCode, 200);
   assert.equal(calls.save, 0);
   assert.deepEqual(calls.updateOne[0].filter, {
     _id: 'onb_create_1',
-    status: 'draft',
+    status: { $in: ['draft', 'payment_pending'] },
     'verificationPayment.status': { $ne: 'paid' },
     'verificationPayment.paymentIntentId': PI,
   });
   assert.deepEqual(calls.updateOne[0].update, { $set: { status: 'payment_pending', badge: 'Silver' } });
   assert.equal(record.status, 'payment_pending');
   assert.equal(record.badge, 'Silver');
+});
+
+test('already-paid record short-circuits with the ALREADY_PAID body', async () => {
+  const record = buildRecord({ verificationPayment: { status: 'paid', paymentIntentId: PI } });
+  const { controller, calls } = loadController(record);
+  const res = jsonResponse();
+  await create(controller, res);
+  assert.equal(calls.retrieved.length, 0);
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, ALREADY_PAID);
 });
