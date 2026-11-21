@@ -85,11 +85,11 @@ test('webhook that read payment_pending before a winning submit leaves the recor
   let webhookRead;
   const webhookHasRead = new Promise(resolve => { webhookRead = resolve; });
   // Hold the webhook's read until /submit has reconciled and submitted.
+  // Signal before any assertion so a failure here can never hang the test.
   VendorOnboarding.findOne = async function(filter, ...rest) {
     const doc = await originalFindOne.call(this, filter, ...rest);
     if (filter && filter['verificationPayment.paymentIntentId']) {
-      assert.equal(doc.status, 'payment_pending');
-      webhookRead();
+      webhookRead(doc?.status);
       await submitDone;
     }
     return doc;
@@ -97,12 +97,15 @@ test('webhook that read payment_pending before a winning submit leaves the recor
   const hookRes = response();
   try {
     const webhook = controller.handleVendorPaymentWebhook(webhookReq(user), hookRes);
-    await webhookHasRead;
-    const submitRes = response();
-    await controller.submitForReview({ user }, submitRes);
-    assert.equal(submitRes.code, 200);
-    release();
-    await webhook;
+    try {
+      assert.equal(await webhookHasRead, 'payment_pending');
+      const submitRes = response();
+      await controller.submitForReview({ user }, submitRes);
+      assert.equal(submitRes.code, 200);
+    } finally {
+      release();
+      await webhook;
+    }
   } finally {
     VendorOnboarding.findOne = originalFindOne;
   }
@@ -202,3 +205,27 @@ test('payment_failed with a different paymentIntentId does not write', async () 
   assert.equal(res.code, 200);
   assert.deepEqual(await VendorOnboarding.collection.findOne({ _id: onboarding._id }), before);
 });
+
+test('succeeded self-repairs a paid but still payment_pending record to draft and keeps paidAt', async () => {
+  const paidAt = new Date('2026-11-20T00:00:00Z');
+  const { user, onboarding } = await seed({ verificationPayment: { status: 'paid', paymentIntentId: PI, paidAt } });
+  const controller = loadController(user, { admin: 0, receipt: 0 });
+  const res = response();
+  await controller.handleVendorPaymentWebhook(webhookReq(user), res);
+  assert.equal(res.code, 200);
+  const saved = await VendorOnboarding.collection.findOne({ _id: onboarding._id });
+  assert.equal(saved.status, 'draft');
+  assert.equal(saved.verificationPayment.status, 'paid');
+  assert.equal(saved.verificationPayment.paidAt.getTime(), paidAt.getTime());
+});
+
+for (const status of ['payment_pending', 'draft']) {
+  test(`payment_failed on a Bronze ${status} record leaves badge Bronze`, async () => {
+    const { user, onboarding } = await seed({ status });
+    const controller = loadController(user, { admin: 0, receipt: 0 });
+    await controller.handleVendorPaymentWebhook(webhookReq(user, PI, FAILED), response());
+    const saved = await VendorOnboarding.collection.findOne({ _id: onboarding._id });
+    assert.equal(saved.verificationPayment.status, 'failed');
+    assert.equal(saved.badge, 'Bronze');
+  });
+}

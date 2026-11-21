@@ -204,3 +204,60 @@ test('payment_failed write is a single guarded updateOne', async () => {
     update: { $set: { 'verificationPayment.status': 'failed', status: 'payment_pending' } },
   }]);
 });
+
+async function captureLogs(fn) {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => { lines.push(args.join(' ')); };
+  try { await fn(); } finally { console.log = original; }
+  return lines;
+}
+
+test('succeeded self-repairs a paid but still payment_pending record to draft; (b) is not gated on (a)', async () => {
+  const paidAt = new Date('2026-11-20T00:00:00Z');
+  const record = buildRecord({ verificationPayment: { status: 'paid', paymentIntentId: PI, paidAt } });
+  const { controller } = loadController(record);
+  const res = mockResponse();
+  await controller.handleVendorPaymentWebhook(webhookReq(), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(record.status, 'draft');
+  assert.equal(record.verificationPayment.status, 'paid');
+  assert.equal(record.verificationPayment.paidAt, paidAt);
+});
+
+for (const status of ['payment_pending', 'draft']) {
+  test(`payment_failed on a Bronze ${status} record leaves badge Bronze`, async () => {
+    const record = buildRecord({ status, badge: 'Bronze' });
+    const { controller } = loadController(record);
+    await controller.handleVendorPaymentWebhook(webhookReq(PI, FAILED), mockResponse());
+    assert.equal(record.verificationPayment.status, 'failed');
+    assert.equal(record.badge, 'Bronze');
+  });
+}
+
+test('succeeded logs update counts and flags a duplicate delivery as no-op without private data', async () => {
+  const record = buildRecord();
+  const { controller } = loadController(record);
+  const first = await captureLogs(() => controller.handleVendorPaymentWebhook(webhookReq(), mockResponse()));
+  const second = await captureLogs(() => controller.handleVendorPaymentWebhook(webhookReq(), mockResponse()));
+  const firstCounts = first.find(line => line.includes('paid matched='));
+  const secondCounts = second.find(line => line.includes('paid matched='));
+  assert.equal(firstCounts, `Vendor verification webhook ${PI}: paid matched=1 modified=1; draft matched=1 modified=1`);
+  assert.equal(secondCounts, `Vendor verification webhook ${PI}: paid matched=0 modified=0; draft matched=0 modified=0 (duplicate/no-op)`);
+  assert.ok(!secondCounts.includes(userId));
+});
+
+test('payment_failed logs update counts and flags a guarded no-op without private data', async () => {
+  const applied = await captureLogs(async () => {
+    const { controller } = loadController(buildRecord());
+    await controller.handleVendorPaymentWebhook(webhookReq(PI, FAILED), mockResponse());
+  });
+  const skipped = await captureLogs(async () => {
+    const { controller } = loadController(buildRecord({ status: 'submitted' }));
+    await controller.handleVendorPaymentWebhook(webhookReq(PI, FAILED), mockResponse());
+  });
+  assert.ok(applied.includes(`Vendor verification webhook ${PI}: failed matched=1 modified=1`));
+  const noop = skipped.find(line => line.includes('failed matched='));
+  assert.equal(noop, `Vendor verification webhook ${PI}: failed matched=0 modified=0 (no-op: already paid, past payment stage, or duplicate)`);
+  assert.ok(!noop.includes(userId));
+});
