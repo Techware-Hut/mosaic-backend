@@ -60,8 +60,13 @@ test('createVerificationPayment reuses existing unpaid PaymentIntent idempotentl
     save: async () => {},
   };
 
+  const updateOneCalls = [];
   const mockVendorOnboarding = {
     findOne: async () => mockOnboarding,
+    updateOne: async (filter, update) => {
+      updateOneCalls.push({ filter, update });
+      return { matchedCount: 1, modifiedCount: 1 };
+    },
   };
 
   Module.prototype.require = function (id) {
@@ -92,6 +97,8 @@ test('createVerificationPayment reuses existing unpaid PaymentIntent idempotentl
     assert.equal(res.body.data.clientSecret, 'pi_existing_12345_secret_test');
     assert.equal(stripeRetrievedId, 'pi_existing_12345');
     assert.equal(stripeCreated, false, 'Should NOT create a new PaymentIntent');
+    assert.equal(updateOneCalls.length, 1);
+    assert.deepEqual(updateOneCalls[0].update, { $set: { status: 'payment_pending' } });
   } finally {
     Module.prototype.require = originalRequire;
     delete require.cache[controllerPath];

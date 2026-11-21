@@ -978,7 +978,9 @@ exports.patchBusinessProfile = async (req, res) => {
 
 // Returns { paid, onboarding }; callers must use the returned document, which
 // may be a fresh read after the conditional payment_pending transition.
-async function reconcileVendorVerificationPaymentFromStripe(onboarding, userId) {
+// `retrievedIntent` lets a caller that already retrieved the stored
+// PaymentIntent skip a second Stripe call; it is validated the same way.
+async function reconcileVendorVerificationPaymentFromStripe(onboarding, userId, retrievedIntent = null) {
   if (onboarding.verificationPayment?.status === 'paid') {
     return { paid: true, onboarding };
   }
@@ -988,12 +990,14 @@ async function reconcileVendorVerificationPaymentFromStripe(onboarding, userId) 
     return { paid: false, onboarding };
   }
 
-  let paymentIntent;
-  try {
-    paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-  } catch (error) {
-    console.error('Vendor verification payment retrieve failed:', error.message);
-    return { paid: false, onboarding };
+  let paymentIntent = retrievedIntent;
+  if (!paymentIntent) {
+    try {
+      paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    } catch (error) {
+      console.error('Vendor verification payment retrieve failed:', error.message);
+      return { paid: false, onboarding };
+    }
   }
 
   if (paymentIntent.status !== 'succeeded') {
@@ -1045,6 +1049,39 @@ async function reconcileVendorVerificationPaymentFromStripe(onboarding, userId) 
 }
 
 //payment controllers
+
+// Existing "already paid" contract (status and message unchanged); `code` is additive.
+function respondAlreadyPaid(res) {
+  return res.status(400).json({
+    success: false,
+    code: 'ALREADY_PAID',
+    message: "Verification fee already paid"
+  });
+}
+
+// Used when a conditional write in createVerificationPayment loses a race:
+// re-read and report what actually won.
+async function respondWithCurrentPaymentState(res, onboardingId) {
+  const current = await VendorOnboarding.findById(onboardingId);
+  if (current?.verificationPayment?.status === 'paid') {
+    return respondAlreadyPaid(res);
+  }
+  return res.status(409).json({
+    success: false,
+    code: 'PAYMENT_STATE_CHANGED',
+    message: "Verification payment state changed. Please retry.",
+    data: {
+      status: current?.verificationPayment?.status || 'not_started',
+      applicationStatus: current?.status || null,
+      applicationId: current?.applicationId || "N/A"
+    }
+  });
+}
+
+function isStripeResourceMissing(error) {
+  return error?.code === 'resource_missing' || error?.statusCode === 404;
+}
+
 exports.createVerificationPayment = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -1059,44 +1096,98 @@ exports.createVerificationPayment = async (req, res) => {
     }
 
     if (onboarding.verificationPayment?.status === "paid") {
-      return res.status(400).json({
-        success: false,
-        message: "Verification fee already paid"
-      });
+      return respondAlreadyPaid(res);
     }
 
     // Reuse existing unpaid PaymentIntent if still active on Stripe (idempotent recovery)
-    if (onboarding.verificationPayment?.paymentIntentId) {
+    const storedIntentId = onboarding.verificationPayment?.paymentIntentId;
+    if (storedIntentId) {
+      let existingIntent = null;
       try {
-        const existingIntent = await stripe.paymentIntents.retrieve(
-          onboarding.verificationPayment.paymentIntentId
-        );
-        if (
-          existingIntent &&
-          existingIntent.status !== "succeeded" &&
-          existingIntent.status !== "canceled"
-        ) {
-          onboarding.status = "payment_pending";
-          await onboarding.save();
-
-          return res.status(200).json({
-            success: true,
-            message: "Payment intent retrieved successfully. Complete payment to continue.",
-            data: {
-              clientSecret: existingIntent.client_secret,
-              amount: 24.99,
-              currency: "usd",
-              status: "pending",
-              applicationStatus: "payment_pending",
-              applicationId: onboarding.applicationId || "N/A"
-            }
+        existingIntent = await stripe.paymentIntents.retrieve(storedIntentId);
+      } catch (retrieveError) {
+        if (!isStripeResourceMissing(retrieveError)) {
+          // We cannot tell whether the stored PaymentIntent was paid; never
+          // replace it blindly.
+          console.error(
+            "Could not retrieve existing payment intent from Stripe:",
+            retrieveError.message
+          );
+          return res.status(503).json({
+            success: false,
+            code: 'PAYMENT_PROVIDER_UNAVAILABLE',
+            message: "Payment provider is temporarily unavailable. Please retry."
           });
         }
-      } catch (retrieveError) {
         console.warn(
-          "Could not retrieve existing payment intent from Stripe, proceeding to create new:",
+          "Existing payment intent not found on Stripe, proceeding to create new:",
           retrieveError.message
         );
+      }
+
+      if (existingIntent?.status === "succeeded") {
+        const isForeignIntent =
+          existingIntent.metadata?.type !== 'vendor_verification' ||
+          existingIntent.metadata?.userId !== userId.toString();
+        if (!isForeignIntent) {
+          // Paid on Stripe but the webhook has not landed yet: record the
+          // payment instead of replacing the PaymentIntent, which would orphan
+          // the charge and make the late webhook miss this record.
+          let paid = false;
+          try {
+            ({ paid } = await reconcileVendorVerificationPaymentFromStripe(
+              onboarding,
+              userId,
+              existingIntent
+            ));
+          } catch (reconcileError) {
+            console.error("Vendor verification payment reconcile failed:", { onboardingId: String(onboarding._id), paymentIntentId: existingIntent?.id, error: reconcileError.message });
+          }
+          if (paid) {
+            return respondAlreadyPaid(res);
+          }
+          // Never create a second PaymentIntent over a succeeded one.
+          return res.status(409).json({
+            success: false,
+            code: 'PAYMENT_CONFIRMING',
+            message: "Payment is being confirmed. Please retry."
+          });
+        }
+        // Foreign metadata: not this vendor's payment; create a new one.
+      } else if (existingIntent && existingIntent.status !== "canceled") {
+        // Conditional write instead of a stale save(): a webhook that marked
+        // this PaymentIntent paid (and moved the record to draft) after our
+        // read must not be flipped back to payment_pending. A record already
+        // moved to payment_pending (e.g. a double-click) still matches.
+        const reuseFields = { status: "payment_pending" };
+        // updateOne skips validate hooks; preserve legacy badge normalization.
+        if (onboarding.badge === "Bronze") reuseFields.badge = "Silver";
+        const reuseResult = await VendorOnboarding.updateOne(
+          {
+            _id: onboarding._id,
+            status: { $in: [...new Set([onboarding.status, "payment_pending"])] },
+            "verificationPayment.status": { $ne: "paid" },
+            "verificationPayment.paymentIntentId": storedIntentId,
+          },
+          { $set: reuseFields },
+          { runValidators: true }
+        );
+        if (!reuseResult?.matchedCount) {
+          return await respondWithCurrentPaymentState(res, onboarding._id);
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Payment intent retrieved successfully. Complete payment to continue.",
+          data: {
+            clientSecret: existingIntent.client_secret,
+            amount: 24.99,
+            currency: "usd",
+            status: "pending",
+            applicationStatus: "payment_pending",
+            applicationId: onboarding.applicationId || "N/A"
+          }
+        });
       }
     }
 
@@ -1111,20 +1202,44 @@ exports.createVerificationPayment = async (req, res) => {
       description: 'Vendor Onboarding Verification Fee - $24.99'
     });
 
-    onboarding.verificationPayment = {
-      provider: 'stripe',
-      paymentIntentId: paymentIntent.id,
-      amount: 24.99,
-      amount_cents: 2499,
-      currency: 'usd',
-      status: 'pending',
-      paidAt: null
+    const createFields = {
+      verificationPayment: {
+        provider: 'stripe',
+        paymentIntentId: paymentIntent.id,
+        amount: 24.99,
+        amount_cents: 2499,
+        currency: 'usd',
+        status: 'pending',
+        paidAt: null
+      },
+      status: 'payment_pending',
     };
+    // updateOne skips validate hooks; preserve legacy badge normalization.
+    if (onboarding.badge === 'Bronze') createFields.badge = 'Silver';
 
-    onboarding.status = 'payment_pending';
-    onboarding.submittedAt = undefined;
-
-    await onboarding.save();
+    // Conditional write instead of a stale save(): only replace the payment
+    // if the record is still as we read it (same status and PaymentIntent, not
+    // paid). A webhook or /submit landing in between must win.
+    const createResult = await VendorOnboarding.updateOne(
+      {
+        _id: onboarding._id,
+        status: onboarding.status,
+        'verificationPayment.status': { $ne: 'paid' },
+        'verificationPayment.paymentIntentId': onboarding.verificationPayment?.paymentIntentId ?? null,
+      },
+      { $set: createFields, $unset: { submittedAt: 1 } },
+      { runValidators: true }
+    );
+    if (!createResult?.matchedCount) {
+      // Lost the race. The new PaymentIntent's client secret is never
+      // returned; cancel it best-effort and report the current state.
+      try {
+        await stripe.paymentIntents.cancel(paymentIntent.id);
+      } catch (cancelError) {
+        console.warn("Could not cancel unused payment intent:", cancelError.message);
+      }
+      return await respondWithCurrentPaymentState(res, onboarding._id);
+    }
 
     return res.status(200).json({
       success: true,
