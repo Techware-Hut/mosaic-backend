@@ -122,6 +122,7 @@ const {
 } = require("../utils/vendorTax");
 
 const { evaluateCouponDiscount } = require("../utils/couponDiscount");
+const { priceOrderLines } = require("../lib/orders/orderPricing");
 const {
   sendOrderAcceptedSMS,
   sendOrderCancelledCustomerSMS,
@@ -611,6 +612,183 @@ function assertClientTotalsMatch(body, serverTotals) {
 //   }
 // };
 
+const orderPricingDependencies = {
+  resolveShippingForCheckout, getTaxRateForCategory, buildTaxAwareAmounts,
+  extractTaxFromInclusiveAmount, roundCurrency, evaluateCouponDiscount,
+};
+
+exports.buyNowQuote = async (req, res) => {
+  try {
+    const { items, couponCode } = req.body || {};
+    const userId = req.user.id;
+    const deliverySpeed = resolveRequestedDeliverySpeed(req.body);
+    if (!Array.isArray(items) || !items.length) {
+      return res.status(400).json({ success: false, message: "Items are required" });
+    }
+    if (items.length > 50) {
+      return res.status(400).json({ success: false, message: "A maximum of 50 items is allowed" });
+    }
+    const vendorItemMap = {};
+    const seen = new Set();
+
+    for (const item of items) {
+      const { productId, variantId, size, quantity, price } = item || {};
+      // Preserve initiateOrder's truthy quantity check and let shared pricing
+      // perform the same Number coercion (including numeric strings).
+
+      if (
+        !productId || !variantId || !size ||
+        !quantity ||
+        !mongoose.isValidObjectId(productId) || !mongoose.isValidObjectId(variantId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid item structure",
+        });
+      }
+
+      const key = `${variantId}-${size}`;
+      if (seen.has(key)) {
+        return res.status(400).json({
+          success: false,
+          message: "Duplicate item in cart",
+        });
+      }
+      seen.add(key);
+
+      const variant = await ProductVariant.findById(variantId).populate(
+        "productId"
+      );
+
+      if (
+        !variant ||
+        !variant.productId ||
+        !variant.productId.isPublished ||
+        !variant.productId.isActive ||
+        variant.productId.isDeleted ||
+        !variant.isPublished ||
+        variant.isDeleted ||
+        variant.productId._id.toString() !== productId
+      ) {
+        return res.status(404).json({
+          success: false,
+          message: "Product not found",
+        });
+      }
+
+      const selectedVariant = resolveVariantSelection(variant, size);
+
+      if (!selectedVariant) {
+        return res.status(400).json({
+          success: false,
+          message: `Size ${size} not available`,
+        });
+      }
+
+      if (!selectedVariant.allowBackorder && selectedVariant.stock < quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `${variant.productId.title} is out of stock for size ${size}`,
+        });
+      }
+
+      const discountEnd = selectedVariant.discountEndDate
+        ? new Date(selectedVariant.discountEndDate)
+        : null;
+
+      const validDiscount =
+        selectedVariant.salePrice &&
+        (!discountEnd || discountEnd.getTime() > Date.now());
+
+      const actualPrice = validDiscount
+        ? Number(selectedVariant.salePrice)
+        : Number(selectedVariant.price);
+
+      const vendorId = variant.ownerId.toString();
+
+      if (!vendorItemMap[vendorId]) {
+        vendorItemMap[vendorId] = {
+          businessId: variant.businessId,
+          items: [],
+        };
+      }
+
+      vendorItemMap[vendorId].items.push({
+        productId,
+        variantId,
+        quantity,
+        submittedPrice: Number(price),
+        priceExclTax: actualPrice,
+        size,
+        sku: selectedVariant.sku,
+        taxCategory: getResolvedTaxCategory(variant.productId),
+        color:
+          variant.color ||
+          getVariantAttribute(variant, "color") ||
+          "default",
+        shippingMethod: deliverySpeed,
+        shipping:
+          variant.shipping ||
+          variant.productId?.shipping ||
+          null,
+      });
+    }
+
+    const vendorIds = Object.keys(vendorItemMap);
+
+    if (vendorIds.length !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Single-vendor checkout only at this time.",
+      });
+    }
+
+    const vendorId = vendorIds[0];
+    const { businessId, items: rawVendorItems } = vendorItemMap[vendorId];
+
+    const business = await Business.findById(businessId);
+
+    // Vendor accounts may buy from other vendors, never from themselves:
+    // a self-purchase would route a Connect charge back to the buyer and
+    // could fabricate sales or reviews.
+    const buyerId = String(userId);
+    if (
+      vendorId === buyerId ||
+      (business?.owner && String(business.owner) === buyerId)
+    ) {
+      return res.status(403).json({
+        success: false,
+        code: "SELF_PURCHASE_FORBIDDEN",
+        message: "You can't purchase products from your own business.",
+      });
+    }
+
+    const checkoutBlock = getBusinessCheckoutBlock(business);
+    if (checkoutBlock) {
+      return res.status(checkoutBlock.status).json({
+        success: false,
+        message: checkoutBlock.message,
+      });
+    }
+
+    // initiateOrder refreshes these fields from Stripe before checking them.
+    // Quotes must not call Stripe; stale stored fields can therefore diverge
+    // from checkout until the next account refresh. Payouts are not a blocker.
+    if (!business.chargesEnabled || getTransferCapabilityStatus(business) !== "active") {
+      return res.status(400).json({ success: false, message: "Vendor Stripe onboarding incomplete." });
+    }
+
+    const p = await priceOrderLines({ rawVendorItems, business, businessId, deliverySpeed, couponCode, validateSubmittedPrices: false }, orderPricingDependencies);
+    return res.json({ success: true, pricing: { lineItems: p.vendorItems,
+      subtotal: p.subtotalAmount, taxTotal: p.taxTotal, discountAmount: p.discountAmount,
+      discountedSubtotal: p.discountedSubtotal, shippingTotal: Number(p.shippingCalculation.amount || 0),
+      totalAmount: p.totalAmount, currency: "USD" } });
+  } catch (err) {
+    if (err.statusCode !== 400) console.error(err.message);
+    return res.status(err.statusCode === 400 ? 400 : 500).json({ success: false,
+      message: err.statusCode === 400 ? err.message : "Server error" });
+  }
+};
 
 exports.initiateOrder = async (req, res) => {
   try {
@@ -805,115 +983,9 @@ exports.initiateOrder = async (req, res) => {
       });
     }
 
-    const vendorItems = rawVendorItems.map((item) => {
-      const taxRate = getTaxRateForCategory(
-        business.taxSettings,
-        item.taxCategory
-      );
-      const taxPricing = buildTaxAwareAmounts({
-        priceExclTax: item.priceExclTax,
-        salePriceExclTax: null,
-        taxRate,
-      });
-      const unitPriceInclTax = taxPricing.priceInclTax ?? roundCurrency(item.priceExclTax);
-      const lineAmounts = extractTaxFromInclusiveAmount({
-        inclusiveAmount: unitPriceInclTax * Number(item.quantity || 0),
-        taxRate,
-      });
-      const submittedPrice = Number(item.submittedPrice);
-      const acceptsLegacyPrice =
-        Math.abs(submittedPrice - Number(item.priceExclTax || 0)) < 0.01;
-      const acceptsTaxInclusivePrice =
-        Math.abs(submittedPrice - Number(unitPriceInclTax || 0)) < 0.01;
-
-      if (!acceptsLegacyPrice && !acceptsTaxInclusivePrice) {
-        const error = new Error(`Price mismatch for size ${item.size}`);
-        error.statusCode = 400;
-        throw error;
-      }
-
-      return {
-        productId: item.productId,
-        variantId: item.variantId,
-        quantity: item.quantity,
-        price: unitPriceInclTax,
-        size: item.size,
-        sku: item.sku,
-        color: item.color,
-        tax: {
-          categoryCode: item.taxCategory?.code || null,
-          categoryLabel: item.taxCategory?.label || null,
-          rate: taxRate,
-          taxIncluded: true,
-          unitPriceExclTax: taxPricing.priceExclTax,
-          unitPriceInclTax,
-          lineBaseAmount: lineAmounts.amountExclTax,
-          lineTaxAmount: lineAmounts.taxAmount,
-          lineTotalAmount: lineAmounts.amountInclTax,
-        },
-      };
-    });
-
-    const subtotalAmount = vendorItems.reduce(
-      (sum, i) => sum + Number(i.tax?.lineTotalAmount || (i.price * i.quantity) || 0),
-      0
-    );
-    const subtotalExclTaxAmount = vendorItems.reduce(
-      (sum, i) => sum + Number(i.tax?.lineBaseAmount || 0),
-      0
-    );
-    const taxTotal = vendorItems.reduce(
-      (sum, i) => sum + Number(i.tax?.lineTaxAmount || 0),
-      0
-    );
-    const totalQuantity = vendorItems.reduce(
-      (sum, i) => sum + Number(i.quantity || 0),
-      0
-    );
-
-    let discountAmount = 0;
-    let discountedSubtotal = subtotalAmount;
-    let appliedCouponCode = null;
-
-    if (couponCode) {
-      const couponResult = await evaluateCouponDiscount({
-        couponCode,
-        businessId,
-        subtotalAmount,
-      });
-
-      if (!couponResult.ok) {
-        return res.status(400).json({
-          success: false,
-          message: couponResult.message,
-        });
-      }
-
-      discountAmount = couponResult.discountAmount;
-      discountedSubtotal = couponResult.discountedSubtotal;
-      appliedCouponCode = couponResult.couponCode;
-    }
-
-    let shippingCalculation;
-    try {
-      shippingCalculation = resolveShippingForCheckout(
-        business.shippingSettings,
-        {
-          deliverySpeed,
-          subtotal: discountedSubtotal,
-          totalQuantity,
-          legacyItems: rawVendorItems,
-        }
-      );
-    } catch (shippingError) {
-      return res.status(400).json({
-        success: false,
-        message: shippingError.message,
-      });
-    }
-
-    const totalAmount =
-      discountedSubtotal + Number(shippingCalculation.amount || 0);
+    const { vendorItems, subtotalAmount, subtotalExclTaxAmount, taxTotal,
+      discountAmount, discountedSubtotal, appliedCouponCode, shippingCalculation,
+      totalAmount } = await priceOrderLines({ rawVendorItems, business, businessId, deliverySpeed, couponCode }, orderPricingDependencies);
 
     const tamperCheck = assertClientTotalsMatch(req.body, {
       totalAmount,
@@ -1077,15 +1149,6 @@ exports.initiateOrder = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("Order initiation failed:", err);
-    console.error("Order initiation Stripe details:", {
-      type: err?.type,
-      code: err?.code,
-      message: err?.message,
-      statusCode: err?.statusCode,
-      requestId: err?.requestId,
-    });
-
     if (err?.statusCode === 400) {
       return res.status(400).json({
         success: false,
@@ -1099,6 +1162,15 @@ exports.initiateOrder = async (req, res) => {
         message: "Vendor Stripe onboarding incomplete.",
       });
     }
+
+    console.error("Order initiation failed:", err);
+    console.error("Order initiation Stripe details:", {
+      type: err?.type,
+      code: err?.code,
+      message: err?.message,
+      statusCode: err?.statusCode,
+      requestId: err?.requestId,
+    });
 
     return res.status(500).json({
       success: false,
