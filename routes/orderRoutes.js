@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { initiateOrder, getUserOrders, getVendorOrders, acceptOrder, rejectOrder, shipOrder, getAllOrdersAdmin, deliverOrder, acceptReturn, initiateReturn, cancelOrderByUser } = require('../controllers/orderController');
+const { buyNowQuote, initiateOrder, getUserOrders, getVendorOrders, acceptOrder, rejectOrder, shipOrder, getAllOrdersAdmin, deliverOrder, acceptReturn, initiateReturn, cancelOrderByUser } = require('../controllers/orderController');
 const { retrieveIntent } = require('../controllers/stripePaymentController');
 const authenticate = require('../middlewares/authenticate');
 const isBusinessOwner = require('../middlewares/isBusinessOwner')
@@ -10,6 +10,7 @@ const { getInvoicePdf } = require('../controllers/invoiceController');
 
 
 
+router.post('/buy-now-quote', authenticate, isCheckoutBuyer, buyNowQuote);
 router.post('/initiate', authenticate, isCheckoutBuyer, initiateOrder);
 router.get('/retrieve-intent/:id', authenticate, retrieveIntent);
 router.get('/user', authenticate, getUserOrders);
