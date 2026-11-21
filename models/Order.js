@@ -260,6 +260,12 @@ const orderSchema = new Schema(
       type: Date,
       default: null,
     },
+    /** Short-lived rejection transition lock; stale claims expire. */
+    transitionLockedAt: { type: Date, default: null },
+    /** Durable evidence for recovery after a successful rejection refund. */
+    rejectionRefundRequestedAt: { type: Date, default: null },
+    rejectionRefundId: { type: String, default: null },
+    rejectionRefundedAt: { type: Date, default: null },
     /** Set once when a reservation/sale is released back to stock. */
     inventoryRestoredAt: {
       type: Date,

@@ -102,6 +102,7 @@ const {
   releaseInventoryReservation,
   restoreInventoryForOrder,
 } = require("../lib/inventory/orderInventory");
+const { claimOrderTransition, releaseOrderTransition, TRANSITION_CONFLICT_RESPONSE } = require("../lib/orders/orderTransitionLock");
 const { getBusinessCheckoutBlock } = require("../utils/checkoutGuards");
 const {
   sendOrderStatusEmail,
@@ -140,6 +141,38 @@ const toNum = (value) => {
 };
 
 const getAuthenticatedUserId = (req) => req.user?.id || req.user?._id;
+
+// Claims the atomic transition lock for an order whose status was just checked
+// in memory. Returns null when a concurrent request changed or holds the order.
+async function claimTransition(order, expectedStatus) {
+  const at = new Date();
+  const claimed = await claimOrderTransition(Order, order._id, expectedStatus, at);
+  return claimed ? { orderId: order._id, at } : null;
+}
+
+async function releaseTransition(claim) {
+  if (claim) await releaseOrderTransition(Order, claim.orderId, claim.at);
+}
+
+// Returns stock that was decremented at payment. Never throws: callers run this
+// after a refund has already been issued, and the order must still be saved.
+// On failure inventoryDecrementedAt stays set, which marks the order for
+// manual stock reconciliation.
+async function restoreDecrementedInventory(order, reason) {
+  if (!order.inventoryDecrementedAt) return "not_needed";
+  try {
+    const result = await restoreInventoryForOrder(order);
+    if (!result.restored) return "not_needed";
+    order.inventoryDecrementedAt = undefined;
+    return "restored";
+  } catch (restoreErr) {
+    console.error(
+      `[inventory] restore failed for ${reason} order ${order._id}; needs manual reconciliation:`,
+      restoreErr?.message || restoreErr
+    );
+    return "failed";
+  }
+}
 
 function serializeOrderForResponse(order) {
   if (!order) return order;
@@ -1220,6 +1253,7 @@ exports.acceptOrder = async (req, res) => {
 };
 
 exports.rejectOrder = async (req, res) => {
+  let transitionClaim = null;
   try {
     const vendorId = req.user._id;
     const orderId = req.params.orderId;
@@ -1238,18 +1272,21 @@ exports.rejectOrder = async (req, res) => {
       });
     }
 
-    order.status = "rejected";
-    order.statusHistory.push({ status: "rejected" });
+    transitionClaim = await claimTransition(order, "ordered");
+    if (!transitionClaim) {
+      return res.status(409).json(TRANSITION_CONFLICT_RESPONSE);
+    }
 
-    // Refund if already paid
-    if (order.paymentStatus === "paid" && order.paymentId) {
-      const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-
-      const vendorStripeAccountId = order.businessId.stripeConnectAccountId; // Vendor's Stripe Connect Account ID
-
+    const claimFilter = { _id: order._id, status: "ordered", transitionLockedAt: transitionClaim.at };
+    if (!order.rejectionRefundId && !order.rejectionRefundedAt && order.paymentStatus === "paid" && order.paymentId) {
+      const previouslyRequested = Boolean(order.rejectionRefundRequestedAt);
+      const pending = await Order.updateOne(claimFilter, {
+        $set: { rejectionRefundRequestedAt: order.rejectionRefundRequestedAt || new Date() },
+      });
+      if (pending.matchedCount === 0) return res.status(409).json(TRANSITION_CONFLICT_RESPONSE);
+      let refund;
       try {
-        // Create the refund from the vendor's Stripe account
-        const refund = await stripe.refunds.create({
+        refund = await stripe.refunds.create({
           payment_intent: order.paymentId,               // pi_...
           amount: Math.round(order.totalAmount * 100),   // in the smallest currency unit
           reason: "requested_by_customer",
@@ -1259,24 +1296,54 @@ exports.rejectOrder = async (req, res) => {
           // ensure funds are pulled back from the connected account & app fee is refunded
           reverse_transfer: true,
           refund_application_fee: true,
-        });
-
-
-        // Update order and payment status
-        order.paymentStatus = "refunded";
-        order.statusHistory.push({ status: "refunded" });
-
-        console.log("Refund initiated for order", {
-          orderId,
-          paymentIntentId: order.paymentId,
+        }, {
+          // One refund per order for this flow, even on double-submit/retry.
+          idempotencyKey: `refund:${order._id}:rejected_by_merchant`,
         });
       } catch (err) {
-        console.error("Error processing refund via Stripe Connect:", err);
-        return res.status(500).json({ success: false, message: "Refund failed" });
+        if (err.code === "charge_already_refunded" && previouslyRequested) {
+          refund = { id: null };
+          console.error("Previously requested rejection refund needs reconciliation", { orderId, paymentIntentId: order.paymentId });
+        } else {
+          console.error("Error processing refund via Stripe Connect:", err);
+          return res.status(500).json({ success: false, message: "Refund failed" });
+        }
       }
+      const refundedAt = new Date();
+      try {
+        const evidence = await Order.updateOne(claimFilter, {
+          $set: { paymentStatus: "refunded", rejectionRefundId: refund.id, rejectionRefundedAt: refundedAt },
+        });
+        if (evidence.matchedCount === 0) return res.status(409).json(TRANSITION_CONFLICT_RESPONSE);
+      } catch (err) {
+        console.error("Rejection refund evidence write failed", { orderId, refundId: refund.id, error: err.message });
+        return res.status(500).json({ success: false, code: "ORDER_REJECT_RECONCILE", message: "Order rejection needs reconciliation. Please retry." });
+      }
+      order.rejectionRefundId = refund.id;
+      order.rejectionRefundedAt = refundedAt;
+      order.paymentStatus = "refunded";
     }
-
-    await order.save();
+    const history = [{ status: "rejected" }];
+    if ((order.rejectionRefundId || order.rejectionRefundedAt) && !order.statusHistory.some(entry => entry.status === "refunded")) {
+      history.push({ status: "refunded" });
+    }
+    const inventoryRestore = await restoreDecrementedInventory(order, "rejected");
+    const update = {
+      $set: { status: "rejected", paymentStatus: order.paymentStatus },
+      $push: { statusHistory: { $each: history } },
+    };
+    if (inventoryRestore === "restored") {
+      update.$unset = { inventoryDecrementedAt: 1 };
+      update.$set.inventoryRestoredAt = order.inventoryRestoredAt;
+    }
+    const transitioned = await Order.updateOne(claimFilter, update);
+    if (transitioned.matchedCount === 0) return res.status(409).json(TRANSITION_CONFLICT_RESPONSE);
+    order.status = "rejected";
+    order.statusHistory.push(...history);
+    // These paths were persisted atomically; notification bookkeeping may save this document.
+    for (const path of ["status", "paymentStatus", "statusHistory", "rejectionRefundId", "rejectionRefundedAt", "inventoryDecrementedAt", "inventoryRestoredAt"]) {
+      order.unmarkModified(path);
+    }
     const emailDelivery = await sendCustomerOrderLifecycleEmail({
       order,
       event: "order_rejected",
@@ -1296,11 +1363,14 @@ exports.rejectOrder = async (req, res) => {
       success: true,
       message: "Order rejected and refunded (if paid)",
       emailDelivery,
+      inventoryRestore,
       order: serializeOrderForResponse(order),
     });
   } catch (err) {
     console.error("Error rejecting order:", err);
     res.status(500).json({ success: false, message: "Server error" });
+  } finally {
+    await releaseTransition(transitionClaim);
   }
 };
 
