@@ -5,6 +5,7 @@
 // The full object is exposed publicly only on staging /api/ready; production
 // sees it solely in the startup log.
 
+const { isRecaptchaEnforced, getAllowedHostnames } = require('./recaptcha');
 const { isStagingEnv } = require('./frontendUrl');
 const { getReleaseEnvironment } = require('./releaseIdentity');
 const { getMailAllowlist, getSmsAllowlist } = require('./recipientAllowlist');
@@ -93,6 +94,8 @@ function getIsolationSelfCheck(options = {}) {
       bucketConfigured: isSet(env, 'AWS_S3_BUCKET'),
       region: trimmed(env.AWS_REGION) || DEFAULT_AWS_REGION,
     },
+    contactVerification: isRecaptchaEnforced(env) ? 'enforced' : 'not_configured',
+    allowedHostnameCount: getAllowedHostnames(env).length,
     adminEmailExplicit: isSet(env, 'ADMIN_EMAIL'),
   };
 }

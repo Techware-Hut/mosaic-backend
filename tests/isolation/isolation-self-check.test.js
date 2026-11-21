@@ -45,7 +45,7 @@ test('getIsolationSelfCheck returns the documented shape with booleans/enums onl
   });
 
   assert.deepEqual(Object.keys(check).sort(), [
-    'adminEmailExplicit', 'database', 'environment', 'jobs', 'mail', 'sms', 'stagingMarker', 'storage', 'stripe',
+    'adminEmailExplicit', 'allowedHostnameCount', 'contactVerification', 'database', 'environment', 'jobs', 'mail', 'sms', 'stagingMarker', 'storage', 'stripe',
   ]);
   assert.equal(check.stagingMarker, true);
   assert.equal(typeof check.environment, 'string');
@@ -166,4 +166,14 @@ test('self-check reports the fail-closed staging policy when allowlists are unse
   assert.equal(invalid.mail.recipientPolicy, 'suppress_all_invalid');
   assert.equal(invalid.sms.recipientPolicy, 'suppress_all_invalid');
   assert.equal(isLikelySafePublicReleasePayload(invalid), true);
+});
+
+test('contact verification reports configuration without secrets', () => {
+  for (const secret of ['', 'synthetic-secret']) {
+    const check = getIsolationSelfCheck({ env: { RECAPTCHA_SECRET_KEY: secret, FRONTEND_URL: 'https://example.com' }, connection: {}, getJobs: jobsOff });
+    assert.equal(check.contactVerification, secret ? 'enforced' : 'not_configured');
+    assert.equal(check.allowedHostnameCount, 1);
+    assert.equal(JSON.stringify(check).includes('synthetic-secret'), false);
+    assert.equal(isLikelySafePublicReleasePayload(check), true);
+  }
 });
