@@ -77,6 +77,39 @@ infrastructure change record without including secrets.
 The release automation does not auto-merge. A green exact-SHA certificate only
 makes the canonical `staging` to `main` PR reviewable.
 
+### Focused release branch readiness (separate approval)
+
+Wave 1 adds code to certify a future `refs/heads/release/focused/*` target;
+it does not create or protect a branch. Before dispatch, an infrastructure
+owner must prove an **active**, no-bypass branch ruleset with pull-request
+merges only, at least one independent human approval, stale-review dismissal,
+resolved review threads, and deletion/non-fast-forward blocks. The verifier
+reads the live GitHub ruleset, merged PR and reviews, and branch tip. The
+focused target must be a reviewed two-parent merge of the pinned production
+baseline and one approved booking-correction cherry-pick, with exactly two
+approved changed files and identical Git blobs to the approved source commit.
+GitHub hides the `bypass_actors` field from read-only ruleset API callers. A
+source certificate therefore records whether that field was visible and
+rejects any visible bypass, while a separate infrastructure-owner record must
+prove no bypass actors before production approval. The exact reviewed-PR and
+merge-graph checks reject a direct push even when the field is hidden.
+
+The `production-preflight` Environment and its read-only AWS OIDC role must
+be configured and independently verified for the workflow's current-`main`
+controller. The `production-release-control` Environment, named reviewer,
+self-review prevention, production OIDC role, and release-controller App
+remain separate infrastructure gates. Their existence is not inferred from
+repository code. Wave 1 does not enter that production Environment even when
+focused preflight passes. The deploy script also has an unconditional focused
+stop before any AWS operation.
+
+Before a later focused deployment can be authorized, the live HTTP and HTTPS
+ALB gate must be independently proven to cover both checkout initiation
+routes, including application-equivalent case and trailing-slash forms, while
+health and webhook paths remain reachable. Payment owners must separately
+prove the treatment of already-issued legacy Stripe PaymentIntents and other
+liabilities. The focused preflight cannot establish either live control.
+
 ### Protected Environments
 
 Create `production-preflight` with no required reviewer and a custom deployment
@@ -348,6 +381,33 @@ than using service wildcards.
 The production Actions job does not need `pull-requests: write`; PR commenting
 belongs in a separate reporting job without AWS credentials.
 
+### Pinned existing deployment bucket
+
+Set `EB_RELEASE_BUCKET` only on `production-release-control` to the independently
+verified, already-existing regional Elastic Beanstalk bucket. The production
+job and deploy script fail closed if it is missing. Before reading or writing
+a bundle, the deploy script uses `s3:GetBucketLocation` and requires the bucket
+region to equal `AWS_REGION`; null/empty location means `us-east-1`.
+The release path does not call `CreateStorageLocation`, so no
+`elasticbeanstalk:CreateStorageLocation` permission is required.
+
+Grant `s3:GetBucketLocation` on the exact bucket ARN. Grant `s3:PutObject` and
+`s3:GetObject` only on that bucket's `mosaic-releases/*` objects. New bundles
+remain under `mosaic-releases/<exact release SHA>/<package SHA256>.zip`.
+Do not grant `s3:ListBucket`, `s3:CreateBucket`, or `s3:DeleteObject`.
+
+The current legacy production rollback baseline may additionally receive one
+exact-object `s3:GetObject` exception for its reviewed historical SourceBundle,
+until all supported rollback versions use controlled release objects. Resolve
+and independently pin that exact key before granting access; do not grant a
+legacy-prefix wildcard. Rollback downloads and validates the original bundle
+without migrating or overwriting it, and still requires the same pinned bucket.
+
+Focused-baseline S3 bundles use `--process`. The release-control role permits
+the required embedded-extension cache reads and writes on the environment
+specific prefix, so focused versions must reach `Processed` before deployment.
+This path rejects `env.yaml` and validates the exact Git bundle (including the+existing `.ebextensions/` and `.platform/` prohibition). A `Failed` or+`Unprocessed` focused version remains fatal. Historical rollback compatibility+may still explicitly accept an existing `Unprocessed` version after validating+its source bundle; normal release behavior is unchanged.
+
 ## `DescribeConfigurationSettings` secret-read caveat
 
 Elastic Beanstalk exposes deployment policy, rolling-update policy, and Enhanced
@@ -467,6 +527,7 @@ comments or artifacts.
 ### `production-release-control` (main-only, one required reviewer)
 
 - `AWS_RELEASE_CONTROL_ROLE_TO_ASSUME`
+- `EB_RELEASE_BUCKET` (existing regional EB bucket; never created by release)
 - `AWS_REGION`
 - `EB_APPLICATION_NAME`
 - `EB_ENVIRONMENT_NAME`

@@ -3,6 +3,10 @@ const VendorOnboarding = require('../models/VendorOnboardingStage1');
 const { sendPaymentReminderEmail } = require('../utils/WellcomeMailer');
 const { deliverVendorOnboardingEmail } = require('../utils/vendorOnboardingEmailDelivery');
 
+// Same value as utils/smtpTransport STAGING_SUPPRESSED_REASON (asserted in tests);
+// kept literal so this job does not load the SMTP module.
+const STAGING_SUPPRESSED_REASON = 'staging_recipient_allowlist_suppressed';
+
 const REMINDER_KINDS = Object.freeze({
   PAYMENT_PENDING: 'payment_pending',
   PAID_DRAFT_UNSUBMITTED: 'paid_draft_unsubmitted',
@@ -33,10 +37,16 @@ function wasRecentlyReminded(application, kind, cooldownHours) {
     ? application.onboardingReminderLog
     : [];
 
+  // A hosted-staging allowlist suppression is a deliberate, terminal outcome:
+  // it counts toward the cooldown like a send so an enabled staging cron does
+  // not re-log every candidate on every run. Other skips stay retryable.
   return log.some(
     (entry) =>
       entry?.kind === kind
-      && entry?.deliveryStatus === 'sent'
+      && (
+        entry?.deliveryStatus === 'sent'
+        || (entry?.deliveryStatus === 'skipped' && entry?.error === STAGING_SUPPRESSED_REASON)
+      )
       && entry?.sentAt
       && new Date(entry.sentAt) >= cutoff
   );

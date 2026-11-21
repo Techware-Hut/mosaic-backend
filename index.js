@@ -12,6 +12,7 @@ require('./instrument');
 const app = require('./app');
 const connectDB = require('./config/Db');
 const { logReleaseIdentityAtStartup } = require('./utils/releaseIdentity');
+const { logIsolationSelfCheckAtStartup } = require('./utils/isolationSelfCheck');
 const { startOnboardingReminderScheduler } = require('./jobs/onboardingReminders');
 const {
   startInventoryReservationExpiryScheduler,
@@ -23,6 +24,7 @@ const startServer = async () => {
   try {
     await connectDB();
     logReleaseIdentityAtStartup();
+    logIsolationSelfCheckAtStartup();
     startOnboardingReminderScheduler();
     startInventoryReservationExpiryScheduler();
     app.listen(PORT, '0.0.0.0', () => {

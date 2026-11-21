@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { getPublicReleaseInfo } = require('../utils/releaseIdentity');
 const { isAuthEmailConfigured } = require('../utils/authEmailDelivery');
+const { isStagingEnv } = require('../utils/frontendUrl');
 
 const router = express.Router();
 const SERVICE_NAME = 'mosaic-backend';
@@ -16,10 +17,19 @@ router.get('/health', (_req, res) => {
   });
 });
 
+function getStagingIsolation() {
+  try {
+    const { getIsolationSelfCheck } = require('../utils/isolationSelfCheck');
+    return getIsolationSelfCheck({ connection: mongoose.connection });
+  } catch {
+    return { error: 'unavailable' };
+  }
+}
+
 router.get('/ready', (_req, res) => {
   const connected = mongoose.connection.readyState === 1;
 
-  res.status(connected ? 200 : 503).json({
+  const body = {
     status: connected ? 'ready' : 'not_ready',
     database: connected ? 'connected' : 'disconnected',
     authEmail: {
@@ -27,7 +37,14 @@ router.get('/ready', (_req, res) => {
     },
     timestamp: new Date().toISOString(),
     release: getPublicReleaseInfo(),
-  });
+  };
+
+  // Hosted staging only: self-attesting isolation report. Production shape is unchanged.
+  if (isStagingEnv()) {
+    body.isolation = getStagingIsolation();
+  }
+
+  res.status(connected ? 200 : 503).json(body);
 });
 
 router.get('/build-info', (_req, res) => {

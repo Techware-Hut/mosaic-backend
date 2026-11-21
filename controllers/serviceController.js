@@ -29,6 +29,7 @@ const {
 const { hasActiveServiceBookings } = require('../utils/bookingDeleteGuards');
 const { safeGeocodeAddress } = require('../utils/geocode');
 const { S3Client } = require('@aws-sdk/client-s3');
+const { buildS3ClientConfig } = require("../utils/s3ClientConfig");
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const {
@@ -51,13 +52,7 @@ const {
 require('../models/ServiceCategory');
 require('../models/ServiceSubcategory');
 
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
+const s3Client = new S3Client(buildS3ClientConfig());
 
 const getGalleryImageLimit = (subscriptionPlan) =>
   subscriptionPlan?.limits?.galleryImageLimit ?? subscriptionPlan?.limits?.imageLimit ?? 0;
