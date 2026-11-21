@@ -936,6 +936,7 @@ exports.getFoodById = async (req, res) => {
 
 
 const ProductVariant = require('../models/ProductVariant');
+const { toResponseSalePrice } = require('../lib/marketplace/listingPricePolicy');
 const Product = require('../models/Product');
 const ProductCategory = require('../models/ProductCategory');
 const ProductSubcategory = require('../models/ProductSubcategory');
@@ -1331,7 +1332,7 @@ exports.getProductById = async (req, res) => {
 
     const mappedVariants = variants.map(({ _id, ...rest }) => {
       const variantPrice = rest.price ? Number(rest.price) : 0;
-      const variantSalePrice = rest.salePrice ? Number(rest.salePrice) : null;
+      const variantSalePrice = toResponseSalePrice(rest.salePrice);
       const variantTaxPricing = buildTaxAwareAmounts({
         priceExclTax: variantPrice,
         salePriceExclTax: variantSalePrice,
@@ -1350,7 +1351,7 @@ exports.getProductById = async (req, res) => {
         sizes: Array.isArray(rest.sizes)
           ? rest.sizes.map((size) => {
               const sizePrice = size?.price ? Number(size.price) : 0;
-              const sizeSalePrice = size?.salePrice ? Number(size.salePrice) : null;
+              const sizeSalePrice = toResponseSalePrice(size?.salePrice);
               const sizeTaxPricing = buildTaxAwareAmounts({
                 priceExclTax: sizePrice,
                 salePriceExclTax: sizeSalePrice,
