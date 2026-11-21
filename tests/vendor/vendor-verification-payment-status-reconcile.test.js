@@ -9,6 +9,7 @@ const controllerPath = path.resolve(
 );
 
 const userId = '507f1f77bcf86cd799439011';
+const onboardingId = '507f1f77bcf86cd799439021';
 const paymentIntentId = 'pi_test_payment_status_001';
 
 function mockResponse() {
@@ -28,6 +29,7 @@ function mockResponse() {
 
 function buildOnboarding(overrides = {}) {
   return {
+    _id: onboardingId,
     userId,
     applicationId: 'MBH-APP-TEST-001',
     status: 'payment_pending',
@@ -60,6 +62,18 @@ function loadController(onboarding, { retrieveResult, retrieveError } = {}) {
   const retrieveCalls = [];
   const vendorOnboardingMock = {
     findOne: async () => onboarding,
+    findById: async () => onboarding,
+    updateOne: async (filter, update) => {
+      assert.deepEqual(filter, {
+        _id: onboardingId,
+        status: 'payment_pending',
+        'verificationPayment.paymentIntentId': paymentIntentId,
+      });
+      onboarding.status = update.$set.status;
+      if (update.$set.badge) onboarding.badge = update.$set.badge;
+      onboarding.verificationPayment.status = update.$set['verificationPayment.status'];
+      onboarding.verificationPayment.paidAt = update.$set['verificationPayment.paidAt'];
+    },
   };
 
   const stripeMock = () => ({

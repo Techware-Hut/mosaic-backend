@@ -71,6 +71,12 @@ function loadController({
   process.env.MAIL_PASSWORD = emailConfigured ? 'app-password' : '';
 
   const vendorOnboardingMock = {
+    findOneAndUpdate: async (filter, update) => {
+      if (!filter.status.$in.includes(onboarding.status)) return null;
+      Object.assign(onboarding, update.$set);
+      for (const key of Object.keys(update.$unset)) delete onboarding[key];
+      return onboarding;
+    },
     findOne: async () => onboarding,
   };
 
@@ -207,4 +213,48 @@ test('submitForReview idempotent when already submitted does not resend emails',
   assert.equal(res.body.success, true);
   assert.equal(mailerCalls.admin, undefined);
   assert.equal(mailerCalls.vendor, undefined);
+});
+
+test('receipt failure remains visible when admin email succeeds', async () => {
+  const { controller } = loadController({
+    onboarding: buildOnboarding(),
+    mailerOverrides: { sendVendorSubmissionConfirmationEmail: async () => { throw new Error('Receipt failed'); } },
+  });
+  const res = mockResponse();
+  await controller.submitForReview({ user: { _id: userId } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.emailSent, true);
+  assert.equal(res.body.emailFailed, false);
+  assert.deepEqual(res.body.receiptEmail, { sent: false, skipped: false, failed: true });
+});
+
+test('receipt reports sent when only the admin alert fails', async () => {
+  const mailerCalls = {};
+  const errorLogs = [];
+  const originalError = console.error;
+  console.error = (...args) => errorLogs.push(args.join(' '));
+  const { controller } = loadController({
+    onboarding: buildOnboarding(),
+    mailerCalls,
+    mailerOverrides: { sendAdminOnboardingSubmissionEmail: async () => { throw new Error('Admin alert failed'); } },
+  });
+  const res = mockResponse();
+  try {
+    await controller.submitForReview({ user: { _id: userId } }, res);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(res.statusCode, 200);
+  assert.ok(mailerCalls.vendor);
+  assert.deepEqual(res.body.receiptEmail, { sent: true, skipped: false, failed: false });
+  assert.equal(res.body.emailSent, true);
+  assert.equal(res.body.emailFailed, false);
+  assert.ok(errorLogs.some((line) => line.includes('admin_submission')));
+});
+
+test('receipt reports skipped when transport is unset', async () => {
+  const { controller } = loadController({ onboarding: buildOnboarding(), emailConfigured: false });
+  const res = mockResponse();
+  await controller.submitForReview({ user: { _id: userId } }, res);
+  assert.deepEqual(res.body.receiptEmail, { sent: false, skipped: true, failed: false });
 });

@@ -976,14 +976,16 @@ exports.patchBusinessProfile = async (req, res) => {
 
 
 
+// Returns { paid, onboarding }; callers must use the returned document, which
+// may be a fresh read after the conditional payment_pending transition.
 async function reconcileVendorVerificationPaymentFromStripe(onboarding, userId) {
   if (onboarding.verificationPayment?.status === 'paid') {
-    return true;
+    return { paid: true, onboarding };
   }
 
   const paymentIntentId = onboarding.verificationPayment?.paymentIntentId;
   if (!paymentIntentId) {
-    return false;
+    return { paid: false, onboarding };
   }
 
   let paymentIntent;
@@ -991,35 +993,55 @@ async function reconcileVendorVerificationPaymentFromStripe(onboarding, userId) 
     paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
   } catch (error) {
     console.error('Vendor verification payment retrieve failed:', error.message);
-    return false;
+    return { paid: false, onboarding };
   }
 
   if (paymentIntent.status !== 'succeeded') {
-    return false;
+    return { paid: false, onboarding };
   }
 
   if (paymentIntent.metadata?.type !== 'vendor_verification') {
-    return false;
+    return { paid: false, onboarding };
   }
 
   if (paymentIntent.metadata?.userId !== userId.toString()) {
-    return false;
+    return { paid: false, onboarding };
   }
 
   if (paymentIntent.id !== paymentIntentId) {
-    return false;
+    return { paid: false, onboarding };
+  }
+
+  if (onboarding.status === 'payment_pending') {
+    const paymentFields = {
+      'verificationPayment.status': 'paid',
+      'verificationPayment.paidAt': onboarding.verificationPayment.paidAt || new Date(),
+      status: 'draft',
+    };
+    // Preserve the save hook's badge normalization without a stale status save.
+    if (onboarding.badge === 'Bronze') paymentFields.badge = 'Silver';
+    await VendorOnboarding.updateOne(
+      {
+        _id: onboarding._id,
+        status: 'payment_pending',
+        'verificationPayment.paymentIntentId': paymentIntentId,
+      },
+      { $set: paymentFields },
+      { runValidators: true }
+    );
+    // Another request may already have reconciled and submitted this record.
+    const refreshed = await VendorOnboarding.findById(onboarding._id);
+    if (!refreshed) return { paid: false, onboarding };
+    return { paid: refreshed.verificationPayment?.status === 'paid', onboarding: refreshed };
   }
 
   onboarding.verificationPayment.status = 'paid';
   if (!onboarding.verificationPayment.paidAt) {
     onboarding.verificationPayment.paidAt = new Date();
   }
-  if (onboarding.status === 'payment_pending') {
-    onboarding.status = 'draft';
-  }
   await onboarding.save();
 
-  return true;
+  return { paid: true, onboarding };
 }
 
 //payment controllers
@@ -1236,7 +1258,7 @@ exports.getPaymentStatus = async (req, res) => {
   try {
     const userId = req.user._id;
     
-    const onboarding = await VendorOnboarding.findOne({ userId });
+    let onboarding = await VendorOnboarding.findOne({ userId });
     
     if (!onboarding) {
       logVendorOnboardingEvent('GET /stage1/payment-status', req, null, {
@@ -1251,7 +1273,7 @@ exports.getPaymentStatus = async (req, res) => {
     }
 
     if (onboarding.verificationPayment?.status !== 'paid') {
-      await reconcileVendorVerificationPaymentFromStripe(onboarding, userId);
+      ({ onboarding } = await reconcileVendorVerificationPaymentFromStripe(onboarding, userId));
     }
 
     const paymentData = {
@@ -1296,7 +1318,7 @@ exports.submitForReview = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    const onboarding = await VendorOnboarding.findOne({ userId });
+    let onboarding = await VendorOnboarding.findOne({ userId });
 
     /* ------------------------------
        BASIC EXISTENCE CHECK
@@ -1350,9 +1372,12 @@ if (
     /* ------------------------------
        PAYMENT VALIDATION (MANDATORY)
     ------------------------------ */
-    const paymentReady =
-      onboarding.verificationPayment?.status === 'paid' ||
-      (await reconcileVendorVerificationPaymentFromStripe(onboarding, userId));
+    let paymentReady = onboarding.verificationPayment?.status === 'paid';
+    if (!paymentReady) {
+      const reconciled = await reconcileVendorVerificationPaymentFromStripe(onboarding, userId);
+      paymentReady = reconciled.paid;
+      onboarding = reconciled.onboarding;
+    }
 
     if (!paymentReady) {
       logVendorOnboardingEvent('POST /submit', req, onboarding, {
@@ -1396,14 +1421,41 @@ if (
     /* ------------------------------
        FINAL SUBMISSION
     ------------------------------ */
-    onboarding.status = "submitted";
-    onboarding.submittedAt = new Date();
-    // Clear stale rejection UI once the app is back in the review queue.
-    onboarding.reviewDecision = undefined;
-    onboarding.rejectionReason = undefined;
-    onboarding.requiredNextAction = undefined;
-    onboarding.rejectedAt = undefined;
-    await onboarding.save();
+    const submitFields = { status: 'submitted', submittedAt: new Date() };
+    // findOneAndUpdate skips validate hooks; preserve badge normalization (applicationId is immutable and assigned on first save).
+    if (onboarding.badge === 'Bronze') submitFields.badge = 'Silver';
+    if (onboarding.hasBusinessLicense === false) {
+      submitFields.licenseNumber = '';
+      submitFields.businessLicenseDocuments = [];
+    }
+    const submitted = await VendorOnboarding.findOneAndUpdate(
+      { userId, status: { $in: ['draft', 'payment_pending', 'rejected'] } },
+      {
+        $set: submitFields,
+        $unset: {
+          reviewDecision: 1,
+          rejectionReason: 1,
+          requiredNextAction: 1,
+          rejectedAt: 1,
+        },
+      },
+      { new: true, runValidators: true }
+    );
+    if (!submitted) {
+      // receiptEmail is unknown for the idempotent loser, not a delivery failure.
+      logVendorOnboardingEvent('POST /submit', req, onboarding, {
+        httpStatus: 200,
+        category: 'success',
+        message: 'Idempotent resubmit',
+      });
+      return res.status(200).json({
+        success: true,
+        message: "Application submitted successfully",
+        applicationId: onboarding.applicationId,
+      });
+    }
+
+    onboarding = submitted;
 
     /* ------------------------------
        FETCH USER DETAILS
@@ -1438,10 +1490,19 @@ if (
       category: 'success',
     });
 
+    const receipt = emailDelivery.results.find(
+      (result) => result.label === 'vendor_submission_confirmation'
+    );
+
     return res.status(200).json({
       success: true,
       message: "Stage 1 submitted successfully for admin verification",
       applicationId: onboarding.applicationId,
+      receiptEmail: {
+        sent: Boolean(receipt?.sent),
+        skipped: Boolean(receipt?.skipped),
+        failed: Boolean(receipt && !receipt.sent && !receipt.skipped),
+      },
       emailSent: emailDelivery.emailSent,
       emailSkipped: emailDelivery.emailSkipped,
       emailFailed: emailDelivery.emailFailed,

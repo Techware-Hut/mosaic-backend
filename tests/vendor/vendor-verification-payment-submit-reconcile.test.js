@@ -13,6 +13,7 @@ const controllerPath = path.resolve(
 );
 
 const userId = '507f1f77bcf86cd799439011';
+const onboardingId = '507f1f77bcf86cd799439022';
 const paymentIntentId = 'pi_test_reconcile_001';
 
 function mockResponse() {
@@ -32,6 +33,7 @@ function mockResponse() {
 
 function buildOnboarding(overrides = {}) {
   return {
+    _id: onboardingId,
     userId,
     applicationId: 'MBH-APP-TEST-001',
     businessName: 'Test Business',
@@ -83,7 +85,25 @@ function loadController(onboarding, { retrieveResult, retrieveError } = {}) {
 
   const retrieveCalls = [];
   const vendorOnboardingMock = {
+    findOneAndUpdate: async (filter, update) => {
+      if (!filter.status.$in.includes(onboarding.status)) return null;
+      Object.assign(onboarding, update.$set);
+      for (const key of Object.keys(update.$unset)) delete onboarding[key];
+      return onboarding;
+    },
     findOne: async () => onboarding,
+    findById: async () => onboarding,
+    updateOne: async (filter, update) => {
+      assert.deepEqual(filter, {
+        _id: onboardingId,
+        status: 'payment_pending',
+        'verificationPayment.paymentIntentId': paymentIntentId,
+      });
+      onboarding.status = update.$set.status;
+      if (update.$set.badge) onboarding.badge = update.$set.badge;
+      onboarding.verificationPayment.status = update.$set['verificationPayment.status'];
+      onboarding.verificationPayment.paidAt = update.$set['verificationPayment.paidAt'];
+    },
   };
 
   const userMock = {
