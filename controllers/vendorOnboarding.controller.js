@@ -1141,7 +1141,7 @@ exports.createVerificationPayment = async (req, res) => {
               existingIntent
             ));
           } catch (reconcileError) {
-            console.error("Vendor verification payment reconcile failed:", reconcileError.message);
+            console.error("Vendor verification payment reconcile failed:", { onboardingId: String(onboarding._id), paymentIntentId: existingIntent?.id, error: reconcileError.message });
           }
           if (paid) {
             return respondAlreadyPaid(res);
@@ -1173,7 +1173,7 @@ exports.createVerificationPayment = async (req, res) => {
           { runValidators: true }
         );
         if (!reuseResult?.matchedCount) {
-          return respondWithCurrentPaymentState(res, onboarding._id);
+          return await respondWithCurrentPaymentState(res, onboarding._id);
         }
 
         return res.status(200).json({
@@ -1238,7 +1238,7 @@ exports.createVerificationPayment = async (req, res) => {
       } catch (cancelError) {
         console.warn("Could not cancel unused payment intent:", cancelError.message);
       }
-      return respondWithCurrentPaymentState(res, onboarding._id);
+      return await respondWithCurrentPaymentState(res, onboarding._id);
     }
 
     return res.status(200).json({
