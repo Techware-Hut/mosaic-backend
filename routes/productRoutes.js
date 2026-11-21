@@ -19,6 +19,7 @@ const isCustomer = require('../middlewares/isCustomer');
 const { listReviews, upsertReview, deleteReview } = require('../controllers/reviewController');
 const { 
   validateProductInput, 
+  validateProductCreate,
   validateVariantInput, 
   validateUpdateVariantInput  
 } = require('../validators/productValidators');
@@ -97,7 +98,7 @@ router.post(
   '/',
   authenticate,
   isBusinessOwner,
-  // validateProductInput,
+  validateProductCreate,
   createProductWithVariants
 );
 

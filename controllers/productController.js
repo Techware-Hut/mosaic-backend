@@ -275,11 +275,34 @@ const generateUniqueSKU = async (businessId, productId, attributes) => {
  */
 
 
+// Remove a product that was saved during a create request that then failed,
+// plus any variants already inserted for it, so a failed create never leaves an
+// unpublished product counting against the vendor's listing quota.
+async function cleanupFailedProductCreate(productId) {
+  if (!productId) return;
+  try {
+    await ProductVariant.deleteMany({ productId });
+    await Product.deleteOne({ _id: productId });
+  } catch (cleanupErr) {
+    console.error('[product-create] cleanup after failed create failed:', {
+      productId: String(productId),
+      message: cleanupErr?.message,
+    });
+  }
+}
+
 exports.createProductWithVariants = async (req, res) => {
+  let createdProductId = null;
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      const list = errors.array();
+      return res.status(400).json({
+        success: false,
+        code: 'PRODUCT_VALIDATION_FAILED',
+        error: list[0]?.msg || 'Invalid product details.',
+        errors: list,
+      });
     }
 
     const userId = req.user._id;
@@ -353,6 +376,16 @@ exports.createProductWithVariants = async (req, res) => {
 
     const willPublish = Boolean(isPublished);
 
+    if (!Array.isArray(variants) || variants.length === 0) {
+      return res.status(400).json({ error: 'At least one variant is required.' });
+    }
+    for (const variant of variants) {
+      const check = normalizeVariantPayload(variant || {});
+      if (!check.ok) {
+        return res.status(400).json({ error: check.error });
+      }
+    }
+
     // Create Product
     const product = new Product({
       title,
@@ -372,6 +405,7 @@ exports.createProductWithVariants = async (req, res) => {
     });
 
     await product.save();
+    createdProductId = product._id;
 
   // Create Variants updated section to handle varient skus rolback and ensure uniqueness
 
@@ -382,6 +416,7 @@ for (const variant of variants) {
   const attrMap = new Map(Object.entries(variant.attributes || {}));
   const normalizedVariant = normalizeVariantPayload(variant);
   if (!normalizedVariant.ok) {
+    await cleanupFailedProductCreate(createdProductId);
     return res.status(400).json({ error: normalizedVariant.error });
   }
 
@@ -432,7 +467,7 @@ for (const variant of variants) {
         isPublished: true,
       });
       if (!publishCheck.ok) {
-        await Product.findByIdAndDelete(product._id);
+        await cleanupFailedProductCreate(createdProductId);
         return res.status(400).json({
           error: publishCheck.message,
           code: publishCheck.code,
@@ -513,6 +548,7 @@ const maxPrice = Math.max(...prices);
       });
 
     } catch (variantErr) {
+  await cleanupFailedProductCreate(createdProductId);
 
   if (variantErr.code === 11000) {
 
@@ -541,6 +577,8 @@ const maxPrice = Math.max(...prices);
     }
   });
 } 
+    // Created successfully: nothing below may roll it back.
+    createdProductId = null;
     return res.status(201).json({
       message: 'Product and variants created successfully.',
       product: await Product.findById(product._id), // returns product with price
@@ -549,6 +587,7 @@ const maxPrice = Math.max(...prices);
 
   } catch (err) {
     console.error('Error in product creation:', err);
+    await cleanupFailedProductCreate(createdProductId);
     return res.status(500).json({ error: 'Server error while creating product.' });
   }
 };
