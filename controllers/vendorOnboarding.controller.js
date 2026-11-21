@@ -1296,7 +1296,7 @@ exports.submitForReview = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    const onboarding = await VendorOnboarding.findOne({ userId });
+    let onboarding = await VendorOnboarding.findOne({ userId });
 
     /* ------------------------------
        BASIC EXISTENCE CHECK
@@ -1396,14 +1396,45 @@ if (
     /* ------------------------------
        FINAL SUBMISSION
     ------------------------------ */
-    onboarding.status = "submitted";
-    onboarding.submittedAt = new Date();
-    // Clear stale rejection UI once the app is back in the review queue.
-    onboarding.reviewDecision = undefined;
-    onboarding.rejectionReason = undefined;
-    onboarding.requiredNextAction = undefined;
-    onboarding.rejectedAt = undefined;
-    await onboarding.save();
+    const submitFields = { status: 'submitted', submittedAt: new Date() };
+    // findOneAndUpdate skips the schema's save/validate hooks; apply the same
+    // effects the previous onboarding.save() had (applicationId, badge).
+    if (!onboarding.applicationId) {
+      const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+      submitFields.applicationId = `MBH-APP-${Date.now()}-${random}`;
+    }
+    if (onboarding.badge === 'Bronze') submitFields.badge = 'Silver';
+    if (onboarding.hasBusinessLicense === false) {
+      submitFields.licenseNumber = '';
+      submitFields.businessLicenseDocuments = [];
+    }
+    const submitted = await VendorOnboarding.findOneAndUpdate(
+      { userId, status: { $in: ['draft', 'payment_pending', 'rejected'] } },
+      {
+        $set: submitFields,
+        $unset: {
+          reviewDecision: 1,
+          rejectionReason: 1,
+          requiredNextAction: 1,
+          rejectedAt: 1,
+        },
+      },
+      { new: true, runValidators: true }
+    );
+    if (!submitted) {
+      logVendorOnboardingEvent('POST /submit', req, onboarding, {
+        httpStatus: 200,
+        category: 'success',
+        message: 'Idempotent resubmit',
+      });
+      return res.status(200).json({
+        success: true,
+        message: "Application submitted successfully",
+        applicationId: onboarding.applicationId,
+      });
+    }
+
+    onboarding = submitted;
 
     /* ------------------------------
        FETCH USER DETAILS
@@ -1438,10 +1469,19 @@ if (
       category: 'success',
     });
 
+    const receipt = emailDelivery.results.find(
+      (result) => result.label === 'vendor_submission_confirmation'
+    );
+
     return res.status(200).json({
       success: true,
       message: "Stage 1 submitted successfully for admin verification",
       applicationId: onboarding.applicationId,
+      receiptEmail: {
+        sent: Boolean(receipt?.sent),
+        skipped: Boolean(receipt?.skipped),
+        failed: Boolean(receipt && !receipt.sent && !receipt.skipped),
+      },
       emailSent: emailDelivery.emailSent,
       emailSkipped: emailDelivery.emailSkipped,
       emailFailed: emailDelivery.emailFailed,

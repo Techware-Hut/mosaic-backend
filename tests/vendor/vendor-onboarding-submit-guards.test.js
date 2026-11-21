@@ -68,6 +68,12 @@ function loadController({ onboarding, findOneQueryLog, findOneImpl } = {}) {
 
   const queries = findOneQueryLog || [];
   const vendorOnboardingMock = {
+    findOneAndUpdate: async (filter, update) => {
+      if (!filter.status.$in.includes(onboarding.status)) return null;
+      Object.assign(onboarding, update.$set);
+      for (const key of Object.keys(update.$unset)) delete onboarding[key];
+      return onboarding;
+    },
     findOne: async (query) => {
       queries.push(query);
       if (typeof findOneImpl === 'function') {
