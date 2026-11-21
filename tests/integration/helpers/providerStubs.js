@@ -4,11 +4,13 @@ const { captureOtp } = require('./otpCapture');
 
 let originalLoad = null;
 let stripeShouldFail = false;
+let stripeRefundErrorCode = null;
 let otpEmailFailCount = 0;
 // Every stripe.refunds.create call, plus the refunds "Stripe" actually created.
 // Like Stripe, a repeated idempotency key with the same params returns the
 // original refund instead of creating another one.
 let statusEmailCalls = [];
+let cancelledSmsCalls = [];
 let refundCalls = [];
 let refundsByIdempotencyKey = new Map();
 
@@ -82,6 +84,7 @@ function createStripeClient() {
     refunds: {
       create: async (params, options = {}) => {
         failIfRequested();
+        if (stripeRefundErrorCode) throw Object.assign(new Error(stripeRefundErrorCode), { code: stripeRefundErrorCode });
         const idempotencyKey = options.idempotencyKey || null;
         refundCalls.push({ params, idempotencyKey });
         if (idempotencyKey && refundsByIdempotencyKey.has(idempotencyKey)) {
@@ -139,6 +142,10 @@ function installProviderStubs() {
   );
 
   Module._load = function integrationMockLoad(request, parent, isMain) {
+    if (request.endsWith('utils/telnyxService')) {
+      const actual = originalLoad.call(this, request, parent, isMain);
+      return { ...actual, sendOrderCancelledCustomerSMS: async (...args) => { cancelledSmsCalls.push(args); } };
+    }
     if (request.endsWith('utils/orderPhase')) return { sendOrderStatusEmail: async (...args) => { statusEmailCalls.push(args); return { messageId: 'synthetic' }; } };
     if (request === 'stripe') {
       function StripeMock() {
@@ -164,14 +171,18 @@ function installProviderStubs() {
 module.exports = {
   installProviderStubs,
   setStripeShouldFail,
+  setStripeRefundErrorCode: (code) => { stripeRefundErrorCode = code; },
   setOtpEmailFailCount,
   resetOtpEmailFailCount,
   resetStripeStub: () => {
     stripeShouldFail = false;
+    stripeRefundErrorCode = null;
     statusEmailCalls = [];
+    cancelledSmsCalls = [];
     refundCalls = [];
     refundsByIdempotencyKey = new Map();
   },
+  getCancelledSmsCalls: () => cancelledSmsCalls.slice(),
   getStatusEmailCalls: () => statusEmailCalls.slice(),
   getStripeRefundCalls: () => refundCalls.slice(),
   getStripeRefundsCreated: () =>
