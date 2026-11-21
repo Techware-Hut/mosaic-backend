@@ -1,3 +1,4 @@
+const { escapeRegex } = require('../utils/safeRegex');
 const mongoose = require('mongoose');
 const Service = require('../models/Service');
 const Review = require('../models/Review');
@@ -154,9 +155,9 @@ exports.getAllServices = async (req, res) => {
     // Search
     if (search) {
       filters.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { 'services.name': { $regex: search, $options: 'i' } },
+        { title: { $regex: escapeRegex(search), $options: 'i' } },
+        { description: { $regex: escapeRegex(search), $options: 'i' } },
+        { 'services.name': { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 
@@ -540,8 +541,8 @@ exports.getAllFood = async (req, res) => {
     // Search filter
     if (search) {
       filters.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
+        { title: { $regex: escapeRegex(search), $options: 'i' } },
+        { description: { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 
@@ -1004,8 +1005,8 @@ exports.getAllProducts = async (req, res) => {
 
     if (search) {
       filters.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
+        { title: { $regex: escapeRegex(search), $options: 'i' } },
+        { description: { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 
@@ -1158,8 +1159,8 @@ exports.getProductsByFilters = async (req, res) => {
 
     if (search) {
       filters.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
+        { title: { $regex: escapeRegex(search), $options: 'i' } },
+        { description: { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 

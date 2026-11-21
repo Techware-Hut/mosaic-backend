@@ -42,6 +42,7 @@ const { sendVendorStorefrontPublishedEmail } = require("../utils/WellcomeMailer"
 const { deliverVendorOnboardingEmail } = require("../utils/vendorOnboardingEmailDelivery");
 const User = require("../models/User");
 const { safeGeocodeAddress } = require('../utils/geocode');
+const { escapeRegex, exactCaseInsensitiveRegex } = require('../utils/safeRegex');
 
 exports.createBusiness = async (req, res) => {
   try {
@@ -108,7 +109,7 @@ exports.createBusiness = async (req, res) => {
     // Check for duplicate business name
     const nameToCheck = businessName?.trim();
     const existingBusiness = await Business.findOne({
-      businessName: { $regex: new RegExp(`^${nameToCheck}$`, "i") },
+      businessName: { $regex: exactCaseInsensitiveRegex(nameToCheck) },
     });
 
     if (existingBusiness) {
@@ -483,7 +484,7 @@ exports.updateBusiness = async (req, res) => {
       req.body.businessName !== business.businessName
     ) {
       const nameExists = await Business.findOne({
-        businessName: { $regex: new RegExp(`^${req.body.businessName}$`, "i") },
+        businessName: { $regex: exactCaseInsensitiveRegex(req.body.businessName) },
         _id: { $ne: businessId },
       });
       if (nameExists) {
@@ -813,14 +814,14 @@ exports.retryCreateBusiness = async (req, res) => {
     // Validate the business name (avoid duplicates)
     let businessNameToCheck = businessName.trim();
     let existingBusiness = await Business.findOne({
-      businessName: { $regex: new RegExp(`^${businessNameToCheck}$`, "i") },
+      businessName: { $regex: exactCaseInsensitiveRegex(businessNameToCheck) },
     });
 
     let counter = 1;
     while (existingBusiness) {
       businessNameToCheck = `${businessName}-${counter}`;
       existingBusiness = await Business.findOne({
-        businessName: { $regex: new RegExp(`^${businessNameToCheck}$`, "i") },
+        businessName: { $regex: exactCaseInsensitiveRegex(businessNameToCheck) },
       });
       counter++;
     }
@@ -933,7 +934,7 @@ exports.getProductBusinesses = async (req, res) => {
       filters.isFeatured = true;
     }
 
-    if (search) filters.businessName = { $regex: search, $options: "i" };
+    if (search) filters.businessName = { $regex: escapeRegex(search), $options: "i" };
     if (city) filters["address.city"] = { $regex: `^${String(city).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" };
     const stateFilter = buildAddressStateFilter(state);
     if (stateFilter) filters["address.state"] = stateFilter;
