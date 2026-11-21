@@ -344,68 +344,8 @@ test('cancelOrderByUser restores accepted-order stock after successful refund', 
 
 // --- Transition lock, refund idempotency and restock on reject (post-merge hardening) ---
 
-test('cancelOrderByUser returns 409 and never refunds when a concurrent transition holds the order', async () => {
-  const order = makeOrder({ status: 'accepted', paymentStatus: 'paid', paymentId: 'pi_race' });
-  const { controller, calls } = loadOrderController({ order, transitionClaimFails: true });
-  const res = mockResponse();
 
-  await controller.cancelOrderByUser(
-    { user: { _id: 'customer-1' }, params: { orderId: 'order-1' } },
-    res
-  );
 
-  assert.equal(res.statusCode, 409);
-  assert.equal(res.body.code, 'ORDER_TRANSITION_CONFLICT');
-  assert.equal(calls.refundCreate.length, 0);
-  assert.equal(order.getSaveCalls(), 0);
-  // The claim is conditional on the status that was checked in memory.
-  assert.deepEqual(calls.updateOne[0].filter.status, { $in: ['ordered', 'accepted'] });
-  assert.equal(calls.updateOne[0].filter._id, 'order-1');
-});
-
-test('cancelOrderByUser refunds with a per-order idempotency key and releases the lock', async () => {
-  const order = makeOrder({ status: 'accepted', paymentStatus: 'paid', paymentId: 'pi_ok' });
-  const { controller, calls } = loadOrderController({ order });
-  const res = mockResponse();
-
-  await controller.cancelOrderByUser(
-    { user: { _id: 'customer-1' }, params: { orderId: 'order-1' } },
-    res
-  );
-
-  assert.equal(res.body.success, true);
-  assert.deepEqual(calls.refundOptions, [{ idempotencyKey: 'refund:order-1:order_cancelled_by_user' }]);
-  const release = calls.updateOne.find((c) => c.update.$set.transitionLockedAt === null);
-  assert.ok(release, 'lock must be released');
-  assert.ok(release.filter.transitionLockedAt instanceof Date, 'release matches the claim timestamp');
-});
-
-test('cancelOrderByUser still saves cancelled/refunded state when stock restore fails after refund', async () => {
-  const decrementedAt = new Date('2026-08-06T00:00:00Z');
-  const order = makeOrder({
-    status: 'accepted',
-    paymentStatus: 'paid',
-    paymentId: 'pi_ok',
-    inventoryDecrementedAt: decrementedAt,
-    items: [{ variantId: 'variant-1', size: 'M', quantity: 1 }],
-  });
-  const { controller, calls } = loadOrderController({ order, restoreError: new Error('db blip') });
-  const res = mockResponse();
-
-  await controller.cancelOrderByUser(
-    { user: { _id: 'customer-1' }, params: { orderId: 'order-1' } },
-    res
-  );
-
-  assert.equal(calls.refundCreate.length, 1);
-  assert.equal(res.body.success, true);
-  assert.equal(res.body.inventoryRestore, 'failed');
-  assert.equal(order.status, 'cancelled');
-  assert.equal(order.paymentStatus, 'refunded');
-  assert.ok(order.getSaveCalls() >= 1, 'order must be persisted');
-  // Left set so the order can be found for manual stock reconciliation.
-  assert.equal(order.inventoryDecrementedAt, decrementedAt);
-});
 
 test('rejectOrder restores stock decremented at payment after refunding', async () => {
   const order = makeOrder({

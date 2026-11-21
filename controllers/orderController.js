@@ -146,8 +146,8 @@ const toNum = (value) => {
 
 const getAuthenticatedUserId = (req) => req.user?.id || req.user?._id;
 
-// Claims the atomic transition lock for an order whose status was just checked
-// in memory. Returns null when a concurrent request changed or holds the order.
+// Claims the atomic transition lock (used by rejectOrder only) for an order whose
+// status was just checked in memory. Returns null when a concurrent request changed or holds the order.
 async function claimTransition(order, expectedStatus) {
   const at = new Date();
   const claimed = await claimOrderTransition(Order, order._id, expectedStatus, at);
@@ -1197,7 +1197,6 @@ exports.getVendorOrders = async (req, res) => {
 };
 
 exports.acceptOrder = async (req, res) => {
-  let transitionClaim = null;
   try {
     const vendorId = req.user._id;
     const orderId = req.params.orderId;
@@ -1214,11 +1213,6 @@ exports.acceptOrder = async (req, res) => {
         success: false,
         message: 'Only "ordered" orders can be accepted',
       });
-    }
-
-    transitionClaim = await claimTransition(order, "ordered");
-    if (!transitionClaim) {
-      return res.status(409).json(TRANSITION_CONFLICT_RESPONSE);
     }
 
     // Stock is decremented on payment success (inventoryDecrementedAt). Accept
@@ -1258,8 +1252,6 @@ exports.acceptOrder = async (req, res) => {
   } catch (err) {
     console.error("Error accepting order:", err);
     res.status(500).json({ success: false, message: "Server error" });
-  } finally {
-    await releaseTransition(transitionClaim);
   }
 };
 
@@ -1363,7 +1355,6 @@ exports.rejectOrder = async (req, res) => {
 };
 
 exports.shipOrder = async (req, res) => {
-  let transitionClaim = null;
   try {
     const vendorId = req.user._id;
     const orderId = req.params.orderId;
@@ -1391,11 +1382,6 @@ exports.shipOrder = async (req, res) => {
         success: false,
         message: "Only accepted orders can be shipped",
       });
-    }
-
-    transitionClaim = await claimTransition(order, "accepted");
-    if (!transitionClaim) {
-      return res.status(409).json(TRANSITION_CONFLICT_RESPONSE);
     }
 
     order.trackingInfo = { trackingId, trackingUrl };
@@ -1435,13 +1421,10 @@ exports.shipOrder = async (req, res) => {
   } catch (err) {
     console.error("Error in shipOrder:", err);
     res.status(500).json({ success: false, message: "Server error" });
-  } finally {
-    await releaseTransition(transitionClaim);
   }
 };
 
 exports.deliverOrder = async (req, res) => {
-  let transitionClaim = null;
   try {
     const vendorId = req.user._id;
     const orderId = req.params.orderId;
@@ -1461,11 +1444,6 @@ exports.deliverOrder = async (req, res) => {
         success: false,
         message: "Order must be shipped before it can be delivered",
       });
-    }
-
-    transitionClaim = await claimTransition(order, "shipped");
-    if (!transitionClaim) {
-      return res.status(409).json(TRANSITION_CONFLICT_RESPONSE);
     }
 
     order.status = "delivered";
@@ -1499,13 +1477,10 @@ exports.deliverOrder = async (req, res) => {
   } catch (err) {
     console.error("Error delivering order:", err);
     res.status(500).json({ success: false, message: "Server error" });
-  } finally {
-    await releaseTransition(transitionClaim);
   }
 };
 
 exports.initiateReturn = async (req, res) => {
-  let transitionClaim = null;
   try {
     const userId = getAuthenticatedUserId(req);
     const orderId = req.params.orderId;
@@ -1521,11 +1496,6 @@ exports.initiateReturn = async (req, res) => {
         success: false,
         message: 'Order must be delivered before it can be returned',
       });
-    }
-
-    transitionClaim = await claimTransition(order, "delivered");
-    if (!transitionClaim) {
-      return res.status(409).json(TRANSITION_CONFLICT_RESPONSE);
     }
 
     // Step 1: Mark as returned when the customer initiates the return
@@ -1558,15 +1528,12 @@ exports.initiateReturn = async (req, res) => {
   } catch (err) {
     console.error("Error initiating return:", err);
     res.status(500).json({ success: false, message: "Server error" });
-  } finally {
-    await releaseTransition(transitionClaim);
   }
 };
 
 
 
 exports.acceptReturn = async (req, res) => {
-  let transitionClaim = null;
   try {
     const vendorId = req.user._id;
     const orderId = req.params.orderId;
@@ -1583,11 +1550,6 @@ exports.acceptReturn = async (req, res) => {
         success: false,
         message: 'Order must be marked as returned before it can be accepted',
       });
-    }
-
-    transitionClaim = await claimTransition(order, "returned");
-    if (!transitionClaim) {
-      return res.status(409).json(TRANSITION_CONFLICT_RESPONSE);
     }
 
     // Step 1: Mark the order as 'refunded'
@@ -1609,8 +1571,6 @@ exports.acceptReturn = async (req, res) => {
           metadata: {
             custom_reason: "return_accepted",
           },
-        }, {
-          idempotencyKey: `refund:${order._id}:return_accepted`,
         });
 
         // Step 3: After successful refund, update order status to 'refunded'
@@ -1651,8 +1611,6 @@ exports.acceptReturn = async (req, res) => {
   } catch (err) {
     console.error("Error accepting return:", err);
     res.status(500).json({ success: false, message: "Server error" });
-  } finally {
-    await releaseTransition(transitionClaim);
   }
 };
 
@@ -1884,7 +1842,6 @@ exports.getAdminSalesSummary = async (req, res) => {
 
 
 exports.cancelOrderByUser = async (req, res) => {
-  let transitionClaim = null;
   try {
     const userId = getAuthenticatedUserId(req);
     const { orderId } = req.params;
@@ -1912,11 +1869,6 @@ exports.cancelOrderByUser = async (req, res) => {
       });
     }
 
-    transitionClaim = await claimTransition(order, ["ordered", "accepted"]);
-    if (!transitionClaim) {
-      return res.status(409).json(TRANSITION_CONFLICT_RESPONSE);
-    }
-
     // If payment captured, refund the whole order
     // (Assumes single PaymentIntent for the order. Adjust for partial refunds if needed.)
     if (order.paymentStatus === "paid" && order.paymentId) {
@@ -1931,8 +1883,6 @@ exports.cancelOrderByUser = async (req, res) => {
             custom_reason: "order_cancelled_by_user",
             order_id: String(order._id),
           },
-        }, {
-          idempotencyKey: `refund:${order._id}:order_cancelled_by_user`,
         });
 
         order.paymentStatus = "refunded";
@@ -1971,9 +1921,21 @@ exports.cancelOrderByUser = async (req, res) => {
     }
 
     // Restore inventory when payment already decremented stock (paid / accepted).
-    // The refund has already been issued at this point, so a restore failure
-    // must not stop the order being saved as cancelled/refunded.
-    const inventoryRestore = await restoreDecrementedInventory(order, "cancelled");
+    if (order.inventoryDecrementedAt) {
+      try {
+        await restoreInventoryForOrder(order);
+        order.inventoryDecrementedAt = undefined;
+      } catch (restoreErr) {
+        console.error(
+          `Failed to restore inventory for cancelled order ${order._id}:`,
+          restoreErr
+        );
+        return res.status(500).json({
+          success: false,
+          message: "Failed to restore inventory after cancellation. Please contact support.",
+        });
+      }
+    }
 
     order.status = "cancelled";
     order.statusHistory.push({ status: "cancelled" });
@@ -1998,14 +1960,11 @@ exports.cancelOrderByUser = async (req, res) => {
       success: true,
       message: "Order cancelled successfully",
       emailDelivery,
-      inventoryRestore,
       order: serializeOrderForResponse(order),
     });
   } catch (err) {
     console.error("Error cancelling order:", err);
     return res.status(500).json({ success: false, message: "Server error" });
-  } finally {
-    await releaseTransition(transitionClaim);
   }
 };
 
