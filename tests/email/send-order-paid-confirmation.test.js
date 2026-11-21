@@ -692,3 +692,34 @@ test("records invoice attachment failure without marking successful email delive
     true
   );
 });
+
+test("records a staging allowlist suppression as a terminal non-failure skip, never as delivered", async () => {
+  const harness = loadHelper({
+    mailPlan: [() => ({
+      customer: {
+        status: "skipped",
+        provider: "smtp",
+        recipientCount: 1,
+        acceptedCount: 0,
+        rejectedCount: 0,
+        messageId: null,
+        reason: "staging_recipient_allowlist_suppressed",
+      },
+      vendor: sentResult("vendor"),
+    })],
+  });
+
+  const result = await harness.helper.sendOrderPaidConfirmationIfNeeded(harness.order._id);
+
+  const customer = harness.order.paidOrderEmailDelivery.customer;
+  assert.equal(customer.status, "skipped");
+  assert.equal(customer.reason, "staging_recipient_allowlist_suppressed");
+  assert.equal(customer.error, undefined);
+  assert.equal(customer.sentAt, undefined);
+  assert.equal(result.emailFailed, false);
+  assert.equal(result.emailSkipped, true);
+  assert.equal(harness.order.paidConfirmationEmailSentAt, null);
+
+  await harness.helper.sendOrderPaidConfirmationIfNeeded(harness.order._id);
+  assert.equal(harness.mailCalls.length, 1, "a suppressed role is not re-claimed or resent");
+});

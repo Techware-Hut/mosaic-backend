@@ -18,6 +18,7 @@ const infrastructureSetupPath = path.join(
 
 const {
   ROLLBACK_CONFIRMATION,
+  FOCUSED_BASELINE_SHA,
   resolveProductionRelease,
 } = require('../../scripts/release/resolve-production-release');
 const {
@@ -38,6 +39,7 @@ const {
 } = require('../../scripts/release/build-production-evidence');
 const {
   requireProcessedVersion,
+  parseConfig: parseApplicationVersionConfig,
 } = require('../../scripts/release/require-eb-application-version');
 const {
   analyzeCheckoutSurface,
@@ -46,10 +48,31 @@ const {
   hasCanonicalPostRoute,
   verifyStatuses: verifyTargetCheckoutStatuses,
 } = require('../../scripts/release/probe-target-checkout-surface');
+const {
+  cliConfiguration: checkoutGateCliConfiguration,
+} = require('../../scripts/release/manage-checkout-gate');
 
 const shaA = 'a'.repeat(40);
 const shaB = 'b'.repeat(40);
 const repository = 'Techware-Hut/mosaic-backend';
+
+const gateArnPrefix = 'arn:aws:elasticloadbalancing:us-east-1:123456789012:';
+const pinnedGateConfiguration = {
+  region: 'us-east-1',
+  loadBalancerArn: `${gateArnPrefix}loadbalancer/app/prod/abc123`,
+  httpRuleArn: `${gateArnPrefix}listener-rule/app/prod/abc123/http80/rule1`,
+  httpsRuleArn: `${gateArnPrefix}listener-rule/app/prod/abc123/https443/rule2`,
+  httpPriority: '1',
+  httpsPriority: '1',
+};
+const gateVerifyArgs = ['verify', '--output', 'gate-evidence.json'];
+const gateEnableArgs = [
+  'enable', '--confirm', 'ENABLE_CHECKOUT_GATE', '--output', 'gate-evidence.json',
+];
+
+function gateCli(args, env = {}) {
+  return checkoutGateCliConfiguration(args, env, pinnedGateConfiguration);
+}
 
 function resolver(overrides = {}) {
   return resolveProductionRelease({
@@ -121,6 +144,33 @@ test('old main ancestors are available only through explicit break-glass rollbac
     }),
     /exact confirmation phrase/
   );
+});
+
+test('focused baseline resolves only an exact protected branch tip and approved production baseline', () => {
+  const focused = {
+    event: 'workflow_dispatch',
+    requestedSha: shaB,
+    mode: 'focused-baseline',
+    baselineSha: FOCUSED_BASELINE_SHA,
+    releaseRef: 'refs/heads/release/focused/booking-filter',
+    sourcePr: '290',
+    focusedRefSha: shaB,
+  };
+  const result = resolver(focused);
+  assert.equal(result.releaseSha, shaB);
+  assert.equal(result.sourceRequired, true);
+  assert.equal(result.breakGlass, false);
+  assert.deepEqual(result.focusedSource, {
+    baselineSha: FOCUSED_BASELINE_SHA,
+    releaseRef: focused.releaseRef,
+    sourcePr: 290,
+  });
+  assert.throws(() => resolver({ ...focused, baselineSha: shaA }), /approved production SHA/);
+  assert.throws(() => resolver({ ...focused, focusedRefSha: shaA }), /branch tip/);
+  assert.throws(() => resolver({ ...focused, releaseRef: 'refs/heads/staging' }), /protected release\/focused/);
+  assert.throws(() => resolver({ ...focused, sourcePr: '' }), /merged PR number/);
+  assert.throws(() => resolver({ ...focused, workflowSha: shaB }), /workflow definition is not the exact current main/);
+  assert.throws(() => resolver({ ...focused, event: 'push' }), /Push-triggered releases cannot enter/);
 });
 
 function pullRequest(overrides = {}) {
@@ -520,6 +570,168 @@ test('git-tree packaging primitive is deterministic and excludes mutable untrack
   });
 });
 
+test('pinned release bucket is mandatory and validated before bundle preparation', (t) => {
+  const gitExecutable = process.platform === 'win32'
+    ? spawnSync('where.exe', ['git'], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/)[0] : null;
+  const bashCommand = gitExecutable
+    ? path.resolve(path.dirname(gitExecutable), '../bin/bash.exe') : 'bash';
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-pinned-bucket-'));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const runGit = (...args) => {
+    const result = spawnSync('git', args, { cwd: temporary, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  runGit('init', '--quiet');
+  runGit('config', 'core.autocrlf', 'false');
+  fs.writeFileSync(path.join(temporary, 'app.js'), 'module.exports = "fixture";\n');
+  runGit('add', 'app.js');
+  runGit('-c', 'user.name=Release Test', '-c', 'user.email=release@example.invalid', 'commit', '--quiet', '-m', 'fixture');
+  const sha = runGit('rev-parse', 'HEAD');
+  assert.match(sha, /^[a-f0-9]{40}$/);
+  runGit('update-ref', 'refs/remotes/origin/main', sha);
+  fs.mkdirSync(path.join(temporary, 'scripts/release'), { recursive: true });
+  fs.copyFileSync(path.join(repoRoot, 'scripts/release/validate-eb-source-bundle.py'),
+    path.join(temporary, 'scripts/release/validate-eb-source-bundle.py'));
+  const source = fs.readFileSync(deployScriptPath, 'utf8');
+  // Execute the actual storage/package preparation path with mocked AWS only.
+  // Stop before the gate/deployment phase; real Git and bundle validation run.
+  fs.writeFileSync(path.join(temporary, 'deploy-fixture.sh'),
+    source.slice(0, source.indexOf('\nwrite_deployment_evidence() {')).replaceAll('\r\n', '\n'));
+  fs.writeFileSync(path.join(temporary, 'harness.sh'), `
+git() {
+  if [ "$1" = fetch ]; then return 0; fi
+  if [ "$FIXTURE_ENV_MANIFEST" = true ] && [[ "$*" == *:env.yaml* ]]; then return 0; fi
+  command git "$@"
+}
+python3() { command ${process.platform === 'win32' ? 'python' : 'python3'} "$@"; }
+node() {
+  if [ "$1" = scripts/release/require-eb-application-version.js ]; then
+    printf '%s\\n' "$*" >> version-checks.txt
+    return 0
+  fi
+  command node "$@"
+}
+fake_aws() {
+  printf '%s\\n' "$*" >> aws-calls.txt
+  case "$1 $2" in
+    's3api get-bucket-location')
+      if [ "$FIXTURE_INACCESSIBLE" = true ]; then echo 'sensitive AWS failure' >&2; return 42; fi
+      printf '%s\\n' "$FIXTURE_LOCATION" ;;
+    'elasticbeanstalk describe-application-versions')
+      if [[ "$*" == *length* ]]; then echo "$FIXTURE_EXISTING";
+      else echo "$FIXTURE_SOURCE_BUCKET historical-baseline.zip"; fi ;;
+    's3api put-object') echo '{}' ;;
+    'elasticbeanstalk create-application-version')
+      if [ "$FIXTURE_FORBID_EXTENSION_CACHE" = true ] && [[ "$*" == *' --process '* ]]; then
+        echo 'AccessDenied: EB preprocessing requires internal extension-cache PutObject' >&2
+        return 42
+      fi
+      echo '{}' ;;
+    's3api head-object')
+      if [ "$FIXTURE_BAD_CHECKSUM" = true ]; then echo 'invalid-checksum invalid-release invalid-package';
+      else printf '%s %s %s\\n' "$package_checksum_b64" "$RELEASE_SHA" "$package_sha"; fi ;;
+    's3api get-object')
+      for argument in "$@"; do
+        if [[ "$argument" == *.zip && "$argument" != historical-baseline.zip ]]; then
+          cp historical.zip "$argument"; break
+        fi
+      done ;;
+    *) echo 'Unexpected mock AWS operation' >&2; return 43 ;;
+  esac
+}
+source ./deploy-fixture.sh ${sha}
+`);
+  const invoke = (overrides = {}) => {
+    fs.writeFileSync(path.join(temporary, 'aws-calls.txt'), '');
+    fs.writeFileSync(path.join(temporary, 'version-checks.txt'), '');
+    const fixtureEnv = { AWS_REGION: 'us-east-1', EB_APPLICATION_NAME: 'fixture',
+      EB_ENVIRONMENT_NAME: 'fixture', EB_RELEASE_BUCKET: 'fixture-release-bucket',
+      AWS_CLI: 'fake_aws', RELEASE_MODE: 'release', FIXTURE_SHA: sha,
+      FIXTURE_LOCATION: 'None', FIXTURE_EXISTING: '0', FIXTURE_INACCESSIBLE: 'false',
+      FIXTURE_SOURCE_BUCKET: 'fixture-release-bucket', FIXTURE_BAD_CHECKSUM: 'false',
+      FIXTURE_FORBID_EXTENSION_CACHE: 'false', FIXTURE_ENV_MANIFEST: 'false', ...overrides };
+    const assignments = Object.entries(fixtureEnv)
+      .map(([key, value]) => `${key}='${value.replaceAll("'", "'\\''")}'`).join(' ');
+    const result = spawnSync(bashCommand, ['-c', `${assignments} bash harness.sh`], {
+      cwd: temporary, encoding: 'utf8', timeout: 20000,
+    });
+    return { ...result, calls: fs.readFileSync(path.join(temporary, 'aws-calls.txt'), 'utf8'),
+      versionChecks: fs.readFileSync(path.join(temporary, 'version-checks.txt'), 'utf8') };
+  };
+  for (const bucket of ['', 'INVALID_BUCKET']) {
+    const result = invoke({ EB_RELEASE_BUCKET: bucket });
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.calls, '');
+  }
+  const inaccessible = invoke({ FIXTURE_INACCESSIBLE: 'true' });
+  assert.equal(inaccessible.status, 1, inaccessible.stderr);
+  assert.match(inaccessible.stderr, /Unable to read pinned release bucket location/);
+  assert.doesNotMatch(inaccessible.stderr, /sensitive AWS failure/);
+  assert.doesNotMatch(inaccessible.calls, /put-object|create-application-version/);
+  const wrongRegion = invoke({ FIXTURE_LOCATION: 'us-west-2' });
+  assert.equal(wrongRegion.status, 1);
+  assert.match(wrongRegion.stderr, /bucket region does not match/);
+  assert.doesNotMatch(wrongRegion.calls, /put-object|create-application-version/);
+  for (const location of ['None', 'null', '']) {
+    const result = invoke({ FIXTURE_LOCATION: location });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.calls, new RegExp(`s3api put-object .*--key mosaic-releases/${sha}/[a-f0-9]{64}\\.zip`));
+    assert.match(result.calls, /s3api head-object .*--checksum-mode ENABLED/);
+    assert.match(result.calls, /--metadata release-sha=.*package-sha256=/);
+    assert.match(result.calls, /create-application-version .* --process /);
+    assert.doesNotMatch(result.versionChecks, /allow-unprocessed/);
+  }
+  const focused = invoke({ RELEASE_MODE: 'focused-baseline',
+    FOCUSED_BASELINE_SHA: FOCUSED_BASELINE_SHA,
+    FOCUSED_RELEASE_REF: 'refs/heads/release/focused/booking-filter' });
+  assert.equal(focused.status, 0, focused.stderr);
+  assert.match(focused.calls, new RegExp(`s3api put-object .*--key mosaic-releases/${sha}/[a-f0-9]{64}\\.zip`));
+  assert.match(focused.calls, /create-application-version .* --process /);
+  assert.doesNotMatch(focused.versionChecks, /allow-unprocessed-focused-bundle/);
+  const processingFailure = invoke({ FIXTURE_FORBID_EXTENSION_CACHE: 'true' });
+  assert.equal(processingFailure.status, 42);
+  assert.match(processingFailure.stderr, /EB preprocessing requires internal extension-cache PutObject/);
+  const manifestBlocked = invoke({ RELEASE_MODE: 'focused-baseline',
+    FOCUSED_BASELINE_SHA, FOCUSED_RELEASE_REF: 'refs/heads/release/focused/booking-filter',
+    FIXTURE_ENV_MANIFEST: 'true' });
+  assert.equal(manifestBlocked.status, 1);
+  assert.match(manifestBlocked.stderr, /environment manifest requiring preprocessing/);
+  assert.equal(manifestBlocked.calls, '');
+  const badChecksum = invoke({ FIXTURE_BAD_CHECKSUM: 'true' });
+  assert.equal(badChecksum.status, 1);
+  assert.match(badChecksum.stderr, /Stored deployment package checksum or identity metadata does not match/);
+  assert.equal(badChecksum.versionChecks, '');
+  const wrongBucket = invoke({ RELEASE_MODE: 'rollback', FIXTURE_EXISTING: '1',
+    EB_RELEASE_BUCKET: 'wrong-release-bucket' });
+  assert.equal(wrongBucket.status, 1);
+  assert.match(wrongBucket.stderr, /outside the controlled bucket/);
+  assert.doesNotMatch(wrongBucket.calls, /get-object|put-object|create-application-version/);
+  const tree = runGit('rev-parse', `${sha}^{tree}`);
+  const manifest = JSON.stringify({ schemaVersion: 1, commit: sha, sourceTree: tree,
+    environment: 'production', deploymentVersion: `mosaic-${sha}` });
+  runGit('archive', '--format=zip', '--output=historical.zip',
+    `--add-virtual-file=release-manifest.json:${manifest}`, sha);
+  const rollback = invoke({ RELEASE_MODE: 'rollback', FIXTURE_EXISTING: '1' });
+  assert.equal(rollback.status, 0, rollback.stderr);
+  assert.match(rollback.calls, /s3api get-object .*--key historical-baseline.zip/);
+  assert.doesNotMatch(rollback.calls, /put-object|create-application-version/);
+  assert.match(rollback.versionChecks, /--allow-unprocessed-reused/);
+  assert.doesNotMatch(rollback.versionChecks, /--allow-unprocessed-focused-bundle/);
+});
+
+test('release storage contract removes creation and exposes a required Environment bucket', () => {
+  const source = fs.readFileSync(deployScriptPath, 'utf8');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.doesNotMatch(source, /create-storage-location|create-bucket|list-buckets|list-objects|delete-object/);
+  assert.match(source, /EB_RELEASE_BUCKET_VALUE="\$\{EB_RELEASE_BUCKET:-\}"/);
+  assert.match(workflow, /EB_RELEASE_BUCKET: \$\{\{ vars\.EB_RELEASE_BUCKET \}\}/);
+  assert.match(workflow, /if \[ -z "\$EB_RELEASE_BUCKET" \]/);
+  assert.ok(source.indexOf('s3api get-bucket-location') < source.indexOf('s3api put-object'));
+  assert.match(source, /Stored deployment package checksum or identity metadata does not match/);
+  assert.match(source, /Exact-tree source bundle changed during deployment/);
+});
+
 test('deploy evidence is persisted as attempted before update and verified only after readiness', () => {
   const source = fs.readFileSync(deployScriptPath, 'utf8');
   const firstFreshnessCall = source.indexOf('\nassert_current_main\n');
@@ -595,6 +807,28 @@ test('EB application version must transition to Processed and reused Failed vers
   assert.equal(historical.historicalRollbackCompatibility, true);
   const deploySource = fs.readFileSync(deployScriptPath, 'utf8');
   assert.match(deploySource, /historical-eb-source-bundle[\s\S]*--allow-unprocessed-reused/);
+});
+
+test('focused S3 versions require PROCESSED and reject UNPROCESSED or FAILED', async () => {
+  const config = { applicationName: 'fixture', versionLabel: `mosaic-${shaA}`,
+    region: 'us-east-1', timeoutSeconds: 10, pollSeconds: 1 };
+  const response = (Status) => () => ({ ApplicationVersions: [{ VersionLabel: config.versionLabel, Status }] });
+  for (const Status of ['UNPROCESSED', 'Unprocessed']) {
+    await assert.rejects(requireProcessedVersion(config, { runAws: response(Status) }), /not deployable \(Unprocessed\)/);
+    await assert.rejects(requireProcessedVersion(config, { runAws: response(Status) }), /not deployable \(Unprocessed\)/);
+  }
+  for (const Status of ['FAILED', 'Failed', 'unknown']) {
+    await assert.rejects(requireProcessedVersion(config, {
+      runAws: response(Status),
+    }), /not deployable/);
+  }
+  let reads = 0;
+  const result = await requireProcessedVersion(config, {
+    runAws: () => ({ ApplicationVersions: [{ VersionLabel: config.versionLabel,
+      Status: ['PROCESSING', 'BUILDING', 'PROCESSED'][reads++] }] }), wait: async () => {},
+  });
+  assert.equal(reads, 3);
+  assert.equal(result.applicationVersionStatus, 'Processed');
 });
 
 test('rollback reuses and hashes the historical EB bundle after validating every member against Git', () => {
@@ -762,6 +996,135 @@ test('rollback treats skipped source certification as expected in workflow resul
   assert.equal(evidence.preApproval.sourceCertificate, 'skipped');
 });
 
+test('focused evidence keeps certification separate from deployment and rejects missing source proof', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-focused-evidence-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const focusedSource = {
+    baselineSha: FOCUSED_BASELINE_SHA,
+    releaseRef: 'refs/heads/release/focused/booking-filter',
+    sourcePr: 290,
+  };
+  writeEvidenceFile(directory, 'release-identity.json', {
+    mode: 'focused-baseline', releaseSha: shaA, focusedSource,
+  });
+  writeEvidenceFile(directory, 'workflow-results.json', {
+    schemaVersion: 1, releaseMode: 'focused-baseline',
+    jobs: {
+      resolve: 'success', exactCi: 'success', targetCheckoutSurface: 'success',
+      sourceCertificate: 'success', publicPreflight: 'success', awsPreflight: 'success',
+      readiness: 'success', production: 'skipped',
+    },
+  });
+  let evidence = buildProductionEvidence({
+    directory, releaseSha: shaA, releaseMode: 'focused-baseline', jobStatus: 'success',
+  });
+  assert.equal(evidence.failingPhase, 'focused-source-certificate-artifact');
+  assert.equal(evidence.focusedBaseline.readOnlyPreflightPassed, false);
+  assert.equal(evidence.preApproval.sourceCertificate, 'not-proven');
+  writeEvidenceFile(directory, 'source-certificate.json', {
+    schemaVersion: 1, mode: 'focused-baseline', status: 'passed', repository, releaseSha: shaA,
+    baselineSha: focusedSource.baselineSha, releaseRef: focusedSource.releaseRef,
+    sourcePr: focusedSource.sourcePr, branchTipSha: shaA,
+    sourceSha: 'bcb9f101c58df6d7df994e94442970b91f36e74c',
+    rulesetBypassActorsVisible: false,
+    productionAccepted: false,
+    changedFiles: [
+      { status: 'M', file: 'controllers/bookingController.js' },
+      { status: 'A', file: 'tests/vendor/vendor-booking-type-filter.test.js' },
+    ],
+  });
+  writeEvidenceFile(directory, 'exact-target-checkout-runtime.json', {
+    status: 'passed', releaseMode: 'focused-baseline', releaseSha: shaA,
+    canonicalRouteTableVerified: true, legacyRouteTableVerified: true,
+  });
+  writeEvidenceFile(directory, 'checkout-surface.json', {
+    status: 'passed', releaseMode: 'focused-baseline',
+    baselineProvenance: { verified: true, targetSha: shaA, baselineSha: FOCUSED_BASELINE_SHA },
+  });
+  writeEvidenceFile(directory, 'public-preflight.json', {
+    mode: 'preflight', releaseMode: 'focused-baseline', expectedSha: shaA,
+    observedSha: FOCUSED_BASELINE_SHA, checkoutStatus: 401, legacyPaymentStatus: 401,
+  });
+  writeEvidenceFile(directory, 'aws-preflight.json', {
+    status: 'passed', phase: 'preflight', releaseSha: shaA,
+  });
+  evidence = buildProductionEvidence({
+    directory, releaseSha: shaA, releaseMode: 'focused-baseline', jobStatus: 'success',
+  });
+  assert.equal(evidence.focusedBaseline.readOnlyPreflightPassed, true);
+  assert.equal(evidence.failingPhase, 'focused-external-gates-not-complete');
+  assert.equal(evidence.tests.unit, 'success');
+  assert.equal(evidence.tests.contract, 'success');
+  assert.equal(evidence.tests.integration, 'success');
+  assert.equal(evidence.status, 'blocked');
+  assert.equal(evidence.productionMutation, false);
+  assert.equal(evidence.preApproval.productionApprovalEntered, false);
+  assert.equal(evidence.deployment.attempted, false);
+  assert.equal(evidence.focusedBaseline.externalGates.paymentLiability, 'not-proven');
+  assert.equal(evidence.focusedBaseline.externalGates.protectedRefNoBypass, 'proven');
+
+  writeEvidenceFile(directory, 'aws-approved-preflight.json', { status: 'passed', releaseSha: shaA });
+  writeEvidenceFile(directory, 'gate-enabled.json', { status: 'passed', gateState: 'active' });
+  writeEvidenceFile(directory, 'drain-approved.json', { approved: true, drainSeconds: 331 });
+  for (const name of ['reservations-before.json', 'reservations-after.json']) {
+    writeEvidenceFile(directory, name, {
+      status: 'passed', mode: 'require-zero', readOnly: true,
+      activeReservationCount: 0, incompletePaidOrderCount: 0, unresolvedPaymentIntentCount: 0,
+    });
+  }
+  writeEvidenceFile(directory, 'eb-deployment.json', {
+    status: 'passed', releaseSha: shaA, versionLabel: `mosaic-${shaA}`,
+    packageSha256: '4'.repeat(64), deploymentAttempted: true, deploymentVerified: true,
+    sourceTree: '5'.repeat(40), packageSource: 'exact-git-tree', applicationVersion: 'created',
+  });
+  writeEvidenceFile(directory, 'aws-deployed.json', {
+    status: 'passed', releaseSha: shaA, expectedVersion: `mosaic-${shaA}`,
+    currentVersion: `mosaic-${shaA}`,
+  });
+  writeEvidenceFile(directory, 'public-deployed.json', {
+    status: 'passed', expectedSha: shaA, observedSha: shaA,
+  });
+  writeEvidenceFile(directory, 'gate-final.json', { status: 'passed', gateState: 'active' });
+  evidence = buildProductionEvidence({
+    directory, releaseSha: shaA, releaseMode: 'focused-baseline', jobStatus: 'success',
+  });
+  assert.equal(evidence.status, 'success');
+  assert.equal(evidence.failingPhase, null);
+  assert.equal(evidence.focusedBaseline.productionApproval, 'entered');
+  assert.equal(evidence.focusedBaseline.deployment, 'verified');
+  assert.equal(evidence.focusedBaseline.externalGates.liveDualRouteGate, 'proven');
+  assert.equal(evidence.focusedBaseline.externalGates.paymentLiability, 'proven');
+  assert.equal(evidence.gate.finalState, 'active');
+  assert.equal(evidence.gate.removal, 'focused-gate-remained-active');
+  assert.equal(evidence.gate.normalCheckoutRestored, false);
+
+  writeEvidenceFile(directory, 'workflow-results.json', {
+    schemaVersion: 1, releaseMode: 'focused-baseline',
+    jobs: {
+      resolve: 'success', exactCi: 'failure', targetCheckoutSurface: 'success',
+      sourceCertificate: 'success', publicPreflight: 'success', awsPreflight: 'success',
+      readiness: 'skipped', production: 'skipped',
+    },
+  });
+  evidence = buildProductionEvidence({
+    directory, releaseSha: shaA, releaseMode: 'focused-baseline', jobStatus: 'failure',
+  });
+  assert.equal(evidence.failingPhase, 'exact-sha-ci');
+  assert.equal(evidence.focusedBaseline.readOnlyPreflightPassed, false);
+  assert.equal(evidence.tests.unit, 'failure');
+});
+
+test('focused deploy validates approved baseline and protected ref before AWS access', () => {
+  const script = `RELEASE_MODE=focused-baseline FOCUSED_BASELINE_SHA=${shaB} FOCUSED_RELEASE_REF=refs/heads/release/focused/booking-filter AWS_CLI=this-command-must-never-be-called bash scripts/release/deploy-eb-exact-sha.sh ${shaA}`;
+  const result = spawnSync('bash', ['-c', script], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Focused target is not bound to the approved production baseline and protected ref/);
+  assert.doesNotMatch(result.stderr, /this-command-must-never-be-called/);
+});
+
 test('timeout after update remains a blocked attempted but unverified deployment', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-release-evidence-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -858,7 +1221,7 @@ test('production workflow is automatic-preflight then one approved serialized re
   assert.match(workflow, /AWS_PREFLIGHT_ROLE_TO_ASSUME/);
   assert.match(workflow, /Checkout fresh exact target for runtime route proof[\s\S]*npm ci --ignore-scripts[\s\S]*probe-target-checkout-surface\.js/);
   assert.match(workflow, /release-readiness:[\s\S]*target-checkout-surface[\s\S]*needs\.target-checkout-surface\.result == 'success'/);
-  assert.match(workflow, /Require exclusive canonical checkout surface in exact target[\s\S]*--root release-target[\s\S]*Observe public production safely/);
+  assert.match(workflow, /Require approved checkout surface in exact target[\s\S]*--root release-target[\s\S]*Observe public production safely/);
   assert.match(workflow, /Bind retirement attestation to deployed and target ancestry[\s\S]*merge-base --is-ancestor/);
   assert.match(workflow, /Checkout exact release commit[\s\S]*persist-credentials: false/);
   assert.match(workflow, /verify-main-release-source\.js/);
@@ -867,6 +1230,66 @@ test('production workflow is automatic-preflight then one approved serialized re
   assert.match(workflow, /deploy-eb-exact-sha\.sh/);
   assert.match(workflow, /manage-checkout-gate\.js disable/);
   assert.doesNotMatch(workflow, /gh pr merge|enable-auto-merge|pull_request_target/);
+});
+
+test('focused workflow requires exact target CI and source proof before protected production release', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /focused-baseline[\s\S]*baseline_sha:[\s\S]*release_ref:[\s\S]*source_pr:/);
+  assert.match(workflow, /exact-ci:[\s\S]*ref: \$\{\{ needs\.resolve-release\.outputs\.release_sha \}\}[\s\S]*run: npm ci[\s\S]*run: npm test[\s\S]*run: npm run test:contract[\s\S]*run: npm run test:integration/);
+  assert.match(workflow, /Verify protected focused source and exact two-file provenance[\s\S]*verify-focused-release-source\.js/);
+  assert.match(workflow, /production-approval-and-release:[\s\S]*if: \$\{\{[^\n]*release_mode != 'focused-baseline'/);
+  assert.match(workflow, /Reassert safe gate after any post-enable failure/);
+});
+
+test('checkout-gate CLI inherits focused mode and still requires explicit live-mutation confirmation', () => {
+  assert.equal(gateCli(gateVerifyArgs, { RELEASE_MODE: 'focused-baseline' }).releaseMode, 'focused-baseline');
+  assert.throws(
+    () => gateCli(['enable', '--output', 'gate-evidence.json'], { RELEASE_MODE: 'focused-baseline' }),
+    /enable requires --confirm ENABLE_CHECKOUT_GATE/
+  );
+  assert.equal(gateCli(gateEnableArgs, { RELEASE_MODE: 'focused-baseline' }).releaseMode, 'focused-baseline');
+});
+
+test('checkout-gate CLI accepts matching focused flag and environment for confirmed mutation', () => {
+  const focusedVerifyArgs = [...gateVerifyArgs, '--release-mode', 'focused-baseline'];
+  const focusedEnableArgs = [...gateEnableArgs, '--release-mode', 'focused-baseline'];
+  assert.equal(gateCli(focusedVerifyArgs, { RELEASE_MODE: 'focused-baseline' }).releaseMode, 'focused-baseline');
+  assert.equal(gateCli(focusedEnableArgs, { RELEASE_MODE: 'focused-baseline' }).releaseMode, 'focused-baseline');
+});
+
+test('checkout-gate CLI rejects explicit release against inherited focused mode', () => {
+  assert.throws(
+    () => gateCli([...gateVerifyArgs, '--release-mode', 'release'], { RELEASE_MODE: 'focused-baseline' }),
+    /--release-mode must match inherited RELEASE_MODE/
+  );
+});
+
+test('checkout-gate CLI rejects explicit focused mode against inherited release', () => {
+  assert.throws(
+    () => gateCli([...gateVerifyArgs, '--release-mode', 'focused-baseline'], { RELEASE_MODE: 'release' }),
+    /--release-mode must match inherited RELEASE_MODE/
+  );
+});
+
+test('checkout-gate CLI keeps normal release and its documented no-mode default', () => {
+  assert.equal(gateCli(gateEnableArgs, { RELEASE_MODE: 'release' }).releaseMode, 'release');
+  assert.equal(gateCli(gateEnableArgs).releaseMode, 'release');
+  assert.throws(
+    () => gateCli(gateVerifyArgs, { RELEASE_MODE: '' }),
+    /Unsupported checkout gate release mode/
+  );
+  assert.throws(
+    () => gateCli([...gateVerifyArgs, '--release-mode', '']),
+    /Unsupported checkout gate release mode/
+  );
+});
+
+test('checkout-gate CLI keeps inherited rollback on the canonical gate path', () => {
+  assert.equal(gateCli(gateEnableArgs, { RELEASE_MODE: 'rollback' }).releaseMode, 'release');
+  assert.throws(
+    () => gateCli([...gateVerifyArgs, '--release-mode', 'rollback'], { RELEASE_MODE: 'rollback' }),
+    /Unsupported checkout gate release mode/
+  );
 });
 
 test('trusted controller supports historical rollback targets and fail-safe gate recovery', () => {

@@ -1,4 +1,5 @@
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { buildS3ClientConfig } = require("../utils/s3ClientConfig");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const {
   ALLOWED_VENDOR_ONBOARDING_MIME_TYPES,
@@ -20,13 +21,7 @@ const {
   logUploadFailure,
 } = require("../utils/uploadDiagnostics");
 
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
+const s3Client = new S3Client(buildS3ClientConfig());
 
 const ALLOWED_VENDOR_ONBOARDING_DOCUMENT_TYPES = [
   "minority-proof",

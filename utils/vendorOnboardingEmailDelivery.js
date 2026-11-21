@@ -71,14 +71,9 @@ async function deliverVendorOnboardingEmail({ label, send }) {
     };
   }
 
+  let info;
   try {
-    const info = await send();
-    return {
-      sent: true,
-      skipped: false,
-      provider: configStatus.provider,
-      messageId: normalizeProviderMessageId(info),
-    };
+    info = await send();
   } catch (err) {
     const message = err && err.message ? String(err.message) : 'Unknown email error';
     console.error(`Vendor onboarding email failed (${label}):`, message);
@@ -89,6 +84,24 @@ async function deliverVendorOnboardingEmail({ label, send }) {
       error: message,
     };
   }
+
+  // Outside the send try: classifying a completed send must never turn it
+  // into a reported failure. Lazy require keeps this module SMTP-free at load.
+  const { isSuppressedMailResult, STAGING_SUPPRESSED_REASON } = require('./smtpTransport');
+  if (isSuppressedMailResult(info)) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: STAGING_SUPPRESSED_REASON,
+      provider: configStatus.provider,
+    };
+  }
+  return {
+    sent: true,
+    skipped: false,
+    provider: configStatus.provider,
+    messageId: normalizeProviderMessageId(info),
+  };
 }
 
 /**

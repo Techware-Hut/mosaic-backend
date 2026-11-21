@@ -2,12 +2,12 @@
 const nodemailer = require("nodemailer");
 const { buildFrontendUrl, getFrontendBaseUrl } = require("./frontendUrl");
 const {
-  buildSmtpTransportConfig,
+  createMosaicTransport,
   formatMosaicFromHeader,
 } = require("./smtpTransport");
 const { baseLayout, esc, SUPPORT_EMAIL } = require("./emailTemplates/baseLayout");
 
-const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
+const transporter = createMosaicTransport(nodemailer);
 
 const TYPE_TITLES = {
   service: "Services",

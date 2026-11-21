@@ -73,6 +73,7 @@ function validateTopology(payload, options) {
     mode,
     releaseSha,
     mixedVersionSafe = false,
+    allowInstanceHealthAccessDeniedInProof = false,
     clock,
   } = options;
   const expectedVersion = `mosaic-${releaseSha}`;
@@ -157,12 +158,23 @@ function validateTopology(payload, options) {
     throw new Error('Auto Scaling desired capacity does not match its instance inventory');
   }
 
-  const instanceHealth = payload.instanceHealth && payload.instanceHealth.InstanceHealthList;
-  if (!Array.isArray(instanceHealth) || !sameMembers(resourceInstances, instanceHealth.map((entry) => entry.InstanceId))) {
-    throw new Error('Enhanced Health instance inventory differs from Elastic Beanstalk resources');
+  // The isolated read-only proof may record an AccessDenied on this one EB call.
+  // Production preflight and verification never set this option and stay strict.
+  if (allowInstanceHealthAccessDeniedInProof &&
+      (mode !== 'preflight' || payload.instanceHealth !== null)) {
+    throw new Error('Proof-only instance health warning state is invalid');
   }
-  for (const instance of instanceHealth) {
-    validateInstanceHealth(instance, expectedVersion, mode === 'verify');
+  const instanceHealthUnverified = allowInstanceHealthAccessDeniedInProof === true;
+  const instanceHealth = instanceHealthUnverified
+    ? null
+    : payload.instanceHealth && payload.instanceHealth.InstanceHealthList;
+  if (!instanceHealthUnverified) {
+    if (!Array.isArray(instanceHealth) || !sameMembers(resourceInstances, instanceHealth.map((entry) => entry.InstanceId))) {
+      throw new Error('Enhanced Health instance inventory differs from Elastic Beanstalk resources');
+    }
+    for (const instance of instanceHealth) {
+      validateInstanceHealth(instance, expectedVersion, mode === 'verify');
+    }
   }
 
   const safeSingleInstanceCutover =
@@ -260,12 +272,13 @@ function validateTopology(payload, options) {
       deploymentPolicy,
       rollingUpdateEnabled,
     },
-    instances: instanceHealth.map((entry) => ({
+    instances: instanceHealthUnverified ? null : instanceHealth.map((entry) => ({
       instanceSuffix: instanceSuffix(entry.InstanceId),
       health: 'Green/Ok',
       deploymentStatus: entry.Deployment.Status,
       versionLabel: entry.Deployment.VersionLabel,
     })),
+    ...(instanceHealthUnverified ? { instanceHealthVerified: false } : {}),
     loadBalancer: {
       ref: resourceRef(loadBalancer.LoadBalancerArn, 'alb'),
       listeners: ['HTTP/80', 'HTTPS/443'],

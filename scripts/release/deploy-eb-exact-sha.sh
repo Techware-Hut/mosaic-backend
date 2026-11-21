@@ -6,18 +6,37 @@ OUTPUT_PATH="${2:-release-evidence/eb-deployment.json}"
 AWS_REGION_VALUE="${AWS_REGION:-}"
 EB_APPLICATION_VALUE="${EB_APPLICATION_NAME:-}"
 EB_ENVIRONMENT_VALUE="${EB_ENVIRONMENT_NAME:-}"
+EB_RELEASE_BUCKET_VALUE="${EB_RELEASE_BUCKET:-}"
 RELEASE_MODE_VALUE="${RELEASE_MODE:-release}"
 AWS_CLI="${AWS_CLI:-aws}"
+APPROVED_FOCUSED_BASELINE_SHA="9bc75c257a9f483a287f122dbd38514b7a4b55d4"
 
 if [[ ! "$RELEASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
   echo "Usage: deploy-eb-exact-sha.sh <full-release-sha> [output-json]" >&2
   exit 2
 fi
-if [ "$RELEASE_MODE_VALUE" != "release" ] && [ "$RELEASE_MODE_VALUE" != "rollback" ]; then
-  echo "RELEASE_MODE must be release or rollback" >&2
+if [ "$RELEASE_MODE_VALUE" = "focused-baseline" ]; then
+  if [ "${FOCUSED_BASELINE_SHA:-}" != "$APPROVED_FOCUSED_BASELINE_SHA" ] \
+    || [[ ! "${FOCUSED_RELEASE_REF:-}" =~ ^refs/heads/release/focused/[a-z0-9]+(-[a-z0-9]+)*$ ]] \
+    || [ "$RELEASE_SHA" = "$APPROVED_FOCUSED_BASELINE_SHA" ]; then
+    echo "Focused target is not bound to the approved production baseline and protected ref" >&2
+    exit 2
+  fi
+fi
+if [ "$RELEASE_MODE_VALUE" = "focused-rollback" ]; then
+  if [ "$RELEASE_SHA" != "$APPROVED_FOCUSED_BASELINE_SHA" ] \
+    || [[ ! "${FOCUSED_RELEASE_SHA:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "Focused rollback must target the pinned production baseline from an exact focused release" >&2
+    exit 2
+  fi
+  echo "Focused rollback mutation is disabled until external release gates are complete" >&2
+  exit 1
+fi
+if [ "$RELEASE_MODE_VALUE" != "release" ] && [ "$RELEASE_MODE_VALUE" != "rollback" ] && [ "$RELEASE_MODE_VALUE" != "focused-baseline" ]; then
+  echo "RELEASE_MODE must be release, rollback, or focused-baseline" >&2
   exit 2
 fi
-for name in AWS_REGION_VALUE EB_APPLICATION_VALUE EB_ENVIRONMENT_VALUE; do
+for name in AWS_REGION_VALUE EB_APPLICATION_VALUE EB_ENVIRONMENT_VALUE EB_RELEASE_BUCKET_VALUE; do
   if [ -z "${!name}" ]; then
     echo "Required deployment configuration is missing" >&2
     exit 2
@@ -48,6 +67,15 @@ if git cat-file -e "$RELEASE_SHA:release-manifest.json" 2>/dev/null; then
 fi
 if [ -n "$(git ls-tree -r --name-only "$RELEASE_SHA" -- release-evidence)" ]; then
   echo "Committed release evidence is forbidden in a deployment tree" >&2
+  exit 1
+fi
+
+# S3 preprocessing caches extensions outside the authorized release prefix.
+# Focused bundles already undergo exact-tree validation that forbids EB hooks;
+# also reject the one remaining EB preprocessing manifest before opting out.
+if [ "$RELEASE_MODE_VALUE" = "focused-baseline" ] \
+  && git cat-file -e "$RELEASE_SHA:env.yaml" 2>/dev/null; then
+  echo "Focused source bundle contains an EB environment manifest requiring preprocessing" >&2
   exit 1
 fi
 
@@ -121,10 +149,27 @@ assert_current_main() {
 # Refuse stale work before even creating or uploading a deployment artifact.
 assert_current_main
 
-bucket=$($AWS_CLI elasticbeanstalk create-storage-location \
+bucket="$EB_RELEASE_BUCKET_VALUE"
+if ! [[ "$bucket" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]; then
+  echo "Pinned release bucket name is invalid" >&2
+  exit 2
+fi
+if ! bucket_region=$($AWS_CLI s3api get-bucket-location \
+  --bucket "$bucket" \
   --region "$AWS_REGION_VALUE" \
-  --query S3Bucket \
-  --output text)
+  --query LocationConstraint \
+  --output text 2>/dev/null); then
+  echo "Unable to read pinned release bucket location" >&2
+  exit 1
+fi
+case "$bucket_region" in
+  ""|None|null) bucket_region="us-east-1" ;;
+  EU) bucket_region="eu-west-1" ;;
+esac
+if [ "$bucket_region" != "$AWS_REGION_VALUE" ]; then
+  echo "Pinned release bucket region does not match the configured release region" >&2
+  exit 1
+fi
 existing_version=$($AWS_CLI elasticbeanstalk describe-application-versions \
   --application-name "$EB_APPLICATION_VALUE" \
   --version-labels "$VERSION_LABEL" \
@@ -143,7 +188,7 @@ object_key=""
 package_sha=""
 package_checksum_b64=""
 
-if [ "$existing_version" = "0" ] || [ "$RELEASE_MODE_VALUE" = "release" ]; then
+if [ "$existing_version" = "0" ] || [ "$RELEASE_MODE_VALUE" = "release" ] || [ "$RELEASE_MODE_VALUE" = "focused-baseline" ]; then
   build_exact_tree_package
   validate_embedded_manifest "$package_path"
   package_sha=$(sha256_file "$package_path")
@@ -184,7 +229,7 @@ else
     echo "Existing application version source bundle is unavailable or outside the controlled bucket" >&2
     exit 1
   fi
-  if [ "$RELEASE_MODE_VALUE" = "release" ]; then
+  if [ "$RELEASE_MODE_VALUE" = "release" ] || [ "$RELEASE_MODE_VALUE" = "focused-baseline" ]; then
     expected_key="mosaic-releases/$RELEASE_SHA/$package_sha.zip"
     if [ "$object_key" != "$expected_key" ]; then
       echo "Existing application version does not reference this exact deterministic package" >&2
@@ -222,9 +267,6 @@ if [ "$RELEASE_MODE_VALUE" = "rollback" ] \
   && [ "$package_source" = "historical-eb-source-bundle" ]; then
   application_version_args+=(--allow-unprocessed-reused)
 fi
-node scripts/release/require-eb-application-version.js \
-  "${application_version_args[@]}"
-
 if [ "$package_source" = "exact-git-tree" ]; then
   read -r remote_checksum remote_release_sha remote_package_sha < <(
     $AWS_CLI s3api head-object \
@@ -242,6 +284,9 @@ if [ "$package_source" = "exact-git-tree" ]; then
     exit 1
   fi
 fi
+
+node scripts/release/require-eb-application-version.js \
+  "${application_version_args[@]}"
 
 write_deployment_evidence() {
   local status="$1"

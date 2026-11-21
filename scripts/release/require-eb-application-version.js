@@ -67,7 +67,13 @@ function readExactVersion(runAws, config) {
   if (version.VersionLabel !== config.versionLabel || typeof version.Status !== 'string') {
     throw new Error('Elastic Beanstalk application-version identity is invalid');
   }
-  return version.Status;
+  // Live EB responses can use uppercase enum values. Normalize only known
+  // states; unknown values remain fatal and FAILED is never accepted.
+  const statuses = {
+    PROCESSED: 'Processed', UNPROCESSED: 'Unprocessed',
+    PROCESSING: 'Processing', BUILDING: 'Building', FAILED: 'Failed',
+  };
+  return statuses[version.Status.toUpperCase()] || version.Status;
 }
 
 async function requireProcessedVersion(config, dependencies = {}) {
