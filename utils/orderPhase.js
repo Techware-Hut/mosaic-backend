@@ -235,7 +235,8 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
     : String(orderOrId || 'N/A');
 
   const rawCustomerName = (isObject ? orderOrId.userId?.name : null) || extra.customerName || extra.firstName || '';
-  const safeFirstName = esc(rawCustomerName ? rawCustomerName.split(' ')[0] : 'there');
+  const rawFirstName = rawCustomerName ? rawCustomerName.split(' ')[0] : 'there';
+  const safeFirstName = esc(rawFirstName);
   const safeOrderNo = esc(orderNo);
   const orderUrl = buildFrontendUrl("/customer/order");
 
@@ -308,9 +309,9 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
     });
 
     const text = [
-      `Hi ${safeFirstName},`,
+      `Hi ${rawFirstName},`,
       ``,
-      `Great news — your order #${safeOrderNo} has been accepted by the vendor and is now being prepared.`,
+      `Great news — your order #${orderNo} has been accepted by the vendor and is now being prepared.`,
       `We’ll notify you when it ships.`,
       ``,
       `View Order Status: ${orderUrl}`,
@@ -407,7 +408,7 @@ async function sendOrderStatusEmail(to, orderOrId, status, extra = {}) {
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `We’re sorry — the vendor was unable to accept your order. If you need help finding alternatives, we’re here to support you.`,
     `If payment was processed, a full refund has been initiated to your original payment method.`,
@@ -441,7 +442,8 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
   const order = details.order;
   const orderNo = order?.groupOrderId || order?._id?.toString() || details.orderId || details.orderNo || '';
   const rawCustomerName = order?.userId?.name || details.customerName || details.firstName || '';
-  const safeFirstName = esc(rawCustomerName ? rawCustomerName.split(' ')[0] : 'there');
+  const rawFirstName = rawCustomerName ? rawCustomerName.split(' ')[0] : 'there';
+  const safeFirstName = esc(rawFirstName);
   const safeOrderNo = esc(orderNo);
   const safeTrackingId = esc(details.trackingId || 'N/A');
   const safeTrackingUrl = trackingUrl || orderUrl;
@@ -520,7 +522,7 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
     });
 
     const text = [
-      `Hi ${safeFirstName},`,
+      `Hi ${rawFirstName},`,
       ``,
       `Your order has shipped.`,
       `Tracking Number: ${details.trackingId || 'N/A'}`,
@@ -596,9 +598,9 @@ async function sendOrderUpdateEmail(to, status, trackingUrl = null, details = {}
     });
 
     const text = [
-      `Hi ${safeFirstName},`,
+      `Hi ${rawFirstName},`,
       ``,
-      `Your order ${safeOrderNo ? `#${safeOrderNo} ` : ''}has been delivered. We hope you enjoy your purchase — thank you for supporting our vendor community.`,
+      `Your order ${orderNo ? `#${orderNo} ` : ''}has been delivered. We hope you enjoy your purchase — thank you for supporting our vendor community.`,
       ``,
       `Thank you for being part of the Mosaic Biz Hub community.`,
       `Mosaic Biz Hub`,

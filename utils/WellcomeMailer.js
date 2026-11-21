@@ -374,9 +374,9 @@ exports.sendAdminOnboardingSubmissionEmail = async ({
     'A vendor has submitted Step 1 and requires review. Please log in to the admin dashboard to approve or block the submission.',
     '',
     'Application Details:',
-    `Application Number: ${safeAppId}`,
-    `Business Name: ${safeBizName}`,
-    safeTier ? `Tier Plan: ${safeTier}` : '',
+    `Application Number: ${applicationId || 'N/A'}`,
+    `Business Name: ${businessName || 'N/A'}`,
+    tierPlan ? `Tier Plan: ${tierPlan}` : '',
     `Submission Date: ${submissionDate}`,
     '',
     'Please log in to the Admin Dashboard to review the submitted application and proceed with the verification process.',
@@ -453,7 +453,7 @@ exports.sendVendorSubmissionConfirmationEmail = async ({
     'Thank you for applying to Mosaic Biz Hub. Your information is under review.',
     'We’ll email next steps within 3–5 business days.',
     '',
-    safeAppId ? `Application ID: ${safeAppId}` : '',
+    applicationId ? `Application ID: ${applicationId}` : '',
     '',
     'If you have questions, contact us at info@mosaicbizhub.com',
     '',
@@ -559,7 +559,8 @@ exports.sendVendorApprovedEmail = async ({
   applicationId,
   submissionDate,
 }) => {
-  const safeFirstName = esc(firstName || (vendorName ? vendorName.split(' ')[0] : 'there'));
+  const rawFirstName = firstName || (vendorName ? vendorName.split(' ')[0] : 'there');
+  const safeFirstName = esc(rawFirstName);
   const safeAppId = esc(applicationId || 'N/A');
   const safeBizName = esc(businessName || 'Your Business');
   const formattedDate = submissionDate
@@ -651,16 +652,16 @@ exports.sendVendorApprovedEmail = async ({
   const textContent = [
     'Your Business Has Been Approved!',
     '',
-    `Congratulations, ${safeFirstName}!`,
+    `Congratulations, ${rawFirstName}!`,
     '',
     'Your business has successfully passed our initial verification process. You’re now eligible to choose your subscription tier plan and complete your profile.',
     '',
-    `Application ID: ${safeAppId}`,
+    `Application ID: ${applicationId || 'N/A'}`,
     `Continue Onboarding: ${continueOnboardingUrl} - Let's keep the momentum going`,
     '',
     'Application Details:',
-    `Application Number: ${safeAppId}`,
-    `Business Name: ${safeBizName}`,
+    `Application Number: ${applicationId || 'N/A'}`,
+    `Business Name: ${businessName || 'Your Business'}`,
     `Submission Date: ${formattedDate}`,
     '',
     'Next steps:',
@@ -1369,7 +1370,7 @@ exports.sendVendorCategoryRequestSubmittedEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `We’ve received your category request. Our admin team will review it shortly.`,
     ``,
@@ -1461,7 +1462,7 @@ exports.sendCustomerNewCategoryNotificationEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `A new category has been added to Mosaic Biz Hub! Explore fresh listings and discover new vendors today.`,
     ``,
@@ -1558,7 +1559,7 @@ exports.sendVendorCategoryRequestRejectedEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `Your category request was reviewed but could not be approved.`,
     `Reason: ${adminReason || 'The requested category does not meet our current platform catalog guidelines.'}`,
@@ -1665,7 +1666,7 @@ exports.sendVendorCategoryRequestApprovedEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `Great news — your category request has been approved and added to the marketplace. You may now create listings under this new category.`,
     ``,

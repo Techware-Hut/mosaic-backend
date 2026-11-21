@@ -40,22 +40,23 @@ const cases = [
   ['utils/BuisnessprofileMail.js', (m,v) => m.sendQuestionVerificationEmail(recipient,v,3,10)],
   ['utils/WellcomeMailer.js', (m,v) => m.sendWelcomeEmail(recipient,v)],
   ...['sendVendorVerificationGuidanceEmail','sendPaymentReminderEmail','sendVendorStorefrontPublishedEmail','sendVendorRejectionEmail'].map(fn => ['utils/WellcomeMailer.js', (m,v) => m[fn](data(v))]),
+  ...['sendVendorSubmissionConfirmationEmail', 'sendVendorTrustBadgeAssignedEmail', 'sendAdminVendorCategoryRequestEmail', 'sendVendorCategoryRequestSubmittedEmail', 'sendCustomerNewCategoryNotificationEmail', 'sendVendorCategoryRequestRejectedEmail', 'sendVendorCategoryRequestApprovedEmail'].map(fn => ['utils/WellcomeMailer.js', (m,v) => m[fn]({...data(v), applicationId:v, requestId:v, requestedCategory:v, categoryName:v, subcategoryName:v, adminReason:v})]),
   ['utils/WellcomeMailer.js', (m,v) => m.sendAdminVendorProfileCompletedEmail(data(v))],
   ['utils/WellcomeMailer.js', (m,v) => m.sendVendorApprovedEmail(data(v))],
   ['utils/WellcomeMailer.js', (m,v) => m.sendAdminOnboardingSubmissionEmail({...data(v), tierPlan:v})],
   ...['order_cancelled','return_initiated','order_refunded','unknown'].map(event => ['utils/orderPhase.js', (m,v) => m.sendOrderLifecycleEmail(recipient,{groupOrderId:v},event)]),
-  ...['accepted','rejected'].map(status => ['utils/orderPhase.js', (m,v) => m.sendOrderStatusEmail(recipient, {groupOrderId:v, userId:{name:v}}, status, {firstName:v})]),
-  ...['shipped','delivered'].map(status => ['utils/orderPhase.js', (m,v) => m.sendOrderUpdateEmail(recipient,status,null,{firstName:v,customerName:v,orderNo:v,trackingId:v})]),
+  ...['accepted','rejected'].map(status => ['utils/orderPhase.js', (m,v) => m.sendOrderStatusEmail(recipient, {groupOrderId:v, userId:{name:v}}, status, {firstName:v}), status === 'rejected']),
+  ...['shipped','delivered'].map(status => ['utils/orderPhase.js', (m,v) => m.sendOrderUpdateEmail(recipient,status,null,{firstName:v,customerName:v,orderNo:v,trackingId:v}), false]),
   ...['sendVendorNewServiceRfqEmail','sendCustomerServiceRfqConfirmationEmail'].map(fn => ['utils/rfqMailer.js', (m,v) => m[fn](data(v))]),
   ...['sendVendorNewServiceBookingEmail','sendVendorNewFoodBookingEmail','sendCustomerNewFoodBookingConfirmationEmail','sendCustomerNewServiceBookingConfirmationEmail','sendCustomerServicePaymentRequestEmail','sendCustomerServiceBookingDecisionEmail'].map(fn => ['utils/bookingMailer.js', (m,v) => m[fn](data(v))]),
   ...['approved','blocked','deactivated'].map(action => ['utils/approvalMail.js', (m,v) => m.sendBusinessStatusEmail({ ...data(v), action, adminNote:v, business: {name:v, type:'service', slug:'shop'} })]),
   ...['customer','vendor'].map(role => ['utils/OrderMail.js', (m,v) => m.sendOrderPaidEmails({
     order: {_id:'order-1',groupOrderId:v,userId:{name:v},businessId:{businessName:v,slug:'shop'},items:[],totalAmount:42},
     customerEmails:[recipient],vendorEmails:[recipient],roles:{customer:role==='customer',vendor:role==='vendor'},
-  })]),
+  }), role === 'vendor']),
   // Contact inquiry email escaping is owned by BE #344 (PR #350).
 ];
-for (const [i, [file, render]] of cases.entries()) test(`template ${i + 1}: ${file} escapes user text and preserves envelope/links`, async () => {
+for (const [i, [file, render, firstNameOnly = false]] of cases.entries()) test(`template ${i + 1}: ${file} escapes user text and preserves envelope/links`, async () => {
   const {mod,sent} = loadWithCapture(file);
   await render(mod,'Baseline');
   assert.equal(sent.length,1);
@@ -67,7 +68,13 @@ for (const [i, [file, render]] of cases.entries()) test(`template ${i + 1}: ${fi
     const mail=sent.pop();
     assert.ok(mail.html.includes(esc(value)), value);
     assert.doesNotMatch(mail.html, /<script>|<img src=x|<a href="https:\/\/evil\.example"/);
-    assert.ok(!mail.html.includes('&amp;lt;'), 'no second escaping of freshly escaped text');
+    assert.doesNotMatch(mail.html, /&amp;(?:#039;|quot;|amp;|lt;)/, 'no double escaping in HTML');
+    if (mail.text !== undefined) {
+      assert.doesNotMatch(mail.text, /&#039;|&amp;|&quot;|&lt;/, 'plain text has no HTML entities');
+      // Order status and vendor paid-order greetings deliberately use only the first name.
+      const rawName = firstNameOnly ? value.split(' ')[0] : value;
+      assert.ok(mail.text.includes(rawName), `plain text preserves raw ${rawName}`);
+    }
     assert.deepEqual(mail.to,baseline.to);
     if (file.includes('approvalMail')) assert.ok(mail.subject.includes(value));
     else if (file.includes('OrderMail')) assert.ok(mail.subject.includes(value));

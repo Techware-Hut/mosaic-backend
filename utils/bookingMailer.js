@@ -130,7 +130,7 @@ exports.sendVendorNewServiceBookingEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `A customer has booked one of your professional services on Mosaic Biz Hub. Please review the details below and confirm or deny the request so the customer knows what to expect.`,
     ``,
@@ -274,7 +274,7 @@ exports.sendVendorNewFoodBookingEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `A customer has requested a reservation at your restaurant through Mosaic Biz Hub. Please review the details below and confirm or deny the request so the customer knows what to expect.`,
     ``,
@@ -411,7 +411,7 @@ exports.sendCustomerNewFoodBookingConfirmationEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `Thank you for booking your dining experience through Mosaic Biz Hub. We’re excited to help you connect with restaurants that celebrate culture, flavor, and community.`,
     ``,
@@ -545,7 +545,7 @@ exports.sendCustomerNewServiceBookingConfirmationEmail = async ({
   });
 
   const text = [
-    `Hi ${safeFirstName},`,
+    `Hi ${rawFirstName},`,
     ``,
     `Thank you for booking your professional service through Mosaic Biz Hub. We’re honored you chose our community of trusted vendors to support your needs.`,
     ``,
