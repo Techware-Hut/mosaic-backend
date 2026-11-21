@@ -1193,17 +1193,44 @@ exports.handleVendorPaymentWebhook = async (req, res) => {
           });
 
           if (onboarding) {
-            onboarding.verificationPayment.status = 'paid';
-            onboarding.verificationPayment.paidAt = new Date();
-            // Only demote payment-in-progress apps. Never yank submitted /
+            // Conditional updates instead of load-then-save: a concurrent
+            // /submit may move this record to 'submitted' after our read, and
+            // a stale save() would revert it to draft.
+            const paymentMatch = {
+              _id: onboarding._id,
+              'verificationPayment.paymentIntentId': paymentIntent.id,
+            };
+            // (a) Mark paid once; duplicate deliveries keep the original paidAt.
+            const paidResult = await VendorOnboarding.updateOne(
+              { ...paymentMatch, 'verificationPayment.status': { $ne: 'paid' } },
+              { $set: { 'verificationPayment.status': 'paid', 'verificationPayment.paidAt': new Date() } },
+              { runValidators: true }
+            );
+            // (b) Only demote payment-in-progress apps. Never yank submitted /
             // rejected / verified applications back to draft on a late webhook.
-            if (onboarding.status === 'payment_pending') {
-              onboarding.status = 'draft';
+            // Intentionally NOT gated on (a) modifying anything: a record that
+            // is already paid but still payment_pending self-repairs to draft.
+            const draftResult = await VendorOnboarding.updateOne(
+              { ...paymentMatch, status: 'payment_pending' },
+              { $set: { status: 'draft' } },
+              { runValidators: true }
+            );
+            // updateOne skips validate hooks; preserve legacy badge normalization.
+            if (onboarding.badge === 'Bronze') {
+              await VendorOnboarding.updateOne(
+                { _id: onboarding._id, badge: 'Bronze' },
+                { $set: { badge: 'Silver' } }
+              );
             }
 
-            await onboarding.save();
-
             console.log(`Vendor verification payment succeeded for user ${userId}`);
+            const paidModified = paidResult?.modifiedCount ?? 0;
+            const draftModified = draftResult?.modifiedCount ?? 0;
+            console.log(
+              `Vendor verification webhook ${paymentIntent.id}: paid matched=${paidResult?.matchedCount ?? 0} modified=${paidModified}; ` +
+              `draft matched=${draftResult?.matchedCount ?? 0} modified=${draftModified}` +
+              (paidModified === 0 && draftModified === 0 ? ' (duplicate/no-op)' : '')
+            );
           } else {
             console.log(`No onboarding record found for payment ${paymentIntent.id}`);
           }
@@ -1228,12 +1255,25 @@ exports.handleVendorPaymentWebhook = async (req, res) => {
           });
 
           if (onboarding) {
-            onboarding.verificationPayment.status = 'failed';
-            onboarding.status = 'payment_pending';
-
-            await onboarding.save();
+            // Conditional update: never unmark a paid payment or pull a
+            // submitted / verified / rejected application back to payment_pending.
+            const failedResult = await VendorOnboarding.updateOne(
+              {
+                _id: onboarding._id,
+                'verificationPayment.paymentIntentId': failedPaymentIntent.id,
+                'verificationPayment.status': { $ne: 'paid' },
+                status: { $in: ['draft', 'payment_pending'] },
+              },
+              { $set: { 'verificationPayment.status': 'failed', status: 'payment_pending' } },
+              { runValidators: true }
+            );
 
             console.log(`Vendor verification payment failed for user ${userId}`);
+            const failedModified = failedResult?.modifiedCount ?? 0;
+            console.log(
+              `Vendor verification webhook ${failedPaymentIntent.id}: failed matched=${failedResult?.matchedCount ?? 0} modified=${failedModified}` +
+              (failedModified === 0 ? ' (no-op: already paid, past payment stage, or duplicate)' : '')
+            );
           }
         } catch (error) {
           console.error('Failed to update vendor verification payment failure:', error);
