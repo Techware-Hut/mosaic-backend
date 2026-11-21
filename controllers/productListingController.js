@@ -1,5 +1,6 @@
 // controllers/productListingController.js
 const { fetchEligibleProducts } = require('../services/productListingService');
+const { containsCaseInsensitiveRegex } = require('../utils/safeRegex');
 const { fetchRemovalLogs } = require('../services/productListingDebugService');
 const { getVendorMetaForBusinesses } = require('../lib/listing/vendorMeta');
 const { baseScore, interleaveWeighted } = require('../lib/listing/ranking');
@@ -157,8 +158,8 @@ async function listProductsRanked(req, res) {
           'business.isActive': true,
           'business.isApproved': true,
           $or: [
-            { 'business.address.city': new RegExp(location, 'i') },
-            { 'business.address.state': new RegExp(location, 'i') }
+            { 'business.address.city': containsCaseInsensitiveRegex(location) },
+            { 'business.address.state': containsCaseInsensitiveRegex(location) }
           ]
         }
       });
@@ -178,7 +179,7 @@ async function listProductsRanked(req, res) {
         $match: {
           'business.isActive': true,
           'business.isApproved': true,
-          'minorityTypeData.name': new RegExp(minority.replace('-', ' '), 'i')
+          'minorityTypeData.name': containsCaseInsensitiveRegex(minority.replace('-', ' '))
         }
       });
     }

@@ -1,3 +1,4 @@
+const { escapeRegex } = require('../utils/safeRegex');
 const Service = require('../models/Service');
 const Review = require('../models/Review');
 const ServiceCategory = require('../models/ServiceCategory');
@@ -31,14 +32,14 @@ exports.getAllPrivateServicesForBusiness = async (req, res) => {
     // Search filter
     if (search) {
       filters.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { 'services.name': { $regex: search, $options: 'i' } },
+        { title: { $regex: escapeRegex(search), $options: 'i' } },
+        { description: { $regex: escapeRegex(search), $options: 'i' } },
+        { 'services.name': { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 
     if (minorityType) filters.minorityType = minorityType;
-    if (city) filters['contact.address'] = { $regex: city, $options: 'i' };
+    if (city) filters['contact.address'] = { $regex: escapeRegex(city), $options: 'i' };
 
     // Category Slug to categoryId conversion
     if (categorySlug) {
@@ -171,16 +172,16 @@ exports.getAllFood = async (req, res) => {
     // Search filter
     if (search) {
       filters.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
+        { title: { $regex: escapeRegex(search), $options: 'i' } },
+        { description: { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 
     // Filter by minorityType, city, state, and country
     if (minorityType) filters.minorityType = minorityType;
-    if (city) filters['address.city'] = { $regex: city, $options: 'i' };
-    if (state) filters['address.state'] = { $regex: state, $options: 'i' };
-    if (country) filters['address.country'] = { $regex: country, $options: 'i' };
+    if (city) filters['address.city'] = { $regex: escapeRegex(city), $options: 'i' };
+    if (state) filters['address.state'] = { $regex: escapeRegex(state), $options: 'i' };
+    if (country) filters['address.country'] = { $regex: escapeRegex(country), $options: 'i' };
 
     // Category Slug to categoryId conversion
     if (categorySlug) {
@@ -458,15 +459,15 @@ exports.getAllProducts = async (req, res) => {
 
     if (search) {
       filters.$or = [
-        { 'productId.title': { $regex: search, $options: 'i' } },
-        { 'productId.description': { $regex: search, $options: 'i' } },
+        { 'productId.title': { $regex: escapeRegex(search), $options: 'i' } },
+        { 'productId.description': { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 
     if (minorityType) filters.minorityType = minorityType;
-    if (city) filters['address.city'] = { $regex: city, $options: 'i' };
-    if (state) filters['address.state'] = { $regex: state, $options: 'i' };
-    if (country) filters['address.country'] = { $regex: country, $options: 'i' };
+    if (city) filters['address.city'] = { $regex: escapeRegex(city), $options: 'i' };
+    if (state) filters['address.state'] = { $regex: escapeRegex(state), $options: 'i' };
+    if (country) filters['address.country'] = { $regex: escapeRegex(country), $options: 'i' };
 
     if (categorySlug) {
       const category = await ProductCategory.findOne({ slug: categorySlug });

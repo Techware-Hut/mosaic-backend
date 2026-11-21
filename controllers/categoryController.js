@@ -945,7 +945,7 @@ const listSubcategories = async (req, res) => {
 
     const filter = {};
     if (catId) filter.category = catId;
-    if (q) filter.name = { $regex: String(q), $options: 'i' };
+    if (q) filter.name = { $regex: escapeRegex(String(q)), $options: 'i' };
 
     const subs = await ProductSubcategory
       .find(filter, { _id: 1, name: 1, slug: 1, category: 1 })

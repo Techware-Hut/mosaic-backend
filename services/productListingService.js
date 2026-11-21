@@ -1,3 +1,4 @@
+const { escapeRegex } = require('../utils/safeRegex');
 // services/productListingService.js
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
@@ -58,8 +59,8 @@ async function fetchEligibleProducts({
     ...(cat ? { categoryId: cat } : {}),
     ...(sub ? { subcategoryId: sub } : {}),
     ...(exclude ? { _id: { $ne: exclude } } : {}),
-    ...(brand ? { brand: { $regex: String(brand), $options: 'i' } } : {}),
-    ...(minorityType ? { minorityType: { $regex: String(minorityType), $options: 'i' } } : {}),
+    ...(brand ? { brand: { $regex: escapeRegex(String(brand)), $options: 'i' } } : {}),
+    ...(minorityType ? { minorityType: { $regex: escapeRegex(String(minorityType)), $options: 'i' } } : {}),
   };
 
   const now = new Date(); // used in discountEndDate comparison and subscription endDate
