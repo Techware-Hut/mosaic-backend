@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   parseListingPrice,
   hasPositiveListingPrice,
+  toResponseSalePrice,
   productHasPublishablePrice,
   serviceHasPublishablePrice,
   foodHasPublishablePrice,
@@ -100,4 +101,25 @@ test('filterPublishableListings keeps only priced listings per type', () => {
     { price: 15 },
   ]);
   assert.equal(foods.length, 1);
+});
+
+test('toResponseSalePrice returns null for missing, zero, negative and non-numeric sales', () => {
+  const { Types } = require('mongoose');
+  assert.equal(toResponseSalePrice(undefined), null);
+  assert.equal(toResponseSalePrice(null), null);
+  assert.equal(toResponseSalePrice(''), null);
+  assert.equal(toResponseSalePrice(0), null);
+  assert.equal(toResponseSalePrice(Types.Decimal128.fromString('0')), null);
+  assert.equal(toResponseSalePrice({ $numberDecimal: '0' }), null);
+  assert.equal(toResponseSalePrice(Types.Decimal128.fromString('-5')), null);
+  assert.equal(toResponseSalePrice('abc'), null);
+  assert.equal(toResponseSalePrice(NaN), null);
+});
+
+test('toResponseSalePrice returns the numeric value for a positive sale', () => {
+  const { Types } = require('mongoose');
+  assert.equal(toResponseSalePrice(Types.Decimal128.fromString('19.99')), 19.99);
+  assert.equal(toResponseSalePrice({ $numberDecimal: '7.5' }), 7.5);
+  assert.equal(toResponseSalePrice(12), 12);
+  assert.equal(toResponseSalePrice('4.25'), 4.25);
 });

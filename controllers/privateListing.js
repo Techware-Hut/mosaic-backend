@@ -243,6 +243,7 @@ exports.getAllFood = async (req, res) => {
 
 
 const ProductVariant = require('../models/ProductVariant');
+const { toResponseSalePrice } = require('../lib/marketplace/listingPricePolicy');
 const Product = require('../models/Product');
 const ProductCategory = require('../models/ProductCategory');
 
@@ -296,7 +297,7 @@ const buildVariantSizes = (variant) => {
         stockStatus: getStockStatus(stock),
         lowStockThreshold: LOW_STOCK_THRESHOLD,
         price: toPriceNumber(size.price),
-        salePrice: size.salePrice ? toPriceNumber(size.salePrice) : null,
+        salePrice: toResponseSalePrice(size.salePrice),
         discountEndDate: size.discountEndDate || null,
       };
     });
@@ -313,7 +314,7 @@ const buildVariantSizes = (variant) => {
       stockStatus: getStockStatus(stock),
       lowStockThreshold: LOW_STOCK_THRESHOLD,
       price: toPriceNumber(variant.price),
-      salePrice: variant.salePrice ? toPriceNumber(variant.salePrice) : null,
+      salePrice: toResponseSalePrice(variant.salePrice),
       discountEndDate: null,
     },
   ];

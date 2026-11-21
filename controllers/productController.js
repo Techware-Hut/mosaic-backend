@@ -35,6 +35,7 @@ const {
 const { validateProductPublishState } = require('../lib/marketplace/listingPricePolicy');
 const { Decimal128 } = mongoose.Types;
 const s3Client = new S3Client(buildS3ClientConfig());
+const { toResponseSalePrice } = require('../lib/marketplace/listingPricePolicy');
 
 const DEFAULT_PRODUCT_SHIPPING = { standard: 0, overnight: 0, local: 0 };
 const getGalleryImageLimit = (subscriptionPlan) =>
@@ -770,7 +771,7 @@ exports.getProductById = async (req, res) => {
       variants: variants.map(v => ({
         ...v,
         price: parseFloat(v.price?.toString() || '0'),
-        salePrice: parseFloat(v.salePrice?.toString() || '0'),
+        salePrice: toResponseSalePrice(v.salePrice),
       })),
     };
 
@@ -1535,7 +1536,7 @@ exports.getVariantById = async (req, res) => {
     const parsedVariant = {
       ...variant,
       price: parseFloat(variant.price?.toString() || '0'),
-      salePrice: parseFloat(variant.salePrice?.toString() || '0'),
+      salePrice: toResponseSalePrice(variant.salePrice),
     };
 
     return res.status(200).json({
