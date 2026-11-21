@@ -87,6 +87,8 @@ function loadOrderController({
     if (request.endsWith('models/Order')) {
       return {
         findOne: () => buildOrderQuery(order, calls),
+        // Transition lock (lib/orders/orderTransitionLock): claim and release succeed.
+        updateOne: async () => ({ modifiedCount: 1 }),
         find: () => ({
           sort: () => ({
             populate: () => ({
