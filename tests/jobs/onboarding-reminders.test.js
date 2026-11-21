@@ -28,7 +28,7 @@ function buildApplication(overrides = {}) {
   };
 }
 
-function loadJob({ applications = [], mailerCalls = [], emailConfigured = true } = {}) {
+function loadJob({ applications = [], mailerCalls = [], emailConfigured = true, sendImpl = null } = {}) {
   process.env.MAIL_USER = emailConfigured ? 'mail@example.com' : '';
   process.env.MAIL_PASSWORD = emailConfigured ? 'app-password' : '';
   process.env.ENABLE_ONBOARDING_REMINDERS = 'true';
@@ -57,6 +57,7 @@ function loadJob({ applications = [], mailerCalls = [], emailConfigured = true }
   const mailerMock = {
     sendPaymentReminderEmail: async (payload) => {
       mailerCalls.push(payload);
+      if (sendImpl) return sendImpl(payload);
       return { messageId: `reminder-${mailerCalls.length}` };
     },
   };
@@ -147,6 +148,7 @@ test('sendPaymentReminderEmail renders onboarding alert CTA', async () => {
 
   const smtpTransportMock = {
     buildSmtpTransportConfig: () => ({}),
+    createMosaicTransport: (impl) => impl.createTransport({}),
     formatMosaicFromHeader: () => 'Mosaic Biz Hub <mail@example.com>',
   };
 
@@ -177,4 +179,57 @@ test('sendPaymentReminderEmail renders onboarding alert CTA', async () => {
   assert.ok(sendMailCalls[0].html.includes('Onboarding Alert'));
   assert.ok(sendMailCalls[0].html.includes('Complete Your Payment &amp; Onboarding Setup'));
   assert.ok(sendMailCalls[0].html.includes('MBH-APP-REMINDER-EMAIL'));
+});
+
+test('staging allowlist suppression counts toward the cooldown; the next run does not re-log', async () => {
+  const { applyMailRecipientAllowlist, STAGING_SUPPRESSED_REASON } = require('../../utils/smtpTransport');
+  const saved = { r: process.env.RELEASE_ENVIRONMENT, a: process.env.MAIL_RECIPIENT_ALLOWLIST };
+  process.env.RELEASE_ENVIRONMENT = 'staging';
+  process.env.MAIL_RECIPIENT_ALLOWLIST = 'qa@example.com';
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const providerSends = [];
+    const transporter = applyMailRecipientAllowlist({
+      sendMail: async (message) => { providerSends.push(message); return { messageId: 'x' }; },
+    });
+    const application = buildApplication();
+    const { job, mailerCalls } = loadJob({
+      applications: [application],
+      sendImpl: (payload) => transporter.sendMail({ to: payload.to, subject: 'reminder' }),
+    });
+
+    const first = await job.runOnboardingReminderBatch();
+    assert.equal(first.processed, 1);
+    assert.equal(providerSends.length, 0);
+    assert.equal(application.onboardingReminderLog.length, 1);
+    assert.equal(application.onboardingReminderLog[0].deliveryStatus, 'skipped');
+    assert.equal(application.onboardingReminderLog[0].error, STAGING_SUPPRESSED_REASON);
+
+    const second = await job.runOnboardingReminderBatch();
+    assert.equal(second.processed, 0);
+    assert.equal(mailerCalls.length, 1);
+    assert.equal(application.onboardingReminderLog.length, 1);
+  } finally {
+    console.warn = originalWarn;
+    if (saved.r === undefined) delete process.env.RELEASE_ENVIRONMENT; else process.env.RELEASE_ENVIRONMENT = saved.r;
+    if (saved.a === undefined) delete process.env.MAIL_RECIPIENT_ALLOWLIST; else process.env.MAIL_RECIPIENT_ALLOWLIST = saved.a;
+  }
+});
+
+test('other skipped reminders stay retryable inside the cooldown', async () => {
+  const application = buildApplication({
+    onboardingReminderLog: [{
+      kind: 'payment_pending',
+      sentAt: new Date(),
+      deliveryStatus: 'skipped',
+      error: 'email_not_configured',
+    }],
+  });
+  const { job, mailerCalls } = loadJob({ applications: [application] });
+
+  const result = await job.runOnboardingReminderBatch();
+
+  assert.equal(result.processed, 1);
+  assert.equal(mailerCalls.length, 1);
 });

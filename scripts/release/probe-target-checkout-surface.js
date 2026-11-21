@@ -44,26 +44,37 @@ function layerMountsExactPath(layer, requestPath, expectedMount) {
   });
 }
 
-function hasCanonicalPostRoute(app) {
+function hasMountedPostRoute(app, mountPath, relativePath) {
   const stack = app?.router?.stack || app?._router?.stack;
   if (!Array.isArray(stack)) return false;
 
   return stack.some((layer) => {
-    if (!layerMountsExactPath(layer, '/api/orders/initiate', '/api/orders')) return false;
+    if (!layerMountsExactPath(layer, `${mountPath}${relativePath}`, mountPath)) return false;
     const routerStack = layer?.handle?.stack;
     if (!Array.isArray(routerStack)) return false;
     return routerStack.some((routeLayer) => {
       const route = routeLayer?.route;
       return Boolean(
         route
-        && routePathIsExact(route.path, '/initiate')
+        && routePathIsExact(route.path, relativePath)
         && route.methods?.post === true
       );
     });
   });
 }
 
-async function verifyStatuses(requestStatus, clock) {
+function hasCanonicalPostRoute(app) {
+  return hasMountedPostRoute(app, '/api/orders', '/initiate');
+}
+
+function hasLegacyPostRoute(app) {
+  return hasMountedPostRoute(app, '/api/payments', '/create-payment-intent');
+}
+
+async function verifyStatuses(requestStatus, clock, releaseMode = 'release') {
+  if (!['release', 'rollback', 'focused-baseline'].includes(releaseMode)) {
+    throw new Error('Unsupported release mode');
+  }
   const canonical = [];
   const legacy = [];
   for (const routePath of CANONICAL_PATHS) {
@@ -76,16 +87,21 @@ async function verifyStatuses(requestStatus, clock) {
   for (const routePath of RETIRED_LEGACY_PATHS) {
     const status = await requestStatus(routePath);
     legacy.push({ path: routePath, status });
-    if (status !== 404 && status !== 405) {
-      throw new Error('Exact target still exposes the retired legacy payment-intent route');
+    if (releaseMode === 'focused-baseline' ? status !== 401 : status !== 404 && status !== 405) {
+      throw new Error(releaseMode === 'focused-baseline'
+        ? 'Exact target does not expose the approved legacy payment route behind its auth guard'
+        : 'Exact target still exposes the retired legacy payment-intent route');
     }
   }
   return {
     schemaVersion: 1,
     status: 'passed',
     checkedAt: nowIso(clock),
+    releaseMode,
     canonical,
-    retiredLegacy: legacy,
+    ...(releaseMode === 'focused-baseline'
+      ? { activeLegacy: legacy, legacyPaymentSurface: 'active-authenticated-baseline' }
+      : { retiredLegacy: legacy }),
     productionMutation: false,
   };
 }
@@ -107,12 +123,19 @@ function safeProbeEnvironment(env = process.env) {
 }
 
 async function probeTarget(root, dependencies = {}) {
+  const releaseMode = dependencies.releaseMode || 'release';
+  if (!['release', 'rollback', 'focused-baseline'].includes(releaseMode)) {
+    throw new Error('Unsupported release mode');
+  }
   safeProbeEnvironment(dependencies.env || process.env);
   const loadApp = dependencies.loadApp || ((appPath) => require(appPath));
   const app = loadApp(path.join(root, 'app.js'));
   if (typeof app !== 'function') throw new Error('Exact target app export is not an HTTP handler');
   if (!hasCanonicalPostRoute(app)) {
     throw new Error('Exact target route stack lacks canonical POST /api/orders/initiate');
+  }
+  if (releaseMode === 'focused-baseline' && !hasLegacyPostRoute(app)) {
+    throw new Error('Exact target route stack lacks approved legacy POST /api/payments/create-payment-intent');
   }
 
   const server = http.createServer(app);
@@ -137,8 +160,9 @@ async function probeTarget(root, dependencies = {}) {
       });
       await response.body?.cancel();
       return response.status;
-    }, dependencies.clock);
+    }, dependencies.clock, releaseMode);
     result.canonicalRouteTableVerified = true;
+    if (releaseMode === 'focused-baseline') result.legacyRouteTableVerified = true;
     return result;
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -147,11 +171,15 @@ async function probeTarget(root, dependencies = {}) {
 
 async function main(argv = process.argv.slice(2), dependencies = {}) {
   const options = parseOptions(argv);
+  const releaseMode = options['--release-mode'] || 'release';
   const root = path.resolve(requireOption(options, '--root'));
   const output = requireOption(options, '--output');
   const releaseSha = requireOption(options, '--release-sha').toLowerCase();
   if (!/^[0-9a-f]{40}$/.test(releaseSha)) throw new Error('Release SHA must be one full SHA');
-  const result = await (dependencies.probeTarget || probeTarget)(root, dependencies);
+  const result = await (dependencies.probeTarget || probeTarget)(root, {
+    ...dependencies,
+    releaseMode,
+  });
   result.releaseSha = releaseSha;
   (dependencies.writeJson || writeJson)(output, result);
   console.log('Exact-target checkout route table passed.');
@@ -169,6 +197,8 @@ module.exports = {
   CANONICAL_PATHS,
   RETIRED_LEGACY_PATHS,
   hasCanonicalPostRoute,
+  hasLegacyPostRoute,
+  hasMountedPostRoute,
   layerMountsExactPath,
   main,
   probeTarget,

@@ -1,12 +1,12 @@
 const nodemailer = require('nodemailer');
 const { buildFrontendUrl } = require('./frontendUrl');
 const {
-  buildSmtpTransportConfig,
+  createMosaicTransport,
   formatMosaicFromHeader,
 } = require('./smtpTransport');
 const { baseLayout, esc } = require('./emailTemplates/baseLayout');
 
-const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
+const transporter = createMosaicTransport(nodemailer);
 
 const escapeHtml = (value = '') =>
   String(value ?? '')

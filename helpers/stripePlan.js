@@ -1,11 +1,38 @@
 const Stripe = require('stripe');
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const { isStagingEnv } = require('../utils/frontendUrl');
+
+const defaultStripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Same live-key classification as the staging isolation self-check.
+const LIVE_STRIPE_KEY_RE = /^(sk|rk)_live_/;
+
+function isLiveStripeKey(key) {
+  return typeof key === 'string' && LIVE_STRIPE_KEY_RE.test(key.trim());
+}
+
+/**
+ * Hosted staging must never create (or touch) Stripe products/prices with a
+ * live key. Throws before any Stripe call; non-staging behavior is unchanged.
+ */
+function assertNotLiveKeyOnStaging(env = process.env) {
+  if (isStagingEnv(env) && isLiveStripeKey(env.STRIPE_SECRET_KEY)) {
+    const err = new Error(
+      'Refusing to sync the plan with Stripe: hosted staging is configured with a live Stripe key. Use a Stripe test-mode key on staging.'
+    );
+    err.code = 'STRIPE_LIVE_KEY_ON_STAGING';
+    err.statusCode = 503;
+    throw err;
+  }
+}
 
 /**
  * Ensures the plan has a Stripe product & recurring price.
  * Creates them on Stripe if missing, saves to Mongo, and returns { productId, priceId }.
+ * `options.stripe` / `options.env` exist for tests; callers pass nothing.
  */
-async function ensurePlanPrice(plan) {
+async function ensurePlanPrice(plan, { stripe = defaultStripe, env = process.env } = {}) {
+  assertNotLiveKeyOnStaging(env);
+
   // Reuse a stored price only if it still exists in the current Stripe account.
   if (plan.stripePriceId) {
     try {
@@ -72,4 +99,4 @@ async function ensurePlanPrice(plan) {
   return { productId, priceId: price.id };
 }
 
-module.exports = { ensurePlanPrice };
+module.exports = { ensurePlanPrice, assertNotLiveKeyOnStaging, isLiveStripeKey };

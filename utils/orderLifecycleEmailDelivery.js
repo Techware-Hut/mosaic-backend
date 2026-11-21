@@ -107,23 +107,9 @@ async function sendCustomerOrderLifecycleEmail({
     };
   }
 
+  let info;
   try {
-    await send(customerEmail);
-    const notificationLog = await appendOrderLifecycleEmailLog(order, {
-      event,
-      fingerprint,
-      deliveryStatus: "sent",
-      recipientRole: "customer",
-    });
-
-    return {
-      emailSent: true,
-      emailSkipped: false,
-      emailFailed: false,
-      emailDeduped: false,
-      notificationLogged: notificationLog.logged,
-      fingerprint,
-    };
+    info = await send(customerEmail);
   } catch (error) {
     const message = error?.message || "Unknown email error";
     console.error(`Order lifecycle email failed (${event}):`, message);
@@ -144,6 +130,45 @@ async function sendCustomerOrderLifecycleEmail({
       fingerprint,
     };
   }
+
+  // Hosted staging only: the recipient allowlist withheld the message. Record a
+  // deliberate skip (never "sent", never "failed"). Lazy require keeps this
+  // module SMTP-free at load time.
+  const { isSuppressedMailResult, STAGING_SUPPRESSED_REASON } = require("./smtpTransport");
+  if (isSuppressedMailResult(info)) {
+    const notificationLog = await appendOrderLifecycleEmailLog(order, {
+      event,
+      fingerprint,
+      deliveryStatus: "skipped",
+      recipientRole: "customer",
+      reason: STAGING_SUPPRESSED_REASON,
+    });
+
+    return {
+      emailSent: false,
+      emailSkipped: true,
+      emailFailed: false,
+      emailDeduped: false,
+      notificationLogged: notificationLog.logged,
+      fingerprint,
+    };
+  }
+
+  const notificationLog = await appendOrderLifecycleEmailLog(order, {
+    event,
+    fingerprint,
+    deliveryStatus: "sent",
+    recipientRole: "customer",
+  });
+
+  return {
+    emailSent: true,
+    emailSkipped: false,
+    emailFailed: false,
+    emailDeduped: false,
+    notificationLogged: notificationLog.logged,
+    fingerprint,
+  };
 }
 
 module.exports = {

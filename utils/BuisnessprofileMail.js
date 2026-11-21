@@ -2,12 +2,12 @@
 const nodemailer = require('nodemailer');
 const { buildFrontendUrl } = require('./frontendUrl');
 const {
-  buildSmtpTransportConfig,
+  createMosaicTransport,
   formatMosaicFromHeader,
 } = require('./smtpTransport');
 const { baseLayout, esc } = require('./emailTemplates/baseLayout');
 
-const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
+const transporter = createMosaicTransport(nodemailer);
 
 // Send business profile review notification to admin
 const sendBusinessProfileReviewEmail = async (userEmail, userName, profileId) => {

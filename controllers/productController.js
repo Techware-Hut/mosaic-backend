@@ -7,6 +7,7 @@ const { validationResult } = require('express-validator');
 const deleteCloudinaryFile = require('../utils/deleteCloudinaryFile');
 const { sendError, sendForbidden, sendNotFound } = require('../utils/apiError');
 const { PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
+const { buildS3ClientConfig } = require("../utils/s3ClientConfig");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const mongoose = require('mongoose');
 const VendorOnboardingStage1 = require('../models/VendorOnboardingStage1');
@@ -33,13 +34,7 @@ const {
 } = require('../utils/uploadDiagnostics');
 const { validateProductPublishState } = require('../lib/marketplace/listingPricePolicy');
 const { Decimal128 } = mongoose.Types;
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
+const s3Client = new S3Client(buildS3ClientConfig());
 
 const DEFAULT_PRODUCT_SHIPPING = { standard: 0, overnight: 0, local: 0 };
 const getGalleryImageLimit = (subscriptionPlan) =>

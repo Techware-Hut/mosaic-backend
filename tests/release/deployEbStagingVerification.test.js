@@ -87,3 +87,37 @@ test('deploy keeps reusing an existing version label, which is why EB-side check
   assert.match(body, /wait_for_environment_recovery: 60\n/);
   assert.match(body, /version_label: mosaic-staging-\$\{\{ github\.sha \}\}/);
 });
+
+test('staging deploys only to the separate staging application, never the production application', () => {
+  assert.match(workflow, /\n  EB_APPLICATION_NAME: mosaic-staging-backend\n/);
+  assert.match(workflow, /\n  EB_ENVIRONMENT_NAME: mosaic-staging-api\n/);
+  assert.doesNotMatch(workflow, /mosaic-biz-hub-backend/, 'production application name must not appear');
+  assert.doesNotMatch(workflow, /mosaic-backend-env\b/, 'production environment name must not appear');
+  assert.doesNotMatch(workflow, /EB_APPLICATION_NAME:\s*\$\{\{\s*vars\./, 'application name must not be overridable by a variable');
+});
+
+test('post-deploy probes connect to the deployed environment, not whatever DNS points at', () => {
+  const steps = deploySteps();
+  const route = indexOfStep(steps, 'Route probes to the deployed environment');
+  const health = indexOfStep(steps, 'Post-deploy health probe');
+  assert.ok(route !== -1 && route < health, 'routing step must run before the probes');
+  assert.match(steps[route].body, /describe-environments[\s\S]*--environment-names "\$EB_ENVIRONMENT_NAME"/);
+  assert.match(steps[route].body, /--connect-to \$\{STAGING_API_HOST\}:443:\$\{cname\}:443/);
+  const curls = workflow.split('\n').filter((l) => /\bcurl -s/.test(l));
+  assert.ok(curls.length >= 3, 'expected the health, identity and auth probes');
+  for (const line of curls) assert.match(line, /\$CURL_ROUTE/, `probe must use the deployed-environment route: ${line.trim()}`);
+});
+
+test('isolation probe enforces staging DB, Stripe test mode and mail/SMS guards once the self-check ships', () => {
+  const steps = deploySteps();
+  const iso = indexOfStep(steps, 'Post-deploy isolation probe');
+  assert.ok(iso > indexOfStep(steps, 'Route probes to the deployed environment'));
+  const body = steps[iso].body;
+  assert.match(body, /utils\/isolationSelfCheck\.js/);
+  assert.match(body, /\/api\/ready/);
+  assert.match(body, /"mosaic_staging"/);
+  assert.match(body, /mode !== "test"/);
+  assert.match(body, /\["mail", "sms"\]/);
+  assert.match(body, /policy === "off"/);
+  assert.doesNotMatch(body, /continue-on-error|\|\| true/);
+});

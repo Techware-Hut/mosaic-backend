@@ -1,12 +1,12 @@
 const nodemailer = require('nodemailer');
 const { buildFrontendUrl } = require('./frontendUrl');
 const {
-  buildSmtpTransportConfig,
+  createMosaicTransport,
   formatMosaicFromHeader,
 } = require('./smtpTransport');
 const { baseLayout } = require('./emailTemplates/baseLayout');
 
-const transporter = nodemailer.createTransport(buildSmtpTransportConfig());
+const transporter = createMosaicTransport(nodemailer);
 
 const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 

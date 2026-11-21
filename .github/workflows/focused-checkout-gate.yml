@@ -1,0 +1,157 @@
+name: Focused checkout gate
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: focused-checkout-gate
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  RELEASE_MODE: focused-baseline
+  PRODUCTION_API_URL: https://api.mosaicbizhub.com
+  CHECKOUT_GATE_LOAD_BALANCER_ARN: ${{ vars.CHECKOUT_GATE_LOAD_BALANCER_ARN }}
+  CHECKOUT_GATE_HTTP_RULE_ARN: ${{ vars.CHECKOUT_GATE_HTTP_RULE_ARN }}
+  CHECKOUT_GATE_HTTPS_RULE_ARN: ${{ vars.CHECKOUT_GATE_HTTPS_RULE_ARN }}
+  CHECKOUT_GATE_HTTP_PRIORITY: ${{ vars.CHECKOUT_GATE_HTTP_PRIORITY }}
+  CHECKOUT_GATE_HTTPS_PRIORITY: ${{ vars.CHECKOUT_GATE_HTTPS_PRIORITY }}
+  CHECKOUT_GATE_DISABLED_PATH: ${{ vars.CHECKOUT_GATE_DISABLED_PATH }}
+
+jobs:
+  enable-focused-checkout-gate:
+    name: Enable focused checkout gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-release-control
+    steps:
+      - name: Require main ref
+        run: |
+          if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+            echo "::error::Focused checkout gate workflow must run from main."
+            exit 1
+          fi
+
+      - name: Checkout current main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reconfirm current main controller
+        env:
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          git fetch --no-tags origin main
+          current_main=$(git rev-parse origin/main)
+          if [ "$(git rev-parse HEAD)" != "$current_main" ]; then
+            echo "::error::Checked-out controller is not current main."
+            exit 1
+          fi
+          if [ "$WORKFLOW_SHA" != "$current_main" ]; then
+            echo "::error::Workflow definition is not current main."
+            exit 1
+          fi
+          mkdir -p release-evidence
+          printf '%s\n' "$current_main" > release-evidence/controller-sha.txt
+
+      - name: Configure release-control AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_CONTROL_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: false
+
+      - name: Enable focused checkout gate
+        id: enable
+        run: |
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+          node scripts/release/manage-checkout-gate.js enable \
+            --release-mode focused-baseline \
+            --confirm ENABLE_CHECKOUT_GATE \
+            --output release-evidence/gate-enabled.json
+
+      - name: Verify focused checkout gate state
+        run: |
+          node scripts/release/manage-checkout-gate.js verify \
+            --release-mode focused-baseline \
+            --expected-state active \
+            --output release-evidence/gate-verified.json
+
+      - name: Verify public checkout routes are gated
+        run: |
+          RELEASE_MODE=focused-baseline bash scripts/release/verify-checkout-gate.sh \
+            --release-mode focused-baseline \
+            "$PRODUCTION_API_URL" \
+            "http://api.mosaicbizhub.com"
+          cat > release-evidence/public-route-verification.json <<'JSON'
+          {
+            "schemaVersion": 1,
+            "releaseMode": "focused-baseline",
+            "httpVerified": true,
+            "httpsVerified": true,
+            "protectedRoutes": [
+              { "method": "POST", "path": "/api/orders/initiate", "expectedStatus": 503 },
+              { "method": "POST", "path": "/api/payments/create-payment-intent", "expectedStatus": 503 }
+            ]
+          }
+          JSON
+
+      - name: Build sanitized evidence summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const readStatus = (file) => {
+            try {
+              const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+              return parsed.status || parsed.gateState || 'present';
+            } catch (_error) {
+              return 'missing';
+            }
+          };
+          const controllerSha = fs.existsSync('release-evidence/controller-sha.txt')
+            ? fs.readFileSync('release-evidence/controller-sha.txt', 'utf8').trim()
+            : process.env.GITHUB_SHA;
+          const summary = {
+            schemaVersion: 1,
+            controllerSha,
+            releaseMode: 'focused-baseline',
+            gateEnableResult: readStatus('release-evidence/gate-enabled.json'),
+            gateVerificationResult: readStatus('release-evidence/gate-verified.json'),
+            publicVerification: fs.existsSync('release-evidence/public-route-verification.json') ? 'passed' : 'missing',
+            protectedRoutes: [
+              { method: 'POST', path: '/api/orders/initiate', expectedStatus: 503 },
+              { method: 'POST', path: '/api/payments/create-payment-intent', expectedStatus: 503 },
+            ],
+            runUrl: process.env.RUN_URL,
+            jobResult: process.env.JOB_STATUS,
+            checkoutGateFinalState: 'active',
+          };
+          fs.writeFileSync('release-evidence/focused-checkout-gate-summary.json', `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+          NODE
+
+      - name: Reassert active checkout gate after verification failure
+        if: ${{ always() && steps.enable.outputs.attempted == 'true' && job.status != 'success' }}
+        run: |
+          node scripts/release/manage-checkout-gate.js enable \
+            --release-mode focused-baseline \
+            --confirm ENABLE_CHECKOUT_GATE \
+            --output release-evidence/gate-failure-safe-active.json
+
+      - name: Upload focused checkout gate evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: focused-checkout-gate-evidence-${{ github.run_id }}
+          path: release-evidence/focused-checkout-gate-summary.json
+          if-no-files-found: error
+          retention-days: 14
