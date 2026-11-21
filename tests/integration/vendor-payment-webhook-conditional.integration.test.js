@@ -37,8 +37,8 @@ function loadController(user, mail) {
   }
 }
 
-function webhookReq(user, paymentIntentId = PI) {
-  const event = { type: 'payment_intent.succeeded', data: { object: { id: paymentIntentId, metadata: { type: 'vendor_verification', userId: String(user._id) } } } };
+function webhookReq(user, paymentIntentId = PI, type = 'payment_intent.succeeded') {
+  const event = { type, data: { object: { id: paymentIntentId, metadata: { type: 'vendor_verification', userId: String(user._id) } } } };
   return { headers: { 'stripe-signature': 't=1,v1=synthetic' }, body: Buffer.from(JSON.stringify(event)) };
 }
 
@@ -152,4 +152,53 @@ test('webhook for a different paymentIntentId does not mark the record paid', as
   assert.equal(saved.status, 'payment_pending');
   assert.equal(saved.verificationPayment.status, 'pending');
   assert.equal(saved.verificationPayment.paidAt ?? null, null);
+});
+
+const FAILED = 'payment_intent.payment_failed';
+
+for (const status of ['payment_pending', 'draft']) {
+  test(`payment_failed on a ${status} record marks failed and payment_pending as before`, async () => {
+    const { user, onboarding } = await seed({ status });
+    const controller = loadController(user, { admin: 0, receipt: 0 });
+    const res = response();
+    await controller.handleVendorPaymentWebhook(webhookReq(user, PI, FAILED), res);
+    assert.equal(res.code, 200);
+    const saved = await VendorOnboarding.findById(onboarding._id);
+    assert.equal(saved.status, 'payment_pending');
+    assert.equal(saved.verificationPayment.status, 'failed');
+  });
+}
+
+for (const status of ['submitted', 'verified', 'rejected']) {
+  test(`payment_failed after ${status} leaves the record untouched`, async () => {
+    const { user, onboarding } = await seed({ status });
+    const before = await VendorOnboarding.collection.findOne({ _id: onboarding._id });
+    const controller = loadController(user, { admin: 0, receipt: 0 });
+    const res = response();
+    await controller.handleVendorPaymentWebhook(webhookReq(user, PI, FAILED), res);
+    assert.equal(res.code, 200);
+    assert.deepEqual(await VendorOnboarding.collection.findOne({ _id: onboarding._id }), before);
+  });
+}
+
+test('payment_failed after a successful payment does not unmark paid', async () => {
+  const { user, onboarding } = await seed();
+  const controller = loadController(user, { admin: 0, receipt: 0 });
+  await controller.handleVendorPaymentWebhook(webhookReq(user), response());
+  const before = await VendorOnboarding.collection.findOne({ _id: onboarding._id });
+  assert.equal(before.verificationPayment.status, 'paid');
+  const res = response();
+  await controller.handleVendorPaymentWebhook(webhookReq(user, PI, FAILED), res);
+  assert.equal(res.code, 200);
+  assert.deepEqual(await VendorOnboarding.collection.findOne({ _id: onboarding._id }), before);
+});
+
+test('payment_failed with a different paymentIntentId does not write', async () => {
+  const { user, onboarding } = await seed();
+  const before = await VendorOnboarding.collection.findOne({ _id: onboarding._id });
+  const controller = loadController(user, { admin: 0, receipt: 0 });
+  const res = response();
+  await controller.handleVendorPaymentWebhook(webhookReq(user, 'pi_someone_else', FAILED), res);
+  assert.equal(res.code, 200);
+  assert.deepEqual(await VendorOnboarding.collection.findOne({ _id: onboarding._id }), before);
 });

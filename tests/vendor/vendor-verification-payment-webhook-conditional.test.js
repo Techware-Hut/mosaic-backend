@@ -15,6 +15,7 @@ function matches(doc, filter) {
   return Object.entries(filter).every(([key, cond]) => {
     const value = getPath(doc, key);
     if (cond && typeof cond === 'object' && '$ne' in cond) return value !== cond.$ne;
+    if (cond && typeof cond === 'object' && '$in' in cond) return cond.$in.includes(value);
     return value === cond;
   });
 }
@@ -62,8 +63,8 @@ function loadController(record, { onRead } = {}) {
 function buildRecord(overrides = {}) {
   return { _id: 'onb_1', userId, status: 'payment_pending', badge: 'Silver', verificationPayment: { status: 'pending', paymentIntentId: PI, paidAt: null }, ...overrides };
 }
-function webhookReq(paymentIntentId = PI) {
-  const event = { type: 'payment_intent.succeeded', data: { object: { id: paymentIntentId, metadata: { type: 'vendor_verification', userId } } } };
+function webhookReq(paymentIntentId = PI, type = 'payment_intent.succeeded') {
+  const event = { type, data: { object: { id: paymentIntentId, metadata: { type: 'vendor_verification', userId } } } };
   return { headers: { 'stripe-signature': 't=1,v1=synthetic' }, body: Buffer.from(JSON.stringify(event)) };
 }
 function mockResponse() {
@@ -144,4 +145,62 @@ test('conditional writes always match on _id and paymentIntentId', async () => {
     { _id: 'onb_1', 'verificationPayment.paymentIntentId': PI, status: 'payment_pending' },
   ]);
   assert.deepEqual(calls.updateOne[1].update, { $set: { status: 'draft' } });
+});
+
+const FAILED = 'payment_intent.payment_failed';
+
+for (const status of ['payment_pending', 'draft']) {
+  test(`payment_failed on a ${status} record marks failed and payment_pending as before`, async () => {
+    const record = buildRecord({ status });
+    const { controller, calls } = loadController(record);
+    const res = mockResponse();
+    await controller.handleVendorPaymentWebhook(webhookReq(PI, FAILED), res);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body, { received: true });
+    assert.equal(calls.save, 0);
+    assert.equal(record.status, 'payment_pending');
+    assert.equal(record.verificationPayment.status, 'failed');
+  });
+}
+
+for (const status of ['submitted', 'verified', 'rejected']) {
+  test(`payment_failed after ${status} leaves the record untouched`, async () => {
+    const record = buildRecord({ status });
+    const before = structuredClone(record);
+    const { controller } = loadController(record);
+    const res = mockResponse();
+    await controller.handleVendorPaymentWebhook(webhookReq(PI, FAILED), res);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(record, before);
+  });
+}
+
+test('payment_failed after paid does not unmark paid', async () => {
+  const paidAt = new Date('2026-11-20T00:00:00Z');
+  const record = buildRecord({ status: 'draft', verificationPayment: { status: 'paid', paymentIntentId: PI, paidAt } });
+  const before = structuredClone(record);
+  const { controller } = loadController(record);
+  await controller.handleVendorPaymentWebhook(webhookReq(PI, FAILED), mockResponse());
+  assert.deepEqual(record, before);
+});
+
+test('payment_failed with mismatched paymentIntentId does not write', async () => {
+  const record = buildRecord();
+  const { controller, calls } = loadController(record);
+  const res = mockResponse();
+  await controller.handleVendorPaymentWebhook(webhookReq('pi_other', FAILED), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(calls.updateOne.length, 0);
+  assert.equal(calls.save, 0);
+  assert.equal(record.verificationPayment.status, 'pending');
+});
+
+test('payment_failed write is a single guarded updateOne', async () => {
+  const record = buildRecord();
+  const { controller, calls } = loadController(record);
+  await controller.handleVendorPaymentWebhook(webhookReq(PI, FAILED), mockResponse());
+  assert.deepEqual(calls.updateOne, [{
+    filter: { _id: 'onb_1', 'verificationPayment.paymentIntentId': PI, 'verificationPayment.status': { $ne: 'paid' }, status: { $in: ['draft', 'payment_pending'] } },
+    update: { $set: { 'verificationPayment.status': 'failed', status: 'payment_pending' } },
+  }]);
 });

@@ -1246,10 +1246,18 @@ exports.handleVendorPaymentWebhook = async (req, res) => {
           });
 
           if (onboarding) {
-            onboarding.verificationPayment.status = 'failed';
-            onboarding.status = 'payment_pending';
-
-            await onboarding.save();
+            // Conditional update: never unmark a paid payment or pull a
+            // submitted / verified / rejected application back to payment_pending.
+            await VendorOnboarding.updateOne(
+              {
+                _id: onboarding._id,
+                'verificationPayment.paymentIntentId': failedPaymentIntent.id,
+                'verificationPayment.status': { $ne: 'paid' },
+                status: { $in: ['draft', 'payment_pending'] },
+              },
+              { $set: { 'verificationPayment.status': 'failed', status: 'payment_pending' } },
+              { runValidators: true }
+            );
 
             console.log(`Vendor verification payment failed for user ${userId}`);
           }
