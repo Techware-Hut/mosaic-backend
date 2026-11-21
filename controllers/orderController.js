@@ -625,15 +625,20 @@ exports.buyNowQuote = async (req, res) => {
     if (!Array.isArray(items) || !items.length) {
       return res.status(400).json({ success: false, message: "Items are required" });
     }
+    if (items.length > 50) {
+      return res.status(400).json({ success: false, message: "A maximum of 50 items is allowed" });
+    }
     const vendorItemMap = {};
     const seen = new Set();
 
     for (const item of items) {
       const { productId, variantId, size, quantity, price } = item || {};
+      // Preserve initiateOrder's truthy quantity check and let shared pricing
+      // perform the same Number coercion (including numeric strings).
 
       if (
         !productId || !variantId || !size ||
-        !Number.isInteger(quantity) || quantity < 1 ||
+        !quantity ||
         !mongoose.isValidObjectId(productId) || !mongoose.isValidObjectId(variantId)
       ) {
         return res.status(400).json({
@@ -658,11 +663,16 @@ exports.buyNowQuote = async (req, res) => {
       if (
         !variant ||
         !variant.productId ||
+        !variant.productId.isPublished ||
+        !variant.productId.isActive ||
+        variant.productId.isDeleted ||
+        !variant.isPublished ||
+        variant.isDeleted ||
         variant.productId._id.toString() !== productId
       ) {
         return res.status(404).json({
           success: false,
-          message: "Product or variant not found",
+          message: "Product not found",
         });
       }
 
@@ -761,12 +771,20 @@ exports.buyNowQuote = async (req, res) => {
       });
     }
 
+    // initiateOrder refreshes these fields from Stripe before checking them.
+    // Quotes must not call Stripe; stale stored fields can therefore diverge
+    // from checkout until the next account refresh. Payouts are not a blocker.
+    if (!business.chargesEnabled || getTransferCapabilityStatus(business) !== "active") {
+      return res.status(400).json({ success: false, message: "Vendor Stripe onboarding incomplete." });
+    }
+
     const p = await priceOrderLines({ rawVendorItems, business, businessId, deliverySpeed, couponCode, validateSubmittedPrices: false }, orderPricingDependencies);
     return res.json({ success: true, pricing: { lineItems: p.vendorItems,
       subtotal: p.subtotalAmount, taxTotal: p.taxTotal, discountAmount: p.discountAmount,
       discountedSubtotal: p.discountedSubtotal, shippingTotal: Number(p.shippingCalculation.amount || 0),
       totalAmount: p.totalAmount, currency: "USD" } });
   } catch (err) {
+    if (err.statusCode !== 400) console.error(err.message);
     return res.status(err.statusCode === 400 ? 400 : 500).json({ success: false,
       message: err.statusCode === 400 ? err.message : "Server error" });
   }
@@ -1131,15 +1149,6 @@ exports.initiateOrder = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("Order initiation failed:", err);
-    console.error("Order initiation Stripe details:", {
-      type: err?.type,
-      code: err?.code,
-      message: err?.message,
-      statusCode: err?.statusCode,
-      requestId: err?.requestId,
-    });
-
     if (err?.statusCode === 400) {
       return res.status(400).json({
         success: false,
@@ -1153,6 +1162,15 @@ exports.initiateOrder = async (req, res) => {
         message: "Vendor Stripe onboarding incomplete.",
       });
     }
+
+    console.error("Order initiation failed:", err);
+    console.error("Order initiation Stripe details:", {
+      type: err?.type,
+      code: err?.code,
+      message: err?.message,
+      statusCode: err?.statusCode,
+      requestId: err?.requestId,
+    });
 
     return res.status(500).json({
       success: false,

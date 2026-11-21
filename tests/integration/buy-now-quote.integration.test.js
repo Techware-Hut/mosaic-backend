@@ -24,6 +24,8 @@ async function snapshot() {
   return JSON.stringify(result);
 }
 for (const scenario of [
+  { name: 'numeric string quantity', quantity: '3', expectedShipping: 15 },
+  { name: 'fractional quantity', quantity: 1.5, expectedShipping: 7.5 },
   { name: 'legacy per-unit qty 3', expectedShipping: 15 },
   { name: 'vendor flat rate', settings: { method: 'flat_rate', flatRate: rates }, expectedShipping: 5 },
   { name: 'quantity tiers', settings: { method: 'quantity_based', quantityTiers: [{ minQuantity: 1, maxQuantity: 2, rates }, { minQuantity: 3, rates: { standard: 8, express: 15, local: 3 } }] }, expectedShipping: 8 },
@@ -39,19 +41,20 @@ for (const scenario of [
     const vendor = await registerAndVerify(vendorAgent, { role: 'business_owner' });
     const owner = await User.findOne({ email: vendor.email });
     const business = await seedApprovedBusiness(owner, {
+      chargesEnabled: true, capabilities: { transfers: 'active' },
       ...(scenario.settings ? { shippingSettings: scenario.settings } : {}),
       taxSettings: { enabled: !!scenario.sale, categories: [{ code: 'goods', label: 'Goods', rate: 10 }] },
     });
     const product = await seedPublishedProduct(business, owner);
     product.taxCategory = { code: 'goods', label: 'Goods' }; await product.save();
     const variant = await ProductVariant.create({ productId: product._id, businessId: business._id,
-      ownerId: owner._id, attributes: { size: 'M' }, sku: 'QUOTE', price: 20,
+      ownerId: owner._id, isPublished: true, attributes: { size: 'M' }, sku: 'QUOTE', price: 20,
       ...(scenario.sale ? { salePrice: 15 } : {}), stock: 100, shipping: { standard: 5, overnight: 12, local: 2 } });
     if (scenario.sizes) await ProductVariant.collection.updateOne({ _id: variant._id }, { $set: { sizes: [{ size: 'M', price: 27, sku: 'SIZE-M' }] } });
     const agent = createAgent(getApp());
     const buyer = await registerAndVerify(agent, { role: 'customer' }); await login(agent, buyer.email, buyer.password);
     const coupon = scenario.coupon ? await seedDiscount(business, { type: scenario.coupon, value: 10 }) : null;
-    const body = { items: [{ productId: String(product._id), variantId: String(variant._id), size: 'M', quantity: 3 }],
+    const body = { items: [{ productId: String(product._id), variantId: String(variant._id), size: 'M', quantity: scenario.quantity || 3 }],
       shippingAddress: { fullName: 'Buyer', phone: '1234567890', addressLine1: '1 Main St', state: 'GA' },
       selectedDeliverySpeed: scenario.speed || 'standard', ...(coupon ? { couponCode: coupon.couponCode } : {}) };
     const before = await snapshot(); setStripeShouldFail(true);
@@ -78,10 +81,10 @@ test('quote validates input and enforces buyer and vendor eligibility without si
   const vendor = await registerAndVerify(vendorAgent, { role: 'business_owner' });
   await login(vendorAgent, vendor.email, vendor.password);
   const owner = await User.findOne({ email: vendor.email });
-  const business = await seedApprovedBusiness(owner);
+  const business = await seedApprovedBusiness(owner, { chargesEnabled: true, capabilities: { transfers: 'active' } });
   const product = await seedPublishedProduct(business, owner);
   const variant = await ProductVariant.create({ productId: product._id, businessId: business._id,
-    ownerId: owner._id, attributes: { size: 'M' }, sku: 'GUARDS', price: 20, stock: 100 });
+    ownerId: owner._id, isPublished: true, attributes: { size: 'M' }, sku: 'GUARDS', price: 20, stock: 100 });
   const agent = createAgent(getApp());
   const buyer = await registerAndVerify(agent, { role: 'business_owner' });
   await login(agent, buyer.email, buyer.password);
@@ -92,11 +95,26 @@ test('quote validates input and enforces buyer and vendor eligibility without si
   assert.equal((await quote({ items: [item] })).status, 200, 'vendors may buy from another vendor');
   const self = await vendorAgent.post('/api/orders/buy-now-quote').send({ items: [item] });
   assert.equal(self.status, 403); assert.equal(self.body.code, 'SELF_PURCHASE_FORBIDDEN');
+  for (const [document, field, value] of [
+    [product, 'isPublished', false], [product, 'isActive', false],
+    [product, 'isDeleted', true], [variant, 'isPublished', false], [variant, 'isDeleted', true],
+  ]) {
+    const previous = document[field];
+    document[field] = value; await document.save();
+    const hidden = await quote({ items: [item] });
+    assert.equal(hidden.status, 404);
+    assert.deepEqual(hidden.body, { success: false, message: 'Product not found' });
+    document[field] = previous; await document.save();
+  }
   const before = await snapshot();
-  for (const items of [[], [null], [{ ...item, quantity: 0 }], [{ ...item, quantity: -1 }],
-    [{ ...item, quantity: 1.5 }], [{ ...item, variantId: 'invalid' }], [{ ...item, size: 'missing' }], [item, item]]) {
+  for (const items of [[], [null], [{ ...item, quantity: 0 }],
+    [{ ...item, variantId: 'invalid' }], [{ ...item, size: 'missing' }], [item, item], Array(51).fill(item)]) {
     assert.equal((await quote({ items })).status, 400, JSON.stringify(items));
   }
+  const capped = await quote({ items: Array(51).fill(item) });
+  assert.equal(capped.status, 400);
+  assert.match(capped.body.message, /50/);
+  assert.equal((await quote({ items: Array(50).fill(item) })).body.message, 'Duplicate item in cart');
   for (const patch of [{ productId: String(new mongoose.Types.ObjectId()) }, { variantId: String(new mongoose.Types.ObjectId()) }]) {
     assert.equal((await quote({ items: [{ ...item, ...patch }] })).status, 404);
   }
@@ -107,7 +125,7 @@ test('quote validates input and enforces buyer and vendor eligibility without si
   const secondBusiness = await seedApprovedBusiness(secondOwner);
   const secondProduct = await seedPublishedProduct(secondBusiness, secondOwner);
   const secondVariant = await ProductVariant.create({ productId: secondProduct._id, businessId: secondBusiness._id,
-    ownerId: secondOwner._id, attributes: { size: 'M' }, sku: 'SECOND', price: 20, stock: 100 });
+    ownerId: secondOwner._id, isPublished: true, attributes: { size: 'M' }, sku: 'SECOND', price: 20, stock: 100 });
   assert.equal((await quote({ items: [item, { ...item, productId: String(secondProduct._id), variantId: String(secondVariant._id) }] })).status, 400);
   business.isActive = false; await business.save();
   const blockedQuote = await quote({ items: [item] });
@@ -115,4 +133,17 @@ test('quote validates input and enforces buyer and vendor eligibility without si
     shippingAddress: { fullName: 'Buyer', phone: '1234567890', addressLine1: 'Main' } });
   assert.equal(blockedQuote.status, blockedOrder.status);
   assert.equal(blockedQuote.body.message, blockedOrder.body.message);
+});
+
+test('quote rate limit returns RATE_LIMITED and leaves initiate outside the limiter', async () => {
+  const agent = createAgent(getApp());
+  let response;
+  for (let n = 0; n < 61; n++) {
+    response = await agent.post('/api/orders/buy-now-quote').send({});
+    if (response.status === 429) break;
+    assert.equal(response.status, 401);
+  }
+  assert.equal(response.status, 429);
+  assert.equal(response.body.code, 'RATE_LIMITED');
+  assert.equal((await agent.post('/api/orders/initiate').send({})).status, 401);
 });

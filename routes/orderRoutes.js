@@ -1,5 +1,16 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+
+function buildBuyNowQuoteLimiter() {
+  return rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, code: 'RATE_LIMITED', message: 'Too many quote requests. Please try again later.' },
+  });
+}
 const { buyNowQuote, initiateOrder, getUserOrders, getVendorOrders, acceptOrder, rejectOrder, shipOrder, getAllOrdersAdmin, deliverOrder, acceptReturn, initiateReturn, cancelOrderByUser } = require('../controllers/orderController');
 const { retrieveIntent } = require('../controllers/stripePaymentController');
 const authenticate = require('../middlewares/authenticate');
@@ -10,7 +21,7 @@ const { getInvoicePdf } = require('../controllers/invoiceController');
 
 
 
-router.post('/buy-now-quote', authenticate, isCheckoutBuyer, buyNowQuote);
+router.post('/buy-now-quote', buildBuyNowQuoteLimiter(), authenticate, isCheckoutBuyer, buyNowQuote);
 router.post('/initiate', authenticate, isCheckoutBuyer, initiateOrder);
 router.get('/retrieve-intent/:id', authenticate, retrieveIntent);
 router.get('/user', authenticate, getUserOrders);
