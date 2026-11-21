@@ -13,10 +13,44 @@ the first `production-release-control` Environment job. The legacy `production`
 Environment/role must be unable to deploy before this path is enabled. No local
 AWS login is part of the normal path.
 
-The read-only preflight also remains fail-closed until the legacy
+The normal release read-only preflight remains fail-closed until the legacy
 `/api/payments/create-payment-intent` surface is retired and its outstanding
 Stripe liabilities are reconciled under the documented checkout-surface
 bootstrap prerequisite.
+
+## Wave 1 focused production-baseline preflight
+
+`focused-baseline` is a separate, manually dispatched preflight mode. It does
+not reinterpret a focused target as `main` or as a break-glass rollback. Its
+inputs are one full target SHA, approved production baseline
+`9bc75c257a9f483a287f122dbd38514b7a4b55d4`, a protected
+`refs/heads/release/focused/*` ref, and the merged source PR number. The
+resolver requires the executing workflow definition to be the current `main`
+SHA and the requested target to be the protected branch tip. The source
+verifier requires a reviewed same-repository PR, a two-parent merge whose
+first parent is the approved baseline, one reviewed cherry-pick of
+`bcb9f101c58df6d7df994e94442970b91f36e74c` on that baseline, exactly
+the approved booking controller and test paths, and matching Git file blobs.
+It rechecks the remote branch tip after certification.
+
+The exact focused target runs `npm ci`, `npm test`, `npm run test:contract`,
+and `npm run test:integration` before release readiness. Read-only source,
+target route, public, and AWS preflight checks use the trusted current-`main`
+controller. Focused checkout proof records both active initiation paths:
+`POST /api/orders/initiate` and
+`POST /api/payments/create-payment-intent`. The legacy path is **active** in
+this baseline; focused evidence must never call it retired. This mode does not
+claim staging certification or Stripe liability clearance.
+
+Wave 1 stops after preflight. The workflow excludes `focused-baseline` from
+`production-approval-and-release`, and `deploy-eb-exact-sha.sh` exits before
+packaging or AWS calls for focused release or focused rollback. Its evidence
+records incomplete GitHub Environment, OIDC, live dual-route gate, and
+payment-liability gates. Do not dispatch a focused candidate until the
+protected ref and required preflight infrastructure exist. A later, separately
+approved change must bind the live gate and payment proof before any focused
+production mutation. The normal `release` and break-glass `rollback` paths
+below retain their existing policy.
 
 ## Normal workflow
 

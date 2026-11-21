@@ -58,7 +58,25 @@ function normalizePhoneNumber(phone, defaultCountry = 'US') {
  * @param {string} [options.messagingProfileId] - Messaging Profile ID (defaults to process.env.TELNYX_MESSAGING_PROFILE_ID)
  * @returns {Promise<{ success: boolean, messageId?: string, status?: string, error?: string, details?: any }>}
  */
-async function sendSMS({ to, text, mediaUrls, from, messagingProfileId }) {
+async function sendSMS(options) {
+  // Staging-only recipient allowlist (SMS_RECIPIENT_ALLOWLIST). Outside hosted
+  // staging this is a pure pass-through; in staging it fails closed (an
+  // unset/blank/invalid allowlist suppresses every SMS).
+  const { getSmsAllowlist, isSmsNumberAllowed } = require('./recipientAllowlist');
+  const allowlist = getSmsAllowlist();
+  if (allowlist.active) {
+    const normalizedTo = normalizePhoneNumber(options?.to);
+    if (normalizedTo && !isSmsNumberAllowed(normalizedTo, allowlist)) {
+      console.warn(
+        `[isolation] sms suppressed by staging recipient allowlist (reason=not_allowlisted, policy=${allowlist.policy}, recipients=1, allowed=0, allowlistSize=${allowlist.size})`
+      );
+      return { success: true, suppressed: true, status: 'suppressed' };
+    }
+  }
+  return sendSMSUnfiltered(options);
+}
+
+async function sendSMSUnfiltered({ to, text, mediaUrls, from, messagingProfileId }) {
   const normalizedTo = normalizePhoneNumber(to);
   if (!normalizedTo) {
     console.warn(`[Telnyx SMS] Invalid destination phone number: "${to}"`);

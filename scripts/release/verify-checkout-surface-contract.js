@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const {
   nowIso,
   parseOptions,
@@ -13,6 +14,8 @@ const {
 
 const LEGACY_PATH = '/create-payment-intent';
 const LEGACY_MOUNT = '/api/payments';
+const APPROVED_BASELINE_SHA = '9bc75c257a9f483a287f122dbd38514b7a4b55d4';
+const BASELINE_OBJECTS = Object.freeze(['app.js', 'routes', 'controllers/paymentController.js']);
 const NON_RUNTIME_DIRECTORIES = new Set([
   '.git',
   '.github',
@@ -161,7 +164,10 @@ function dynamicExpressPostRegistrations(source) {
   return dynamic;
 }
 
-function analyzeCheckoutSurface({ appSource, paymentRoutesSource, orderRoutesSource, runtimeRouteSources, clock }) {
+function analyzeCheckoutSurface({ appSource, paymentRoutesSource, orderRoutesSource, runtimeRouteSources, clock, releaseMode = 'release', baselineProvenance = null }) {
+  if (!['release', 'rollback', 'focused-baseline'].includes(releaseMode)) {
+    throw new Error('Unsupported release mode');
+  }
   const paymentsMounted = String(appSource).includes(LEGACY_MOUNT);
   const sources = Array.isArray(runtimeRouteSources)
     ? runtimeRouteSources
@@ -176,28 +182,97 @@ function analyzeCheckoutSurface({ appSource, paymentRoutesSource, orderRoutesSou
     .test(executableAppSource);
   const canonicalRoutePresent = /\b[A-Za-z_$][\w$]*\s*\.\s*post\s*\(\s*['"]\/initiate['"]\s*,/i
     .test(executableOrderRoutesSource);
+  const legacyMountPresent = /\bapp\s*\.\s*use\s*\(\s*['"]\/api\/payments['"]\s*,\s*paymentRoutes\b/i
+    .test(executableAppSource);
+  const executablePaymentRoutesSource = stripJavaScriptComments(paymentRoutesSource || '');
+  const legacyRoutePresentExact = /\b[A-Za-z_$][\w$]*\s*\.\s*post\s*\(\s*['"]\/create-payment-intent['"]\s*,/i
+    .test(executablePaymentRoutesSource);
+  const legacyRegistrationCount = sources.reduce((count, source) => count
+    + [...stripJavaScriptComments(source).matchAll(/\b[A-Za-z_$][\w$]*\s*\.\s*post\s*\(\s*['"]\/create-payment-intent['"]\s*,/gi)].length, 0);
   // Retiring only the original mount is insufficient: an alternate router can
   // expose the same liability. Any runtime route definition is a release stop.
   const exclusiveCanonicalSurface = canonicalMountPresent
     && canonicalRoutePresent
     && !legacyRoutePresent
     && dynamicRouteRegistrations.length === 0;
+  const approvedFocusedSurface = canonicalMountPresent
+    && canonicalRoutePresent
+    && legacyMountPresent
+    && legacyRoutePresentExact
+    && legacyRegistrationCount === 1
+    && dynamicRouteRegistrations.length === 0
+    && baselineProvenance?.verified === true
+    && baselineProvenance?.baselineSha === APPROVED_BASELINE_SHA;
+  const passed = releaseMode === 'focused-baseline'
+    ? approvedFocusedSurface
+    : exclusiveCanonicalSurface;
   return {
     schemaVersion: 1,
-    status: exclusiveCanonicalSurface ? 'passed' : 'blocked',
+    status: passed ? 'passed' : 'blocked',
     checkedAt: nowIso(clock),
+    releaseMode,
     canonicalGate: { method: 'POST', path: '/api/orders/initiate' },
     legacyPaymentSurfaceActive: legacyRoutePresent || dynamicRouteRegistrations.length > 0,
+    ...(releaseMode === 'focused-baseline' ? {
+      legacyPaymentSurface: 'active-authenticated-baseline',
+      legacyGate: { method: 'POST', path: '/api/payments/create-payment-intent' },
+      legacyMountPresent,
+      legacyRoutePresentExact,
+      legacyRegistrationCount,
+      baselineProvenance,
+    } : {}),
     canonicalMountPresent,
     canonicalRoutePresent,
     dynamicPostPathRegistrationCount: dynamicRouteRegistrations.length,
     paymentsMounted,
     runtimeRouteSourceCount: sources.length,
     productionMutation: false,
-    nextAction: exclusiveCanonicalSurface
-      ? 'Checkout initiation is exclusive to the canonical gated surface.'
-      : 'Restore the exact canonical order-initiation route, retire legacy/dynamic payment routes, and reconcile outstanding issued intents before automatic cutover.',
+    nextAction: passed
+      ? (releaseMode === 'focused-baseline'
+        ? 'Both approved baseline checkout initiators remain active; gate both during deployment and retain separate Stripe liability controls.'
+        : 'Checkout initiation is exclusive to the canonical gated surface.')
+      : (releaseMode === 'focused-baseline'
+        ? 'Restore the exact approved canonical and legacy route surface; reject changed or additional payment initiators.'
+        : 'Restore the exact canonical order-initiation route, retire legacy/dynamic payment routes, and reconcile outstanding issued intents before automatic cutover.'),
   };
+}
+
+function verifyFocusedBaselineProvenance({ root, baselineRepo, releaseSha, baselineSha = APPROVED_BASELINE_SHA, git = execFileSync }) {
+  if (baselineSha !== APPROVED_BASELINE_SHA) {
+    throw new Error('Focused release baseline must be the approved production SHA');
+  }
+  if (!/^[a-f0-9]{40}$/.test(String(releaseSha || ''))) {
+    throw new Error('Focused release requires an exact release SHA');
+  }
+  const readObject = (repository, revision) => {
+    try {
+      const objectId = String(git('git', ['-C', repository, 'rev-parse', '--verify', revision], {
+        encoding: 'utf8',
+        windowsHide: true,
+      })).trim().toLowerCase();
+      if (!/^[a-f0-9]{40}$/.test(objectId)) throw new Error('Invalid Git object identity');
+      return objectId;
+    } catch (_error) {
+      throw new Error('Focused baseline Git provenance is unavailable');
+    }
+  };
+  const targetSha = readObject(root, 'HEAD^{commit}');
+  if (targetSha !== releaseSha) {
+    throw new Error('Focused target checkout HEAD differs from release SHA');
+  }
+  if (readObject(baselineRepo, `${baselineSha}^{commit}`) !== baselineSha) {
+    throw new Error('Approved production baseline commit is unavailable');
+  }
+  const comparedObjects = [];
+  for (const sourcePath of BASELINE_OBJECTS) {
+    const targetObject = readObject(root, `HEAD:${sourcePath}`);
+    const baselineObject = readObject(baselineRepo, `${baselineSha}:${sourcePath}`);
+    if (targetObject !== baselineObject) {
+      throw new Error(`Focused target changes approved payment route provenance: ${sourcePath}`);
+    }
+    comparedObjects.push(sourcePath);
+  }
+  return { verified: true, baselineSha, targetSha, comparedObjects };
 }
 
 function collectRuntimeRouteSources(root, dependencies = {}) {
@@ -229,23 +304,41 @@ function collectRuntimeRouteSources(root, dependencies = {}) {
 function main(argv = process.argv.slice(2), dependencies = {}) {
   const options = parseOptions(argv);
   const output = requireOption(options, '--output');
+  const releaseMode = options['--release-mode'] || 'release';
   const readFile = dependencies.readFile || ((file) => fs.readFileSync(file, 'utf8'));
   const root = dependencies.root
     || (options['--root'] ? path.resolve(options['--root']) : path.resolve(__dirname, '../..'));
   const runtimeRouteSources = dependencies.runtimeRouteSources
     || collectRuntimeRouteSources(root, { readFile });
+  const paymentRoutesPath = path.join(root, 'routes', 'paymentRoutes.js');
+  const paymentRoutesSource = dependencies.paymentRoutesSource !== undefined
+    ? dependencies.paymentRoutesSource
+    : (fs.existsSync(paymentRoutesPath) ? readFile(paymentRoutesPath) : '');
   const orderRoutesSource = dependencies.orderRoutesSource
     || readFile(path.join(root, 'routes', 'orderRoutes.js'));
+  const baselineProvenance = releaseMode === 'focused-baseline'
+    ? (dependencies.baselineProvenance || verifyFocusedBaselineProvenance({
+      root,
+      baselineRepo: path.resolve(options['--baseline-repo'] || path.resolve(__dirname, '../..')),
+      releaseSha: requireOption(options, '--release-sha').toLowerCase(),
+      baselineSha: requireOption(options, '--baseline-sha').toLowerCase(),
+      git: dependencies.git || execFileSync,
+    }))
+    : null;
   const result = analyzeCheckoutSurface({
     appSource: runtimeRouteSources[0],
-    paymentRoutesSource: runtimeRouteSources.find((source) => String(source).includes(LEGACY_MOUNT)) || '',
+    paymentRoutesSource,
     orderRoutesSource,
     runtimeRouteSources,
     clock: dependencies.clock,
+    releaseMode,
+    baselineProvenance,
   });
   (dependencies.writeJson || writeJson)(output, result);
   if (result.status !== 'passed') {
-    throw new Error('Legacy payment-intent surface prevents an exclusive checkout gate');
+    throw new Error(releaseMode === 'focused-baseline'
+      ? 'Exact target differs from the approved dual-route baseline'
+      : 'Legacy payment-intent surface prevents an exclusive checkout gate');
   }
   console.log('Checkout surface contract passed.');
   return result;
@@ -261,10 +354,13 @@ if (require.main === module) {
 }
 
 module.exports = {
+  APPROVED_BASELINE_SHA,
+  BASELINE_OBJECTS,
   analyzeCheckoutSurface,
   collectRuntimeRouteSources,
   dynamicExpressPostRegistrations,
   NON_RUNTIME_DIRECTORIES,
   main,
   stripJavaScriptComments,
+  verifyFocusedBaselineProvenance,
 };

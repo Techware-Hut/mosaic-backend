@@ -203,12 +203,9 @@ test('getStage1UploadUrl returns clear storage config error when S3 env is missi
   assert.equal(res.statusCode, 503);
   assert.equal(res.body.success, false);
   assert.equal(res.body.code, 'UPLOAD_STORAGE_NOT_CONFIGURED');
-  assert.deepEqual(res.body.missingEnv, [
-    'AWS_REGION',
-    'AWS_ACCESS_KEY_ID',
-    'AWS_SECRET_ACCESS_KEY',
-    'AWS_S3_BUCKET',
-  ]);
+  // Static keys are optional (default credential chain), so only region and
+  // bucket are reported when nothing is configured.
+  assert.deepEqual(res.body.missingEnv, ['AWS_REGION', 'AWS_S3_BUCKET']);
 });
 
 test('getStage1UploadUrl rejects unsupported documents even when extension is present', async () => {

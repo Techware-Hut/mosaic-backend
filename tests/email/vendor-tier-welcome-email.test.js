@@ -318,3 +318,53 @@ test('triggerTierWelcomeNotifications executes idempotently via welcomeEmailSent
     Module._load = originalLoad;
   }
 });
+
+test('triggerTierWelcomeNotifications skip log names the user id, never the email address', async () => {
+  const userMock = { _id: 'user_test_456', email: 'vendor@example.com', name: 'Alex Rivera' };
+  const originalLoad = Module._load;
+  Module._load = function mockLoad(request, parent, isMain) {
+    if (request === '../models/Subscription') {
+      return { findOneAndUpdate: async (filter) => ({ _id: filter._id, welcomeEmailSent: true }) };
+    }
+    if (request === '../models/User') {
+      return { findById: () => ({ select: () => ({ lean: async () => userMock }) }) };
+    }
+    if (request === '../models/SubscriptionPlan') {
+      return { findById: () => ({ select: () => ({ lean: async () => ({ name: 'Growth Plan' }) }) }) };
+    }
+    if (request === './telnyxService') {
+      return { sendVendorTierWelcomeSMS: async () => ({ success: true }) };
+    }
+    if (request === 'nodemailer') {
+      return { createTransport: () => ({ sendMail: async () => ({ messageId: 'msg-id' }) }) };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+
+  delete require.cache[modulePath];
+  const mod = require(modulePath);
+
+  const saved = { u: process.env.MAIL_USER, p: process.env.MAIL_PASSWORD };
+  delete process.env.MAIL_USER; // forces the "Delivery skipped" branch
+  delete process.env.MAIL_PASSWORD;
+  const lines = [];
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  console.log = (...args) => lines.push(args.join(' '));
+  console.warn = (...args) => lines.push(args.join(' '));
+  try {
+    await mod.triggerTierWelcomeNotifications({ _id: 'sub_1', userId: 'user_test_456', subscriptionPlanId: 'plan_1' });
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    Module._load = originalLoad;
+    console.log = originalLog;
+    console.warn = originalWarn;
+    if (saved.u === undefined) delete process.env.MAIL_USER; else process.env.MAIL_USER = saved.u;
+    if (saved.p === undefined) delete process.env.MAIL_PASSWORD; else process.env.MAIL_PASSWORD = saved.p;
+  }
+
+  const skipLine = lines.find((line) => line.includes('[Tier Welcome Email] Delivery skipped'));
+  assert.ok(skipLine, 'expected the skip log line');
+  assert.match(skipLine, /for user user_test_456/);
+  assert.ok(lines.every((line) => !line.includes('vendor@example.com')));
+});

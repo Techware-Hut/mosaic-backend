@@ -1,0 +1,211 @@
+name: Prove production-preflight OIDC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  prove-production-preflight-oidc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-preflight
+    steps:
+      - name: Require main ref
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            printf '%s\n' 'FAIL: main ref required'
+            exit 1
+          fi
+          printf '%s\n' 'PASS: main ref'
+
+      - name: Check out exact main commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Prove OIDC and read-only production topology access
+        shell: bash
+        env:
+          ROLE_TO_ASSUME: ${{ secrets.AWS_PREFLIGHT_ROLE_TO_ASSUME }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          EB_APPLICATION_NAME: ${{ vars.EB_APPLICATION_NAME || 'mosaic-biz-hub-backend' }}
+          EB_ENVIRONMENT_NAME: ${{ vars.EB_ENVIRONMENT_NAME || 'mosaic-backend-env' }}
+        run: |
+          set -Eeuo pipefail
+          set +x
+          umask 077
+          fail() {
+            printf 'FAIL: %s\n' "$1"
+            exit 1
+          }
+          [[ -n "${ROLE_TO_ASSUME:-}" ]] || fail 'masked role binding'
+          printf '%s\n' 'PASS: masked role binding present'
+
+          [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" && -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]] || fail 'GitHub OIDC token'
+
+          oidc_token="$(curl --fail --silent --show-error \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            --get --data-urlencode 'audience=sts.amazonaws.com' \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL" 2>/dev/null | jq -er '.value' 2>/dev/null)" || fail 'GitHub OIDC token'
+          [[ -n "$oidc_token" ]] || fail 'GitHub OIDC token'
+          printf '%s\n' 'PASS: GitHub OIDC token issued'
+
+          [[ -n "${AWS_REGION:-}" ]] || fail 'AWS role assumption'
+          proof_dir="$(mktemp -d "$RUNNER_TEMP/preflight-oidc.XXXXXX" 2>/dev/null)" || fail 'AWS role assumption'
+          trap 'rm -rf "$proof_dir"' EXIT
+          : > "$proof_dir/empty"
+          export AWS_SHARED_CREDENTIALS_FILE="$proof_dir/empty"
+          export AWS_CONFIG_FILE="$proof_dir/empty"
+          export AWS_EC2_METADATA_DISABLED=true
+          unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_DEFAULT_PROFILE
+
+          credentials="$(aws sts assume-role-with-web-identity \
+            --role-arn "$ROLE_TO_ASSUME" \
+            --region "$AWS_REGION" \
+            --role-session-name "preflight-${GITHUB_RUN_ID}" \
+            --web-identity-token "$oidc_token" \
+            --duration-seconds 900 \
+            --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+            --output text 2>/dev/null)" || fail 'AWS role assumption'
+          unset oidc_token
+          read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN <<< "$credentials"
+          unset credentials
+          [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" && -n "${AWS_SESSION_TOKEN:-}" ]] || fail 'AWS role assumption'
+          export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          printf '%s\n' 'PASS: AWS role assumption'
+
+          [[ -n "${EB_APPLICATION_NAME:-}" && -n "${EB_ENVIRONMENT_NAME:-}" ]] || fail 'read-only AWS topology collection'
+          node 2>/dev/null <<'NODE'
+          'use strict';
+          function prove() {
+            let payload;
+            let validateTopology;
+            let instanceHealthAccessDenied = false;
+            try {
+              const { spawnSync } = require('node:child_process');
+              const topology = require('./scripts/release/aws-release-topology');
+              const { createAwsCliRunner } = require('./scripts/release/release-control-utils');
+              const approvedReads = Object.freeze({
+                'elasticbeanstalk:describe-environments': 'DescribeEnvironments',
+                'elasticbeanstalk:describe-configuration-settings': 'DescribeConfigurationSettings',
+                'elasticbeanstalk:describe-environment-resources': 'DescribeEnvironmentResources',
+                'elasticbeanstalk:describe-instances-health': 'DescribeInstancesHealth',
+                'autoscaling:describe-auto-scaling-groups': 'DescribeAutoScalingGroups',
+                'elbv2:describe-load-balancers': 'DescribeLoadBalancers',
+                'elbv2:describe-listeners': 'DescribeListeners',
+                'elbv2:describe-target-groups': 'DescribeTargetGroups',
+                'elbv2:describe-target-health': 'DescribeTargetHealth',
+                'elbv2:describe-load-balancer-attributes': 'DescribeLoadBalancerAttributes',
+              });
+              function classifyAwsError(stderr) {
+                const detail = String(stderr || '');
+                const code = /An error occurred \(([^)]+)\)/.exec(detail)?.[1] || '';
+                if (/^(?:AccessDenied(?:Exception)?|UnauthorizedOperation)$/.test(code) ||
+                    (!code && /not authorized to perform/i.test(detail))) {
+                  return 'AccessDenied';
+                }
+                if (/^(?:ResourceNotFound(?:Exception)?|NoSuchEntity(?:Exception)?|EnvironmentNotFound(?:Exception)?|LoadBalancerNotFound(?:Exception)?|TargetGroupNotFound(?:Exception)?)$/.test(code)) {
+                  return 'ResourceNotFound';
+                }
+                if (/^(?:ValidationError|ValidationException|InvalidParameter(?:Value|Exception)?)$/.test(code)) {
+                  return 'ValidationError';
+                }
+                return 'OtherAwsError';
+              }
+              let failureClass = 'OtherAwsError';
+              let awsErrorCode = '';
+              let awsCliReturnedError = false;
+              const runner = createAwsCliRunner({
+                awsCli: 'aws',
+                spawn: (command, args, options) => {
+                  const result = spawnSync(command, args, options);
+                  if (result.error || result.status !== 0) {
+                    awsErrorCode = /An error occurred \(([^)]+)\)/.exec(String(result.stderr || ''))?.[1] || '';
+                    awsCliReturnedError = !result.error && Number.isInteger(result.status) && result.status !== 0;
+                    failureClass = classifyAwsError(result.stderr);
+                  }
+                  return result;
+                },
+              });
+              const diagnosticRunAws = (service, operation, args) => {
+                const label = approvedReads[`${service}:${operation}`];
+                if (!Object.hasOwn(approvedReads, `${service}:${operation}`)) {
+                  throw new Error('Unapproved AWS read operation');
+                }
+                failureClass = 'OtherAwsError';
+                awsErrorCode = '';
+                awsCliReturnedError = false;
+                try {
+                  const result = runner(service, operation, args);
+                  console.log(`PASS: ${label}`);
+                  return result;
+                } catch (_) {
+                  if (service === 'elasticbeanstalk' &&
+                      operation === 'describe-instances-health' &&
+                      failureClass === 'AccessDenied' &&
+                      awsCliReturnedError &&
+                      /^(?:AccessDenied|AccessDeniedException)$/.test(awsErrorCode)) {
+                    instanceHealthAccessDenied = true;
+                    console.log('WARN: DescribeInstancesHealth');
+                    console.log('WARN CLASS: AccessDenied');
+                    return null;
+                  }
+                  console.log(`FAIL: ${label}`);
+                  console.log(`FAIL CLASS: ${failureClass}`);
+                  throw new Error('Approved AWS read failed');
+                }
+              };
+              validateTopology = topology.validateTopology;
+              payload = topology.collectAwsTopology({
+                runAws: diagnosticRunAws,
+                region: process.env.AWS_REGION,
+                applicationName: process.env.EB_APPLICATION_NAME,
+                environmentName: process.env.EB_ENVIRONMENT_NAME,
+              });
+            } catch (_) {
+              console.log('FAIL: read-only AWS topology collection');
+              return false;
+            }
+            console.log('PASS: read-only AWS topology collection');
+
+            try {
+              if (!/^[0-9a-f]{40}$/.test(process.env.GITHUB_SHA || '')) {
+                throw new Error('Invalid exact main SHA');
+              }
+              // The filtered CLI query returns an array. Restore only its response
+              // envelope here; the production release collector stays unchanged.
+              if (!Array.isArray(payload.configuration)) {
+                throw new Error('Filtered configuration response is malformed');
+              }
+              const validationPayload = {
+                ...payload,
+                configuration: { ConfigurationSettings: payload.configuration },
+              };
+              const evidence = validateTopology(validationPayload, {
+                applicationName: process.env.EB_APPLICATION_NAME,
+                environmentName: process.env.EB_ENVIRONMENT_NAME,
+                mode: 'preflight',
+                releaseSha: process.env.GITHUB_SHA,
+                mixedVersionSafe: false,
+                allowInstanceHealthAccessDeniedInProof: instanceHealthAccessDenied,
+              });
+              if (instanceHealthAccessDenied &&
+                  (evidence.instanceHealthVerified !== false || evidence.instances !== null)) {
+                throw new Error('Unverified instance health was reported as verified');
+              }
+            } catch (_) {
+              console.log('FAIL: topology validation');
+              return false;
+            }
+            console.log(instanceHealthAccessDenied
+              ? 'PASS: topology validation (EB instance health unverified)'
+              : 'PASS: topology validation');
+            return true;
+          }
+          if (!prove()) process.exitCode = 1;
+          NODE
